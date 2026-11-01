@@ -982,3 +982,19 @@ test('처음 쓰는 사람 안내: 시작 카드·다시 보지 않기·도움�
   const T = vm.runInContext('RA_TOUR', c); assert.ok(T.length >= 6 && T.every(x => x.length === 3));
   assert.ok(c.raFlow([['x', '한 문장 지시'], ['y', '초안']]).includes('이 화면의 순서'));
 });
+
+test('구성 단순화: 메뉴는 작업+더 보기 둘, 예시는 넷만 먼저', () => {
+  const c = load();
+  vm.runInContext(`raRerender=()=>{}; _raSave=()=>{}; RA.ui={}; RA.agent.steps=[];`, c);
+  const N = vm.runInContext('RA_NAV', c);
+  assert.equal(N.map(g => g.id).join(','), 'work,more');
+  const more = N[1];
+  assert.equal(more.parts.flatMap(p => p[1]).join(','), more.tabs.join(','), '소제목 묶음이 더 보기 탭 전체와 같음');
+  const nav = c.raNavHtml(true);
+  assert.ok(nav.includes('찾아보기') && nav.includes('정비 도구') && nav.includes('관리'));
+  const v = c.raAgentView();
+  assert.equal((v.match(/class="ra-ag-ex"/g) || []).length, 4, '예시 넷');
+  assert.ok(v.includes('예시') && v.includes('더 보기'));
+  vm.runInContext(`RA.ui.exMore=true;`, c);
+  assert.ok((c.raAgentView().match(/class="ra-ag-ex"/g) || []).length > 4, '더 보기 후 전부');
+});

@@ -57,9 +57,8 @@ const RA_TABS=[
 // 메뉴 묶음 — 처음 보는 사람은 ‘작업’ 넷만 보면 된다. 나머지는 접어 두고 쓰는 사람이 편다
 const RA_NAV=[
   {id:'work',t:'작업',tabs:['agent','health','amend','enact']},
-  {id:'browse',t:'찾아보기',tabs:['regs','advise','terms','org'],fold:true},
-  {id:'tools',t:'정비 도구',tabs:['bulk','upper','graph'],fold:true},
-  {id:'admin',t:'관리',tabs:['proc','ledger'],fold:true,small:true},
+  {id:'more',t:'더 보기',fold:true,tabs:['regs','advise','terms','org','bulk','upper','graph','proc','ledger'],
+   parts:[['찾아보기',['regs','advise','terms','org']],['정비 도구',['bulk','upper','graph']],['관리',['proc','ledger']]]},
 ];
 // 처음 보는 사람이 메뉴 이름만으로 고르기 어려운 ‘작업’ 넷은 한 줄 설명을 늘 보여 준다
 const RA_NAV_SUB={agent:'한 문장으로 맡기기',health:'우리 내규 상태 보기',amend:'있는 내규 고치기',enact:'새 내규 만들기'};
@@ -70,7 +69,7 @@ function raNavHtml(grouped){
   return RA_NAV.map(g=>{ const on=!g.fold||open[g.id]||g.tabs.includes(RA.tab);     // 지금 보는 화면이 든 묶음은 펼친다
     // 항상 펼친 첫 묶음은 머리말을 두지 않는다(사이드바의 ‘작업’ 표시와 겹친다)
     return `<div class="ra-nav-g${on?'':' fold'}${g.small?' small':''}">`+(g.fold?`<button class="ra-nav-gh" onclick="raNavToggle('${g.id}')" aria-expanded="${on}">${_e(g.t)}<span class="ra-nav-chev" aria-hidden="true">${on?'▾':'▸'}</span></button>`:'')+
-      `<div class="ra-nav-gb">${g.tabs.map(raNavTab).join('')}</div></div>`; }).join('');
+      `<div class="ra-nav-gb">${g.parts?g.parts.map(([t,ks])=>`<div class="ra-nav-sub">${_e(t)}</div>`+ks.map(raNavTab).join('')).join(''):g.tabs.map(raNavTab).join('')}</div></div>`; }).join('');
 }
 function raNavToggle(id){ RA.ui=RA.ui||{}; RA.ui.nav=RA.ui.nav||{}; const g=RA_NAV.find(x=>x.id===id); const on=RA.ui.nav[id]||(g&&g.tabs.includes(RA.tab)); RA.ui.nav[id]=!on; _raSave(); const nav=document.getElementById('raNav'); if(nav) nav.innerHTML=raNavHtml(true); }
 const RA_PAGE={
@@ -99,8 +98,7 @@ async function raLoadOrg(){
 }
 // Gemini API 키 발급 페이지(Google AI Studio) — 키가 없을 때 화면 곳곳에서 바로 연다
 const RA_KEY_URL='https://aistudio.google.com/apikey';
-function raAiKeyNote(what){ return raHasAi()?'':`<div class="ra-note ra-keynote">${raIc('spark')}<span>${_e(what||'AI 키가 없으면 규칙 기반으로 처리합니다.')} <b>Google AI Studio</b>에서 Gemini API 키를 무료로 발급받아 [AI 설정]에 붙여 넣으세요.</span>`+
-  `<span class="ra-row" style="margin:0"><a class="svc-btn sm" href="${RA_KEY_URL}" target="_blank" rel="noopener">키 발급(Google)</a><button class="svc-btn sm yes" onclick="openAiModal()">AI 설정</button></span></div>`; }
+function raAiKeyNote(what){ return raHasAi()?'':`<div class="ra-note ra-keynote">${raIc('spark')}<span>${_e(what||'AI 키가 없으면 규칙 기반으로 처리합니다.')}</span><button class="svc-btn sm" onclick="openAiModal()">AI 설정</button></div>`; }   // 키 발급 링크는 AI 설정 창 안에
 function raRules(){ return (RA_ORG&&RA_ORG.rules_name)||'내규관리규칙'; }
 function _raBlank(){
   return {tab:'agent',
@@ -382,9 +380,9 @@ function openRegAgent(tab){
   if(nav) nav.innerHTML=tabs;
   let [pt,pf]=RA_PAGE[RA.tab]||['',[]]; if(RA.tab==='enact'||RA.tab==='amend') pf=[];
   const ph=(RA_TABS.find(x=>x[0]===RA.tab)||[])[2]||'';
-  const ai=raHasAi()?`<span class="ra-pill ok ra-ai-pill">${raIc('spark')}AI 연결됨</span>`:`<button class="ra-pill ra-ai-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button><a class="ra-pill subtle" href="${RA_KEY_URL}" target="_blank" rel="noopener" title="Google AI Studio에서 Gemini API 키를 무료로 발급받습니다">키 발급(Google)</a>`;
+  const ai=raHasAi()?`<span class="ra-pill ok ra-ai-pill">${raIc('spark')}AI 연결됨</span>`:`<button class="ra-pill ra-ai-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button>`;   // 키 발급 링크는 AI 설정 창 안에
   p.innerHTML=(nav?'':`<nav class="ra-tabs" aria-label="에이전트 기능">${tabs}</nav>`)+
-    `<header class="ra-page"><div class="ra-page-t"><h1 title="${_e(ph)}">${_e(pt)}</h1>${raFlow(pf)}</div><div class="ra-page-a"><button class="ra-pill ra-help-btn" onclick="raHelpOpen()" aria-haspopup="dialog">${raIc('info')}처음 사용 안내</button>${ai}<span class="ra-pill subtle" title="절차·심의기준의 근거">「${_e(raRules())}」</span></div></header>`+
+    `<header class="ra-page"><div class="ra-page-t"><h1 title="${_e(ph)}">${_e(pt)}</h1></div><div class="ra-page-a"><button class="ra-pill ra-help-btn" onclick="raHelpOpen()" aria-haspopup="dialog">${raIc('info')}도움말</button>${ai}</div></header>`+
     `<div id="raBody" class="ra-body"></div>`;
   raOrgCard();
   raRender();
@@ -398,8 +396,7 @@ function raOrgCard(){
   const c=document.getElementById('orgCard'); if(!c||!RA_ORG) return;
   const srv=(typeof _srvOk==='undefined'||_srvOk===null)?'<span class="badge">서버 확인 중</span>':_srvOk?'<span class="badge ok">서버 연결됨</span>':'<span class="badge no">서버 연결 실패</span>';
   c.innerHTML=`<div class="oc-n">${_e(RA_ORG.org_name)}</div><div class="oc-m">등록 ${_e(RA_ORG.reg_word)} ${RA_ORG._count!=null?RA_ORG._count+'건':'—'}<br>근거 「${_e(raRules())}」</div>`+
-    `<div class="oc-row">${srv}</div><div class="oc-row">${raHasAi()?'<span class="badge ok">AI 연결됨</span>':`<span class="badge">AI 미설정</span> <a class="ra-link" href="${RA_KEY_URL}" target="_blank" rel="noopener">키 발급</a>`}</div>`+
-    `<div class="oc-row"><button class="ra-link" onclick="raHelpOpen()">처음 사용 안내</button><button class="ra-link" onclick="raTourStart()">둘러보기</button></div><div class="oc-row oc-bk"><button class="ra-link" onclick="raBackup()" title="제정·개정·절차 작업 내용을 파일로 저장(이 브라우저에만 저장되어 있음)">작업 백업</button><button class="ra-link" onclick="raRestore()" title="백업 파일에서 작업 내용을 되살림">복원</button></div>`;
+    (_srvOk===false||typeof _srvOk==='undefined'||_srvOk===null?`<div class="oc-row">${srv}</div>`:'');   // 정상일 때는 상태를 보이지 않는다(문제가 있을 때만)
 }
 // 작업 내용은 이 브라우저(localStorage)에만 있으므로 파일로 백업·복원할 수 있게 한다
 function raBackup(){
@@ -2580,7 +2577,9 @@ const RA_MODE_L={amend:'개정',enact:'제정',bulk:'일괄 정비',upper:'상�
 function raAgentView(){
   const G=RA.agent;
   const mic={'개정':'amend','제정':'enact','일괄 정비':'bulk','상위법':'upper','다른 기관':'search','자문':'advise'};
-  const ex=RA_AG_EX.map(([k,t])=>`<button class="ra-ag-ex" onclick="raAgentEx('${_a(t)}')"><span class="ra-ag-ex-k">${raIc(mic[k]||'spark')}${_e(k)}</span><span class="ra-ag-ex-t">${_e(t)}</span></button>`).join('');
+  const exb=([k,t])=>`<button class="ra-ag-ex" onclick="raAgentEx('${_a(t)}')"><span class="ra-ag-ex-k">${raIc(mic[k]||'spark')}${_e(k)}</span><span class="ra-ag-ex-t">${_e(t)}</span></button>`;
+  const seen=new Set(), main=[], rest=[]; RA_AG_EX.forEach(x=>{ (seen.has(x[0])||main.length>=4?rest:main).push(x); seen.add(x[0]); });   // 종류마다 하나씩 넷만
+  const ex=main.map(exb).join('')+(rest.length?(RA.ui&&RA.ui.exMore?rest.map(exb).join(''):`<button class="ra-ag-ex ra-ag-more" onclick="RA.ui=RA.ui||{};RA.ui.exMore=true;_raSave();raRerender('agent')"><span class="ra-ag-ex-k">${raIc('spark')}더 보기</span><span class="ra-ag-ex-t">예시 ${rest.length}개 더 보기</span></button>`):'');
   const tip=`요청을 제정·개정·일괄 정비·상위법 영향 중 하나로 판단하고, 대상 ${RA_ORG.reg_word}와 조문을 찾아 초안 → 인용 영향 → 점검 → 심의 사전검토 → 절차 판단 → 문서 세트까지 이어서 수행합니다. `+(raHasAi()?'AI가 계획과 초안을 씁니다.':'AI 키가 없으면 규칙 기반으로 계획하고, 조문 문장은 결과 화면에서 직접 고칩니다.')+' (Ctrl+Enter로 실행)';
   return `<div class="ra-wide">`+raIntroView()+
     `<section class="ra-ag-hero"><div class="ra-ag-label"><label for="raAgIn">${_e(RA_ORG.reg_word)} 작업을 한 문장으로 지시하세요</label>${raTip(tip)}</div>`+
@@ -2606,8 +2605,8 @@ function raIntroView(){
   if((RA.ui||{}).introDone||raArr(RA.agent.steps).length) return '';
   return `<section class="ra-sec ra-intro" aria-labelledby="raIntroT"><div class="ra-intro-top"><h2 id="raIntroT">처음 오셨나요? 세 가지 중 하나로 시작하세요</h2>`+
     `<button class="ra-x" aria-label="시작 안내 닫기" onclick="raIntroDone()">${raIc('x')}</button></div>`+raIntroCards(false)+
-    `<div class="ra-row ra-intro-foot"><button class="svc-btn sm ghost" onclick="raTourStart()">${raIc('info')}30초 둘러보기</button><button class="svc-btn sm ghost" onclick="raHelpOpen('terms')">용어 풀이</button>`+
-    `<span class="ra-hint">AI 키가 없어도 쓸 수 있습니다(규칙 기반). 이 안내는 오른쪽 위 “처음 사용 안내”에서 다시 볼 수 있습니다.</span><button class="ra-link" onclick="raIntroDone()">다시 보지 않기</button></div></section>`;
+    `<div class="ra-row ra-intro-foot"><button class="svc-btn sm ghost" onclick="raTourStart()">${raIc('info')}30초 둘러보기</button>`+
+    `<span class="ra-hint">AI 키가 없어도 쓸 수 있습니다. 이 안내와 용어 풀이는 오른쪽 위 “도움말”에 있습니다.</span><button class="ra-link" onclick="raIntroDone()">다시 보지 않기</button></div></section>`;
 }
 function raIntroDone(){ RA.ui=RA.ui||{}; RA.ui.introDone=true; _raSave(); raRerender('agent'); }
 const RA_GLOSS=[
@@ -2626,12 +2625,15 @@ const RA_GLOSS=[
 function raHelpOpen(sec){
   let bg=document.getElementById('raHelpBg');
   if(!bg){ bg=document.createElement('div'); bg.id='raHelpBg'; bg.className='modal-bg'; bg.addEventListener('click',e=>{ if(e.target===bg) raHelpClose(); }); document.body.appendChild(bg); }
-  const menu=RA_NAV.map(g=>`<dt>${_e(g.t)}</dt>`+g.tabs.map(k=>{ const t=RA_TABS.find(x=>x[0]===k); return t?`<dd><button class="ra-link" onclick="raHelpClose();raTab('${k}')">${_e(t[1])}</button> ${_e(RA_NAV_SUB[k]||t[2])}</dd>`:''; }).join('')).join('');
-  bg.innerHTML=`<div class="modal ra-help" role="dialog" aria-modal="true" aria-labelledby="raHelpT"><div class="ra-intro-top"><h2 id="raHelpT" tabindex="-1">처음 사용 안내</h2><button class="ra-x" aria-label="닫기" onclick="raHelpClose()">${raIc('x')}</button></div>`+
+  const menu=RA_NAV.flatMap(g=>g.parts?g.parts.map(([t,ks])=>({t:`${g.t} › ${t}`,tabs:ks})):[g]).map(g=>`<dt>${_e(g.t)}</dt>`+g.tabs.map(k=>{ const t=RA_TABS.find(x=>x[0]===k); return t?`<dd><button class="ra-link" onclick="raHelpClose();raTab('${k}')">${_e(t[1])}</button> ${_e(RA_NAV_SUB[k]||t[2])}</dd>`:''; }).join('')).join('');
+  bg.innerHTML=`<div class="modal ra-help" role="dialog" aria-modal="true" aria-labelledby="raHelpT"><div class="ra-intro-top"><h2 id="raHelpT" tabindex="-1">도움말</h2><button class="ra-x" aria-label="닫기" onclick="raHelpClose()">${raIc('x')}</button></div>`+
     `<h3>어떻게 시작하나요?</h3>`+raIntroCards(true)+
     `<div class="ra-row"><button class="svc-btn sm" onclick="raTourStart()">${raIc('info')}30초 둘러보기</button><span class="ra-hint">화면의 주요 부분을 차례로 짚어 드립니다.</span></div>`+
     `<h3>메뉴 안내</h3><dl class="ra-help-menu">${menu}</dl>`+
-    `<h3 id="raHelpTerms" tabindex="-1">용어 풀이</h3><dl class="ra-gloss">`+RA_GLOSS.map(([t,d])=>`<dt>${_e(t)}</dt><dd>${_e(d)}</dd>`).join('')+`</dl></div>`;
+    `<h3 id="raHelpTerms" tabindex="-1">용어 풀이</h3><dl class="ra-gloss">`+RA_GLOSS.map(([t,d])=>`<dt>${_e(t)}</dt><dd>${_e(d)}</dd>`).join('')+`</dl>`+
+    `<h3>설정·보관</h3><div class="ra-row"><button class="svc-btn sm" onclick="raHelpClose();openAiModal()">${raIc('spark')}AI 설정</button><a class="svc-btn sm ghost" href="${RA_KEY_URL}" target="_blank" rel="noopener">AI 키 발급(Google)</a>`+
+    `<button class="svc-btn sm ghost" onclick="raBackup()" title="제정·개정·절차 작업 내용을 파일로 저장(이 브라우저에만 저장되어 있음)">작업 백업</button><button class="svc-btn sm ghost" onclick="raRestore()">복원</button></div>`+
+    `<p class="ra-hint">절차·심의기준의 근거: 「${_e(raRules())}」</p></div>`;
   bg.classList.add('show'); document.addEventListener('keydown',raHelpKey);
   setTimeout(()=>{ const t=document.getElementById(sec==='terms'?'raHelpTerms':'raHelpT'); if(t){ t.focus(); if(sec==='terms') t.scrollIntoView({block:'start'}); } },30);
 }
@@ -2639,13 +2641,13 @@ function raHelpClose(){ const bg=document.getElementById('raHelpBg'); if(bg) bg.
 function raHelpKey(e){ if(e.key==='Escape') raHelpClose(); }
 // 둘러보기: 화면의 주요 부분을 차례로 밝혀 짚는다(없는 부분은 건너뜀). ←·→·Esc
 const RA_TOUR=[
-  ['#raNav','왼쪽 메뉴','자주 쓰는 “작업” 넷(에이전트·건강검진·개정·제정)만 펼쳐 있습니다. 찾아보기·정비 도구·관리는 눌러서 엽니다.'],
+  ['#raNav','왼쪽 메뉴','자주 쓰는 “작업” 넷(에이전트·건강검진·개정·제정)만 펼쳐 있습니다. 내규 목록·자문·일괄 정비 같은 나머지는 “더 보기”를 눌러 엽니다.'],
   ['#raAgIn','한 문장으로 지시','하고 싶은 일을 적고 “에이전트 실행”을 누르면 대상 찾기부터 수정안·점검·문서까지 이어서 합니다.'],
   ['.ra-ag-exs','예시','예시를 누르면 입력 칸에 채워집니다. 그대로 실행해 보세요.'],
   ['.ra-page-a .ra-ai-pill','AI 설정','AI 키가 없어도 규칙 기반으로 됩니다. 키를 넣으면 수정안·초안·검토의견을 AI가 씁니다.'],
   ['.ra-tab[data-k="health"]','건강검진','우리 내규 전체의 오류와 오래된 곳을 먼저 보고, 고칠 곳에서 바로 개정을 시작할 수 있습니다.'],
   ['.ra-tab[data-k="amend"]','개정·제정','직접 할 때는 화면 위의 단계(대상 고르기 → 고치기 → 확인·검토 → 문서 받기)를 따라가면 됩니다.'],
-  ['.ra-help-btn','처음 사용 안내','이 둘러보기와 메뉴 안내, 용어 풀이는 언제든 여기서 다시 볼 수 있습니다.'],
+  ['.ra-help-btn','도움말','이 둘러보기와 메뉴 안내, 용어 풀이, AI 설정·작업 백업은 언제든 여기서 다시 볼 수 있습니다.'],
 ];
 let _raTourI=-1;
 function raTourStart(){ raHelpClose(); if(RA.tab!=='agent') raTab('agent'); _raTourI=0; setTimeout(raTourShow,120); }
