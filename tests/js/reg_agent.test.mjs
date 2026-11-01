@@ -1043,3 +1043,27 @@ test('제정 초안 색 표시: 고친 곳·채울 곳(○○)', () => {
   assert.ok(c.raPhBar(D).includes('<b>2</b>곳') && c.raPhBar(D).includes('다음 채울 곳'));
   assert.ok(c.raPhBar({ text: '끝', orig: '끝' }).includes('채울 곳 없음'));
 });
+
+test('사람이 틀리기 쉬운 곳: 애매한 수치는 바꾸지 않고, 낱말은 모든 조사형까지, 없는 말은 알림', () => {
+  const c = load();
+  // “연차휴가 일수를 20일로” → 일반 낱말(일수)은 앞 낱말을 열쇠로, 낱말 바꾸기로 넘어가지 않음
+  assert.equal(c.raVqReq('연차휴가 일수를 20일로 해줘').key, '연차휴가');
+  assert.equal(c.raRepReq('일수를 20일로 해줘'), null);
+  // 의·에서 같은 조사도 바꾼다
+  assert.equal(c.raRepJosa('여비의 지급과 여비에서 뺀다. 여비이나', '여비', '출장비').s, '출장비의 지급과 출장비에서 뺀다. 출장비나');
+  vm.runInContext(`_raArts={slug:'s',title:'복무규정',articles:[
+      {no:'3',title:'휴가',body:'연차유급휴가 일수는 15일로 한다. 병가 일수는 60일로 한다.'},
+      {no:'4',title:'근무',body:'근무시간은 8시간으로 한다.'}],appendix:[]};
+    RA.amend.title='복무규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.valNote='';`, c);
+  const A = vm.runInContext('RA.amend', c);
+  // 값이 서로 다른 여러 곳 → 추측하지 않음
+  vm.runInContext(`RA.amend.changes=[{type:'modify',no:'3',title:'휴가',body:'연차유급휴가 일수는 15일로 한다. 연차유급휴가 가산 일수는 25일로 한다.'}];`, c);
+  const r = c.raRuleApply(A, '연차유급휴가 일수를 20일로');
+  assert.equal(r.n, 0); assert.ok(r.ambiguous && A.valNote.includes('자동으로 바꾸지 않았습니다'));
+  assert.ok(A.changes[0].body.includes('15일') && A.changes[0].body.includes('25일'));
+  // 내규에 없는 말 → 바꾸지 않고 알림, 담았던 카드는 되돌림
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  const m = c.raRuleApply(A, '기획운영본부를 경영기획본부로 바꿔');
+  assert.ok(m.missing && A.valNote.includes('일괄 정비')); assert.equal(A.changes.length, 0);
+  assert.ok(c.raNear('연차휴가').includes('연차유급휴가'));
+});
