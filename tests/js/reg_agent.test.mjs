@@ -183,9 +183,13 @@ test('raAmendSentences: 바뀐 곳만 짚는 일부개정 문형', () => {
   assert.equal(S(base, { ...base, body: '① 숙박비는 5만원을 한도로 한다.\n② 식비는 실비로 한다.' }), '제5조제1항 중 “3만원”을 “5만원”으로 한다.');
   assert.equal(S(base, { ...base, title: '여비의 지급', body: base.body + '\n③ 교통비는 실비로 한다.' }),
     '제5조의 제목 “여비”를 “여비의 지급”으로 하고, 같은 조에 제3항을 다음과 같이 신설한다. | ③ 교통비는 실비로 한다.');
-  // 받침에 따라 바뀌는 조사(으로/로)는 따옴표 밖으로
+  // 받침에 따라 모양이 바뀐 조사(으로→로·이→가)는 따옴표 안에 함께 쓴다 — 밖으로 빼면 그대로 적용했을 때 “전자결재으로”가 된다
   assert.equal(S({ no: '7', title: '신청', body: '신청서를 서면으로 제출한다.' }, { no: '7', title: '신청', body: '신청서를 전자결재로 제출한다.' }),
-    '제7조 중 “서면”을 “전자결재”로 한다.');
+    '제7조 중 “서면으로”를 “전자결재로”로 한다.');
+  assert.equal(S({ no: '9', title: '해지', body: '입주기업이 다음에 해당하면 해지한다.' }, { no: '9', title: '해지', body: '입주단체가 다음에 해당하면 해지한다.' }),
+    '제9조 중 “입주기업이”를 “입주단체가”로 한다.');
+  // 같은 모양 조사는 밖으로
+  assert.equal(S({ no: '8', title: '보고', body: '부서장은 보고한다.' }, { no: '8', title: '보고', body: '본부장은 보고한다.' }), '제8조 중 “부서장”을 “본부장”으로 한다.');
   // 단서가 있는 항은 고친 곳이 본문인지 단서인지 밝힌다
   const pv = { no: '8', title: '휴가', body: '① 연차휴가는 15일로 한다. 다만, 신규 직원은 10일로 한다.\n② x' };
   assert.equal(S(pv, { ...pv, body: '① 연차휴가는 15일로 한다. 다만, 신규 직원은 11일로 한다.\n② x' }), '제8조제1항 단서 중 “10일”을 “11일”로 한다.');
@@ -1066,4 +1070,16 @@ test('사람이 틀리기 쉬운 곳: 애매한 수치는 바꾸지 않고, 낱�
   const m = c.raRuleApply(A, '기획운영본부를 경영기획본부로 바꿔');
   assert.ok(m.missing && A.valNote.includes('일괄 정비')); assert.equal(A.changes.length, 0);
   assert.ok(c.raNear('연차휴가').includes('연차유급휴가'));
+});
+
+
+test('개정문 문형: “같은 항”은 앞 문장의 마지막 항, 통째 괄호 낱말의 조사, 본문이 “제N조”로 시작하는 조', () => {
+  const c = load();
+  const S = (o, n) => { const r = c.raAmendSentences(o, Object.assign({ type: 'modify' }, n)); return r.head + (r.lines.length ? ' | ' + r.lines.join(' / ') : ''); };
+  const o = { no: '16', title: '계약', body: '① 다음과 같다.\n② 다음 각 호의 경우에는 할 수 있다.\n1. 가\n2. 나\n3. 물품매각의 경우에 매수인이 납부한다\n③ 그 밖의 경우에는 정한다.' };
+  const h = S(o, { no: '16', title: '계약', body: o.body.replace(/경우에는/g, '때에는').replace('물품매각의 경우에', '물품매각의 때에') });
+  assert.ok(!/같은 항 제3호/.test(h) && /제2항제3호|같은 조 제2항제3호/.test(h), h);
+  assert.equal(c.raEul('(운영기관)'), '을'); assert.equal(c.raRo('(운영기관)'), '으로');
+  const t = S({ no: '6', title: '장소', body: '제4조의 규정에 의하여 의뢰받은 시험은 센터에서 한다.' }, { no: '6', title: '장소', body: '제4조의 규정에 의하여 의뢰받은 시험은 본부에서 한다. 다만, 따로 정한다.' });
+  assert.ok(!/^제6조를 다음과 같이 한다\. \| 제4조/.test(t), t);
 });
