@@ -967,3 +967,18 @@ test('여러 개 고르는 목록: 전부 선택·선택 취소', () => {
   assert.ok(/선택 취소/.test(c.raAllNone('a()', 'b()', 0)) && c.raAllNone('a()', 'b()', 0).includes('disabled'));
   assert.ok(!c.raAllNone('a()', 'b()', 2).includes('disabled'));
 });
+
+test('처음 쓰는 사람 안내: 시작 카드·다시 보지 않기·도움말 내용', () => {
+  const c = load();
+  vm.runInContext(`raRerender=()=>{}; RA.ui={}; RA.agent.steps=[];`, c);
+  const h = c.raIntroView();
+  assert.ok(h.includes('처음 오셨나요') && h.includes('예시로 해 보기') && h.includes('건강검진 열기') && h.includes('개정 열기') && h.includes('30초 둘러보기'));
+  c.raIntroDone(); assert.equal(c.raIntroView(), '', '다시 보지 않기');
+  vm.runInContext(`RA.ui={}; RA.agent.steps=[{t:'x',st:'ok',d:''}];`, c);
+  assert.equal(c.raIntroView(), '', '에이전트를 한 번 쓴 뒤에는 보이지 않음');
+  // 메뉴 설명·용어 풀이
+  assert.ok(c.raNavTab('amend').includes('있는 내규 고치기') && c.raNavTab('amend').includes('data-k="amend"'));
+  const G = vm.runInContext('RA_GLOSS', c); assert.ok(G.length >= 10 && G.some(([t]) => t === '신구조문대비표'));
+  const T = vm.runInContext('RA_TOUR', c); assert.ok(T.length >= 6 && T.every(x => x.length === 3));
+  assert.ok(c.raFlow([['x', '한 문장 지시'], ['y', '초안']]).includes('이 화면의 순서'));
+});
