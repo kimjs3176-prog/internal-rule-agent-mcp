@@ -1268,6 +1268,7 @@ function raRepLeft(a){
   raArr(_raArts.appendix).forEach(o=>{ if(re.test(String(o.head||'')+' '+String(o.body||''))) out.add(o.id); re.lastIndex=0; });
   return [...out];
 }
+function raWhere(w){ return w.length>8?w.slice(0,8).join(', ')+` 외 ${w.length-8}곳`:w.join(', '); }   // 긴 위치 목록은 앞 여덟 곳만
 function raRepApply(A, r){
   let n=0; const where=[];
   A.changes.forEach(c=>{ if(c.type==='delete') return; const x=raRepJosa(c.body,r.a,r.b), y=raRepJosa(c.title,r.a,r.b); if(x.n+y.n){ c.body=x.s; c.title=y.s; n+=x.n+y.n; where.push(raLbl(c.no)); } });
@@ -1287,11 +1288,11 @@ function raRuleApply(A, text){
     if(!r.n){ raRuleUndo(A,add); A.valNote=`「${A.title||_raArts&&_raArts.title||''}」에는 “${rp.a}”${raJosa(rp.a,['이','가'])} 따로 쓰인 곳이 없습니다. 여러 내규에 걸친 명칭이면 “더 보기 → 일괄 정비”로 모든 내규에서 찾으세요.`; return {n:0, notes:[], rep:rp, missing:true}; }
     raRuleUndo(A,{arts:add.arts.filter(([no])=>!r.where.includes(raLbl(no))), xs:add.xs.filter(([id])=>!r.where.includes(id))});   // 담았지만 바꾼 곳이 없는 카드는 뺀다
     const ro=raJosa(rp.b,['으로','로']), extra=add.arts.filter(([no])=>r.where.includes(raLbl(no))).length+add.xs.filter(([id])=>r.where.includes(id)).length, left=raRepLeft(rp.a);
-    A.valNote=`지시문대로 “${rp.a}”${raJosa(rp.a,['을','를'])} “${rp.b}”${ro} 바꿨습니다(${r.n}곳: ${r.where.join(', ')}). `+
+    A.valNote=`지시문대로 “${rp.a}”${raJosa(rp.a,['을','를'])} “${rp.b}”${ro} 바꿨습니다(${r.where.length}개 조·별표 ${r.n}곳: ${raWhere(r.where)}). `+
       (extra?`고르지 않았어도 그 말이 든 조문·별표 ${extra}곳을 함께 찾아 담았습니다. `:'')+
       (left.length?`다른 말에 붙은 “${rp.a}”(${left.slice(0,6).join(', ')}${left.length>6?' 외':''})는 뜻이 다를 수 있어 그대로 두었습니다. `:'')+'뒤 조사도 맞췄으니 문장이 자연스러운지 확인하세요.';
     if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose)) A.purpose=`“${rp.a}”${raJosa(rp.a,['을','를'])} “${rp.b}”${ro} 변경하려는 것임.`;
-    return {n:r.n, notes:[`“${rp.a}” → “${rp.b}” ${r.n}곳(${r.where.join(', ')})`+(left.length?` · 다른 말에 붙은 곳 ${left.length}곳은 그대로`:'')], rep:rp}; }
+    return {n:r.n, notes:[`“${rp.a}” → “${rp.b}” ${r.where.length}개 조·별표 ${r.n}곳(${raWhere(r.where)})`+(left.length?` · 다른 말에 붙은 곳 ${left.length}곳은 그대로`:'')], rep:rp}; }
   const dm=t.match(/제\s*(\d+)\s*조(?:\s*의\s*(\d+))?[^。.\n]{0,12}?삭제/);
   if(dm&&_raArts){ const no=dm[2]?`${dm[1]}의${dm[2]}`:dm[1], o=raOld(no);
     if(o&&!o.deleted){ let c=A.changes.find(x=>x.no===no); if(!c){ A.sel[no]=true; c={type:'modify',no,title:o.title,body:o.body,why:''}; A.changes.push(c); A.changes.sort((x,y)=>raCmp(x.no,y.no)); }
@@ -2310,10 +2311,11 @@ function raDocsView(mode){
   const pickable=RA_DOCS[mode].map(x=>x[0]).filter(k=>!(k==='review'&&!S.review));
   const all=raAllNone(`raPickAll('${mode}',true)`,`raPickAll('${mode}',false)`,picks.filter(k=>pickable.includes(k)).length)+`<span class="ra-picks" title="저장할 문서">`+RA_DOCS[mode].map(([k,l])=>{ const off=k==='review'&&!S.review;
     return `<label class="ra-pk-c${off?' dis':''}"${off?' title="심의 사전검토를 실행하면 넣을 수 있습니다"':''}><input type="checkbox" class="ra-docpick" value="${k}" ${picks.includes(k)&&!off?'checked':''} ${off?'disabled':''} onchange="raPickSet('${mode}','${k}',this.checked)"><span>${raIc(RA_DOC_IC[k]||'doc')}${l}</span></label>`; }).join('')+`</span>`;
-  return raSubmitPanel(mode,B)+`<div class="ra-dtabs">${tabs}</div><div class="ra-docbox">${body}</div>`+
+  return `<div class="ra-dtabs">${tabs}</div><div class="ra-docbox">${body}</div>`+
     `<div id="raNota">${raNotaView(mode)}</div>`+
     `<div class="ra-save">${all}<div class="ra-row"><button class="svc-btn ghost" onclick="raCopyDoc('${mode}')">복사</button><button class="svc-btn ghost" onclick="raPrintDoc('${mode}')">인쇄</button>`+
     `<span class="ra-sep"></span><button class="svc-btn yes" onclick="raExport('${mode}','hwpx')">한글(.hwpx)</button><button class="svc-btn" onclick="raExport('${mode}','docx')">Word(.docx)</button></div></div>`+
+    raSubmitPanel(mode,B)+                                              // 문서·저장 단추를 먼저 보이고, 제출 정보 입력은 그 아래(접힘)
     `<div class="ra-meta"><span class="ra-days">사전예고 ${RA_ORG.notice_days}일↑</span><span class="ra-days">직원 의견수렴 ${RA_ORG.staff_days}일↑</span>${raTip(`사전예고는 국민 권리·의무 관련 ${RA_ORG.reg_word}(「${raRules()}」 제15조의3제2항)일 때, 직원 의견수렴은 제15조의4 — 절차 안내를 확인하세요.`)}</div>`;
 }
 // ── 공문서 표기 점검(행정업무운영편람) — 서버 notation.py 규칙: 날짜·기간·시각·금액·쌍점·붙임·끝·낫표·줄표·외래어 ──
@@ -2598,7 +2600,7 @@ function raSubmitCheck(mode, B){
   return out;
 }
 function raSubmitCheckView(mode, B){
-  const L=raSubmitCheck(mode,B), e=L.filter(x=>x.st==='err').length, w=L.filter(x=>x.st==='warn').length;
+  const ord={err:0,warn:1,ok:2}, L=raSubmitCheck(mode,B).slice().sort((x,y)=>ord[x.st]-ord[y.st]), e=L.filter(x=>x.st==='err').length, w=L.filter(x=>x.st==='warn').length;   // 고칠 것부터
   const ic={ok:'check',warn:'alert',err:'bad'};
   return `<div class="ra-subck-h ${e?'err':w?'warn':'ok'}">${raIc(e?'bad':w?'alert':'check')}<b>${e?`제출 전에 고칠 문제 ${e}건`:w?`보완 권장 ${w}건 — 제출은 가능합니다`:'제출 준비 완료'}</b></div>`+
     `<ul class="ra-subck">${L.map(x=>`<li class="st-${x.st}">${raIc(ic[x.st])}<span>${_e(x.t)}</span>${x.act?` <button class="ra-link" onclick="${x.act}">바로 하기</button>`:''}</li>`).join('')}</ul>`;
@@ -2618,7 +2620,8 @@ function raSubmitPanel(mode, B){
   const aiBox=`<div class="ra-aichk">${pv?`<label class="ra-chk"><input type="checkbox" ${raAiOk(mode)?'checked':''} onchange="raAiConfirm('${mode}',this.checked)"> AI 작성분 검토 확인 <span class="ra-sub">${raAiParts(pv)}</span></label>`:''}`+
     `<label class="ra-f ra-me"><span>검토자(직위·성명)</span><input class="ra-in" value="${_e(raMe())}" placeholder="예) 주임 홍길동" oninput="raMeSet(this.value);raSubRedraw('${mode}')"></label>`+
     `<label class="ra-chk"><input type="checkbox" ${RA[mode].aiMark!==false?'checked':''} onchange="raSet('${mode}.aiMark',this.checked)"> 문서 끝에 작성 지원·검토 표기 ${raTip('저장하는 문서 끝에 “작성 지원: AI 초안 활용(모델), 조문 N개 중 M개 담당자 수정 · 검토: 검토자(날짜)”를 붙입니다. AI를 쓰지 않았으면 규칙 기반 작성 지원으로 적습니다.')}</label></div>`;
-  return `<details class="ra-det ra-subp" open><summary><b>${raIc('doc')}심의 제출 준비</b> <span class="ra-sub">「${_e(raRules())}」 [별지 제3호 서식] 심의안건서 기준</span></summary>`+
+  const ck=raSubmitCheck(mode,B), ce=ck.filter(x=>x.st==='err').length, cw=ck.filter(x=>x.st==='warn').length;
+  return `<details class="ra-det ra-subp"${RA[mode].subOpen||ce?' open':''} ontoggle="RA['${mode}'].subOpen=this.open;_raSave()"><summary><b>${raIc('doc')}심의 제출 준비</b> <span class="ra-chip ${ce?'bad':cw?'warn':'ok'}">${ce?`고칠 문제 ${ce}건`:cw?`보완 권장 ${cw}건`:'제출 준비 완료'}</span> <span class="ra-sub">제안 부서·심의일 등 입력 · 「${_e(raRules())}」 [별지 제3호 서식] 기준</span></summary>`+
     form+aiBox+need+`<div id="raSubCk">${raSubmitCheckView(mode,B)}</div>`+
     `<div class="ra-row"><button class="svc-btn yes" onclick="raSubmitExport('${mode}','hwpx')">${raIc('doc')}심의 제출 패키지 한글(.hwpx)</button><button class="svc-btn" onclick="raSubmitExport('${mode}','docx')">Word(.docx)</button>${raTip('아래에서 체크한 문서를 심의안건서 → 내규안 → 신구조문대비표 → 이유서 → 의견수렴 결과 → (자체 규제심사서·부패영향평가 기초자료) → 사전검토 의견서 순서로 한 파일에 담습니다. 심의안건서의 붙임 목록도 담은 문서에 맞춥니다.')}</div></details>`;
 }
@@ -2877,7 +2880,7 @@ function raAgentOut(){
     G.done.acts.map(([l,f,yes])=>`<button class="svc-btn${yes?' yes':''}" onclick="${f}">${_e(l)}</button>`).join('')+`</div></div>`:'';
   const nst=k=>G.steps.filter(x=>x.st===k).length;
   const sum=raStack([{n:nst('ok'),l:'완료',tone:'ok'},{n:nst('warn'),l:'확인 필요',tone:'warn'},{n:nst('err'),l:'중단',tone:'bad'},{n:nst('run')+nst('skip'),l:G.running?'진행 중':'건너뜀',tone:'n'}],'단계 상태');
-  return raSec(0,'에이전트 작업 내역',_e(G.req),head+sum+steps+done,'raAgSec');
+  return raSec(0,'에이전트 작업 내역',_e(G.req),head+done+sum+steps,'raAgSec');      // 결론(결과·다음 할 일)을 맨 위에, 단계 기록은 그 아래
 }
 function raAgentDraw(){ const o=document.getElementById('raAgOut'); if(o) o.innerHTML=raAgentOut(); }
 // 내규명 끝말 → 종류(제정 화면의 종류 목록과 같은 이름)
@@ -2978,7 +2981,7 @@ async function raAgAmend(P, step, fin, stop){
   if(!ok){
     A.changes=tg.map(a=>({type:'modify',no:a.no,title:a.title,body:a.body,why:'에이전트가 고른 대상 조문 — 내용을 고쳐 쓰세요'}));
     A.purpose=tg.length?`「${A.title}」 ${tg.map(a=>`${raLbl(a.no)}(${a.title})`).join('·')}의 내용을 정비하려는 것임.`:''; A.main=[];   // 주요 내용은 실제 수정안에서 만든다
-    if(!raHasAi()) fin(s,'AI 키가 없어 대상 조문을 수정안 칸에 담았습니다. 결과 화면에서 문장을 고쳐 쓰면 대비표·문서가 바로 바뀝니다.','warn');
+    if(!raHasAi()) fin(s,'AI 키가 없어 AI 수정안은 건너뜁니다. 지시문의 수치·낱말·조 삭제는 다음 단계에서 규칙으로 고치고, 나머지는 결과 화면에서 고쳐 쓰면 대비표·문서가 바로 바뀝니다.','skip');
   }
   // 대상 조문이 “별표에서 정한다”고 넘긴 금액·일수(여비규정 제15조 → 별표 2·4)는 별표에 있으므로 관련 별표를 함께 담는다
   const relX=raAppxForArts(tg.map(a=>a.no));
