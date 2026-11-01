@@ -1172,3 +1172,6 @@ a.svc-btn[target="_blank"][href^="http"]::after{position:static;inset:auto;}
 .ra-chg-idle>summary{display:flex;align-items:center;gap:var(--space-xs);padding:var(--space-xs) var(--space-md);cursor:pointer;font-size:var(--text-sm);}
 .ra-chg-idle[open]>summary{border-bottom:1px solid var(--color-rule);}
 .ra-chg-idle>.ra-chg{margin:var(--space-xs);}
+/* 대상 고르기: 전부 선택·선택 취소 */
+.ra-selall{display:inline-flex;gap:var(--space-2xs);margin:0 0 0 var(--space-xs);flex-wrap:nowrap;}
+@media (max-width:640px){ .ra-selall{margin:var(--space-2xs) 0 0;} }
