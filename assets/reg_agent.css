@@ -1227,3 +1227,11 @@ a.svc-btn[target="_blank"][href^="http"]::after{position:static;inset:auto;}
 .ra-hl-b u.ra-i{color:transparent;font-weight:inherit;background:color-mix(in srgb,var(--color-accent) 20%,transparent);border-radius:2px;text-decoration-color:var(--color-accent);}
 .ra-old u.ra-d{background:color-mix(in srgb,var(--color-bad) 10%,transparent);border-radius:2px;}
 .ra-chg.t-appx .ra-hl .ra-ta.ra-hl-t{max-height:520px;}
+/* 제정 초안: 채울 곳(○○) 노란 바탕 · 범례 */
+.ra-hl-b mark.ra-ph{color:transparent;background:color-mix(in srgb,var(--color-warn,#d97706) 32%,transparent);border-radius:2px;}
+.ra-phbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-xs) var(--space-md);font-size:12.5px;color:var(--color-muted);margin:var(--space-3xs) 0 var(--space-xs);}
+.ra-leg2{display:inline-flex;align-items:center;gap:6px;}
+.ra-leg2 .sw{display:inline-block;width:14px;height:10px;border-radius:2px;}
+.ra-leg2 .sw.ed{background:color-mix(in srgb,var(--color-accent) 20%,transparent);border-bottom:2px solid var(--color-accent);}
+.ra-leg2 .sw.ph{background:color-mix(in srgb,var(--color-warn,#d97706) 32%,transparent);}
+.ra-ok-t{display:inline-flex;align-items:center;gap:4px;color:var(--color-ok);}

@@ -46,3 +46,11 @@ def test_ai_enact_gets_outline_and_drops_invented_sources(ra, monkeypatch):
     assert "[다른 기관 같은 종류 규정의 조 구성]" in seen["user"] and "가공사 「드론 운영지침」: 제1조(목적)" in seen["user"]
     srcs = {s["title"]: s["src"] for s in d["sources"]}
     assert srcs == {"비행 승인": "가공사 「드론 운영지침」 제4조"}     # 받은 자료에 없는 기관은 지운다
+
+
+def test_template_scope_uses_purpose(ra):
+    d = ra.template_enact({"title": "업무용 드론 운영지침", "purpose": "업무용 드론의 안전한 운영"})
+    scope = next(a for a in d["articles"] if a["title"] == "적용범위")
+    assert scope["body"].startswith("업무용 드론의 안전한 운영에 관하여") and "○○" not in scope["body"]
+    d2 = ra.template_enact({"title": "업무용 드론 운영지침"})
+    assert next(a for a in d2["articles"] if a["title"] == "적용범위")["body"].startswith("○○에 관하여")
