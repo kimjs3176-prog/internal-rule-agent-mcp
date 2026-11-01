@@ -61,7 +61,9 @@ const RA_NAV=[
   {id:'tools',t:'정비 도구',tabs:['bulk','upper','graph'],fold:true},
   {id:'admin',t:'관리',tabs:['proc','ledger'],fold:true,small:true},
 ];
-function raNavTab(k){ const t=RA_TABS.find(x=>x[0]===k); if(!t) return ''; const [,l,h]=t; return `<button class="ra-tab${RA.tab===k?' on':''}" ${RA.tab===k?'aria-current="page"':''} title="${_e(h)}" onclick="raTab('${k}')">${raIc(k)}<span class="ra-tab-t"><b>${l}</b><small>${_e(h)}</small></span></button>`; }
+// 처음 보는 사람이 메뉴 이름만으로 고르기 어려운 ‘작업’ 넷은 한 줄 설명을 늘 보여 준다
+const RA_NAV_SUB={agent:'한 문장으로 맡기기',health:'우리 내규 상태 보기',amend:'있는 내규 고치기',enact:'새 내규 만들기'};
+function raNavTab(k){ const t=RA_TABS.find(x=>x[0]===k); if(!t) return ''; const [,l,h]=t; return `<button class="ra-tab${RA.tab===k?' on':''}" data-k="${k}" ${RA.tab===k?'aria-current="page"':''} title="${_e(h)}" onclick="raTab('${k}')">${raIc(k)}<span class="ra-tab-t"><b>${l}</b>${RA_NAV_SUB[k]?`<small class="on">${_e(RA_NAV_SUB[k])}</small>`:`<small>${_e(h)}</small>`}</span></button>`; }
 function raNavHtml(grouped){
   if(!grouped) return RA_TABS.map(t=>raNavTab(t[0])).join('');
   const open=(RA.ui&&RA.ui.nav)||{};
@@ -218,7 +220,7 @@ function raErr(msg, needKey){ return `<div class="ra-err" role="alert">${raIc('a
 // ── 인포그래픽 부품 — 숫자·비율은 그림으로, 설명은 ⓘ 툴팁으로 ─────────────────
 // 색조(tone): ok 양호 · warn 주의 · serious 경고 · bad 위험 · acc 강조(파랑) · n 중립 — 색만으로 뜻을 전하지 않도록 항상 글자와 함께 쓴다
 function raTip(t){ return `<span class="ra-tip" tabindex="0" role="note" aria-label="${_e(t)}" data-tip="${_e(t)}" onkeydown="if(event.key==='Escape'){event.stopPropagation();this.blur();}">${raIc('info')}</span>`; }
-function raFlow(f){ return f.length?`<ol class="ra-flow" aria-label="작업 순서">`+f.map(([ic,l])=>`<li>${_e(l)}</li>`).join('')+`</ol>`:''; }
+function raFlow(f){ return f.length?`<ol class="ra-flow" aria-label="이 화면의 순서"><li class="ra-flow-h" aria-hidden="true">이 화면의 순서</li>`+f.map(([ic,l])=>`<li>${_e(l)}</li>`).join('')+`</ol>`:''; }
 function raStats(items){
   return `<div class="ra-stats">`+items.map(x=>`<div class="ra-stat t-${x.tone||'n'}"${x.tip?` title="${_e(x.tip)}"`:''}><b>${x.v}</b><span>${_e(x.l)}</span></div>`).join('')+`</div>`;
 }
@@ -380,9 +382,9 @@ function openRegAgent(tab){
   if(nav) nav.innerHTML=tabs;
   let [pt,pf]=RA_PAGE[RA.tab]||['',[]]; if(RA.tab==='enact'||RA.tab==='amend') pf=[];
   const ph=(RA_TABS.find(x=>x[0]===RA.tab)||[])[2]||'';
-  const ai=raHasAi()?`<span class="ra-pill ok">${raIc('spark')}AI 연결됨</span>`:`<button class="ra-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button><a class="ra-pill subtle" href="${RA_KEY_URL}" target="_blank" rel="noopener" title="Google AI Studio에서 Gemini API 키를 무료로 발급받습니다">키 발급(Google)</a>`;
+  const ai=raHasAi()?`<span class="ra-pill ok ra-ai-pill">${raIc('spark')}AI 연결됨</span>`:`<button class="ra-pill ra-ai-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button><a class="ra-pill subtle" href="${RA_KEY_URL}" target="_blank" rel="noopener" title="Google AI Studio에서 Gemini API 키를 무료로 발급받습니다">키 발급(Google)</a>`;
   p.innerHTML=(nav?'':`<nav class="ra-tabs" aria-label="에이전트 기능">${tabs}</nav>`)+
-    `<header class="ra-page"><div class="ra-page-t"><h1 title="${_e(ph)}">${_e(pt)}</h1>${raFlow(pf)}</div><div class="ra-page-a">${ai}<span class="ra-pill subtle" title="절차·심의기준의 근거">「${_e(raRules())}」</span></div></header>`+
+    `<header class="ra-page"><div class="ra-page-t"><h1 title="${_e(ph)}">${_e(pt)}</h1>${raFlow(pf)}</div><div class="ra-page-a"><button class="ra-pill ra-help-btn" onclick="raHelpOpen()" aria-haspopup="dialog">${raIc('info')}처음 사용 안내</button>${ai}<span class="ra-pill subtle" title="절차·심의기준의 근거">「${_e(raRules())}」</span></div></header>`+
     `<div id="raBody" class="ra-body"></div>`;
   raOrgCard();
   raRender();
@@ -397,7 +399,7 @@ function raOrgCard(){
   const srv=(typeof _srvOk==='undefined'||_srvOk===null)?'<span class="badge">서버 확인 중</span>':_srvOk?'<span class="badge ok">서버 연결됨</span>':'<span class="badge no">서버 연결 실패</span>';
   c.innerHTML=`<div class="oc-n">${_e(RA_ORG.org_name)}</div><div class="oc-m">등록 ${_e(RA_ORG.reg_word)} ${RA_ORG._count!=null?RA_ORG._count+'건':'—'}<br>근거 「${_e(raRules())}」</div>`+
     `<div class="oc-row">${srv}</div><div class="oc-row">${raHasAi()?'<span class="badge ok">AI 연결됨</span>':`<span class="badge">AI 미설정</span> <a class="ra-link" href="${RA_KEY_URL}" target="_blank" rel="noopener">키 발급</a>`}</div>`+
-    `<div class="oc-row oc-bk"><button class="ra-link" onclick="raBackup()" title="제정·개정·절차 작업 내용을 파일로 저장(이 브라우저에만 저장되어 있음)">작업 백업</button><button class="ra-link" onclick="raRestore()" title="백업 파일에서 작업 내용을 되살림">복원</button></div>`;
+    `<div class="oc-row"><button class="ra-link" onclick="raHelpOpen()">처음 사용 안내</button><button class="ra-link" onclick="raTourStart()">둘러보기</button></div><div class="oc-row oc-bk"><button class="ra-link" onclick="raBackup()" title="제정·개정·절차 작업 내용을 파일로 저장(이 브라우저에만 저장되어 있음)">작업 백업</button><button class="ra-link" onclick="raRestore()" title="백업 파일에서 작업 내용을 되살림">복원</button></div>`;
 }
 // 작업 내용은 이 브라우저(localStorage)에만 있으므로 파일로 백업·복원할 수 있게 한다
 function raBackup(){
@@ -2580,13 +2582,102 @@ function raAgentView(){
   const mic={'개정':'amend','제정':'enact','일괄 정비':'bulk','상위법':'upper','다른 기관':'search','자문':'advise'};
   const ex=RA_AG_EX.map(([k,t])=>`<button class="ra-ag-ex" onclick="raAgentEx('${_a(t)}')"><span class="ra-ag-ex-k">${raIc(mic[k]||'spark')}${_e(k)}</span><span class="ra-ag-ex-t">${_e(t)}</span></button>`).join('');
   const tip=`요청을 제정·개정·일괄 정비·상위법 영향 중 하나로 판단하고, 대상 ${RA_ORG.reg_word}와 조문을 찾아 초안 → 인용 영향 → 점검 → 심의 사전검토 → 절차 판단 → 문서 세트까지 이어서 수행합니다. `+(raHasAi()?'AI가 계획과 초안을 씁니다.':'AI 키가 없으면 규칙 기반으로 계획하고, 조문 문장은 결과 화면에서 직접 고칩니다.')+' (Ctrl+Enter로 실행)';
-  return `<div class="ra-wide">`+
+  return `<div class="ra-wide">`+raIntroView()+
     `<section class="ra-ag-hero"><div class="ra-ag-label"><label for="raAgIn">${_e(RA_ORG.reg_word)} 작업을 한 문장으로 지시하세요</label>${raTip(tip)}</div>`+
     `<div class="ra-ag-box"><textarea id="raAgIn" class="ra-ag-in" rows="2" placeholder="예) 여비규정 제15조의 일비를 3만원으로 올려줘" oninput="raSet('agent.req',this.value)" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();raAgentRun();}">${_e(G.req)}</textarea>`+
     `<button class="svc-btn yes ra-ag-go" onclick="raAgentRun()" ${G.running?'disabled':''}>${raIc('spark')}${G.running?'진행 중…':'에이전트 실행'}</button></div>`+
     `<div class="ra-ag-exs">${ex}</div>${raAiKeyNote('AI 키가 없으면 규칙 기반으로 계획하고 조문 문장은 직접 고칩니다. 키를 넣으면 AI가 계획·초안·검토의견을 씁니다.')}</section>`+
     `<div id="raAgOut" aria-live="polite">${raAgentOut()}</div></div>`;
 }
+// ── 처음 쓰는 사람 안내: 시작 카드·도움말·둘러보기·용어 풀이 ──
+function raIntroCards(inDialog){
+  const go=js=>inDialog?`raHelpClose();${js}`:js;
+  const card=(n,ic,t,d,acts)=>`<div class="ra-intro-c"><div class="ra-intro-h"><span class="ra-intro-n" aria-hidden="true">${n}</span>${raIc(ic)}<b>${t}</b></div><p>${d}</p><div class="ra-row">${acts}</div></div>`;
+  return `<div class="ra-intro-g">`+
+    card(1,'spark','한 문장으로 맡기기',`하고 싶은 일을 적으면 대상 ${_e(RA_ORG.reg_word)} 찾기부터 수정안·점검·문서까지 이어서 합니다. 끝나면 결과를 확인하고 고치기만 하면 됩니다.`,
+      `<button class="svc-btn sm yes" onclick="${go("raTab('agent');setTimeout(()=>raAgentEx('여비규정 제15조의 일비를 3만원으로 올려줘'),80)")}">예시로 해 보기</button>`)+
+    card(2,'health','우리 내규 상태 보기',`기관 ${_e(RA_ORG.reg_word)} 전체에서 없는 조문 인용·옛 명칭·오래된 개정을 찾아 점수로 보여 주고, 고칠 곳에서 바로 개정을 시작합니다.`,
+      `<button class="svc-btn sm" onclick="${go("raTab('health')")}">건강검진 열기</button>`)+
+    card(3,'amend','단계별로 직접 하기','개정은 대상 고르기 → 고치기 → 확인·검토 → 문서 받기, 제정은 기본 정보 → 참고 자료 → 조문 초안 순서로 화면이 안내합니다.',
+      `<button class="svc-btn sm" onclick="${go("raTab('amend')")}">개정 열기</button><button class="svc-btn sm" onclick="${go("raTab('enact')")}">제정 열기</button>`)+
+  `</div>`;
+}
+function raIntroView(){
+  if((RA.ui||{}).introDone||raArr(RA.agent.steps).length) return '';
+  return `<section class="ra-sec ra-intro" aria-labelledby="raIntroT"><div class="ra-intro-top"><h2 id="raIntroT">처음 오셨나요? 세 가지 중 하나로 시작하세요</h2>`+
+    `<button class="ra-x" aria-label="시작 안내 닫기" onclick="raIntroDone()">${raIc('x')}</button></div>`+raIntroCards(false)+
+    `<div class="ra-row ra-intro-foot"><button class="svc-btn sm ghost" onclick="raTourStart()">${raIc('info')}30초 둘러보기</button><button class="svc-btn sm ghost" onclick="raHelpOpen('terms')">용어 풀이</button>`+
+    `<span class="ra-hint">AI 키가 없어도 쓸 수 있습니다(규칙 기반). 이 안내는 오른쪽 위 “처음 사용 안내”에서 다시 볼 수 있습니다.</span><button class="ra-link" onclick="raIntroDone()">다시 보지 않기</button></div></section>`;
+}
+function raIntroDone(){ RA.ui=RA.ui||{}; RA.ui.introDone=true; _raSave(); raRerender('agent'); }
+const RA_GLOSS=[
+  ['조·항·호·목','조문의 단위입니다. “제5조(조) ①(항) 1.(호) 가.(목)” 순서로 잘게 나뉩니다.'],
+  ['개정문','현행 내규를 어떻게 바꾸는지 정해진 문형으로 적은 글입니다. 예) “제15조제2항 중 ‘1주일’을 ‘10일’로 한다.”'],
+  ['신구조문대비표','현행(왼쪽)과 개정안(오른쪽)을 나란히 놓고 바뀐 곳에 밑줄을 친 표입니다. 심의 자료의 중심입니다.'],
+  ['부칙','시행일과 경과조치를 정하는 끝부분입니다. 비워 두면 “발령한 날부터 시행한다”로 씁니다.'],
+  ['별표·별지 서식','별표는 금액표·기준표처럼 본문 밖에 둔 표, 별지 서식은 신청서 같은 양식입니다. 금액은 대개 별표에 있습니다.'],
+  ['인용 영향','고친 조문을 같은 내규나 다른 내규가 “제○조에 따라”처럼 인용하는지 찾은 결과입니다. 번호나 내용이 바뀌면 함께 고칩니다.'],
+  ['위임 조항','상위 법령·규정이 “…은 내규로 정한다”고 맡긴 조항입니다. 새 내규의 제1조(목적)에 근거로 씁니다.'],
+  ['심의 사전검토','심의에 올리기 전에 심의기준(형식·상위법 저촉·규제 신설 등)에 맞는지 미리 보는 것입니다.'],
+  ['건강검진 점수','없는 조문 인용, 옛 명칭, 조 번호 오류, 오래된 개정 등을 감점해 100점 기준으로 낸 점수와 A~E 등급입니다.'],
+  ['일괄 정비','부서명·직위명 같은 명칭이 바뀌었을 때 모든 내규에서 한 번에 고치고, 내규마다 개정문을 만드는 기능입니다.'],
+  ['알리오','공공기관 경영정보 공개시스템입니다. 다른 기관이 공시한 내부규정을 찾아 참고합니다.'],
+];
+function raHelpOpen(sec){
+  let bg=document.getElementById('raHelpBg');
+  if(!bg){ bg=document.createElement('div'); bg.id='raHelpBg'; bg.className='modal-bg'; bg.addEventListener('click',e=>{ if(e.target===bg) raHelpClose(); }); document.body.appendChild(bg); }
+  const menu=RA_NAV.map(g=>`<dt>${_e(g.t)}</dt>`+g.tabs.map(k=>{ const t=RA_TABS.find(x=>x[0]===k); return t?`<dd><button class="ra-link" onclick="raHelpClose();raTab('${k}')">${_e(t[1])}</button> ${_e(RA_NAV_SUB[k]||t[2])}</dd>`:''; }).join('')).join('');
+  bg.innerHTML=`<div class="modal ra-help" role="dialog" aria-modal="true" aria-labelledby="raHelpT"><div class="ra-intro-top"><h2 id="raHelpT" tabindex="-1">처음 사용 안내</h2><button class="ra-x" aria-label="닫기" onclick="raHelpClose()">${raIc('x')}</button></div>`+
+    `<h3>어떻게 시작하나요?</h3>`+raIntroCards(true)+
+    `<div class="ra-row"><button class="svc-btn sm" onclick="raTourStart()">${raIc('info')}30초 둘러보기</button><span class="ra-hint">화면의 주요 부분을 차례로 짚어 드립니다.</span></div>`+
+    `<h3>메뉴 안내</h3><dl class="ra-help-menu">${menu}</dl>`+
+    `<h3 id="raHelpTerms" tabindex="-1">용어 풀이</h3><dl class="ra-gloss">`+RA_GLOSS.map(([t,d])=>`<dt>${_e(t)}</dt><dd>${_e(d)}</dd>`).join('')+`</dl></div>`;
+  bg.classList.add('show'); document.addEventListener('keydown',raHelpKey);
+  setTimeout(()=>{ const t=document.getElementById(sec==='terms'?'raHelpTerms':'raHelpT'); if(t){ t.focus(); if(sec==='terms') t.scrollIntoView({block:'start'}); } },30);
+}
+function raHelpClose(){ const bg=document.getElementById('raHelpBg'); if(bg) bg.classList.remove('show'); document.removeEventListener('keydown',raHelpKey); }
+function raHelpKey(e){ if(e.key==='Escape') raHelpClose(); }
+// 둘러보기: 화면의 주요 부분을 차례로 밝혀 짚는다(없는 부분은 건너뜀). ←·→·Esc
+const RA_TOUR=[
+  ['#raNav','왼쪽 메뉴','자주 쓰는 “작업” 넷(에이전트·건강검진·개정·제정)만 펼쳐 있습니다. 찾아보기·정비 도구·관리는 눌러서 엽니다.'],
+  ['#raAgIn','한 문장으로 지시','하고 싶은 일을 적고 “에이전트 실행”을 누르면 대상 찾기부터 수정안·점검·문서까지 이어서 합니다.'],
+  ['.ra-ag-exs','예시','예시를 누르면 입력 칸에 채워집니다. 그대로 실행해 보세요.'],
+  ['.ra-page-a .ra-ai-pill','AI 설정','AI 키가 없어도 규칙 기반으로 됩니다. 키를 넣으면 수정안·초안·검토의견을 AI가 씁니다.'],
+  ['.ra-tab[data-k="health"]','건강검진','우리 내규 전체의 오류와 오래된 곳을 먼저 보고, 고칠 곳에서 바로 개정을 시작할 수 있습니다.'],
+  ['.ra-tab[data-k="amend"]','개정·제정','직접 할 때는 화면 위의 단계(대상 고르기 → 고치기 → 확인·검토 → 문서 받기)를 따라가면 됩니다.'],
+  ['.ra-help-btn','처음 사용 안내','이 둘러보기와 메뉴 안내, 용어 풀이는 언제든 여기서 다시 볼 수 있습니다.'],
+];
+let _raTourI=-1;
+function raTourStart(){ raHelpClose(); if(RA.tab!=='agent') raTab('agent'); _raTourI=0; setTimeout(raTourShow,120); }
+function raTourShow(){
+  if(_raTourI<0) return;
+  let ov=document.getElementById('raTour');
+  if(!ov){ ov=document.createElement('div'); ov.id='raTour'; ov.className='ra-tour'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-labelledby','raTourT'); document.body.appendChild(ov);
+    document.addEventListener('keydown',raTourKey); window.addEventListener('resize',raTourShow); }
+  while(_raTourI<RA_TOUR.length){ const el=document.querySelector(RA_TOUR[_raTourI][0]); if(el&&el.getClientRects().length) break; _raTourI++; }
+  if(_raTourI>=RA_TOUR.length){ raTourEnd(); return; }
+  const n=RA_TOUR.length, [sel,t0,d]=RA_TOUR[_raTourI], el=document.querySelector(sel);
+  const t=sel==='#raNav'&&innerWidth<1024?'위쪽 메뉴':t0;                 // 좁은 화면에서는 메뉴가 위에 있다
+  el.scrollIntoView({block:'center',inline:'nearest'});
+  let r=el.getBoundingClientRect(); const pad=6;
+  ov.innerHTML=`<div class="ra-tour-hole" style="left:${r.left-pad}px;top:${r.top-pad}px;width:${r.width+pad*2}px;height:${r.height+pad*2}px"></div>`+
+    `<div class="ra-tour-pop" id="raTourPop"><div class="ra-tour-k">${_raTourI+1} / ${n}</div><h3 id="raTourT">${_e(t)}</h3><p>${_e(d)}</p><div class="ra-row">`+
+    (_raTourI>0?`<button class="svc-btn sm ghost" onclick="raTourGo(-1)">이전</button>`:'')+`<button class="svc-btn sm yes" onclick="raTourGo(1)">${_raTourI<n-1?'다음':'끝'}</button><button class="ra-link" onclick="raTourEnd()">그만 보기</button></div></div>`;
+  const pop=document.getElementById('raTourPop'), pw=Math.min(340,innerWidth-24); pop.style.width=pw+'px'; const ph=pop.offsetHeight;
+  let left=Math.min(Math.max(12,r.left),innerWidth-pw-12), top=r.bottom+12;
+  if(r.height>innerHeight*0.45&&r.right+pw+28<innerWidth){ left=r.right+16; top=Math.min(Math.max(12,r.top),innerHeight-ph-12); }   // 키 큰 것(메뉴)은 오른쪽에
+  else if(top+ph>innerHeight-12){
+    if(r.top-ph-12>=12) top=r.top-ph-12;                                   // 위에 자리가 있으면 위에
+    else {                                                                 // 위아래 모두 모자라면(휴대폰의 긴 목록) 대상을 말풍선 아래로 내린다
+      window.scrollBy(0, r.top-(ph+28)); r=el.getBoundingClientRect(); top=12;
+      const hole=ov.querySelector('.ra-tour-hole'); hole.style.left=(r.left-pad)+'px'; hole.style.top=(r.top-pad)+'px'; hole.style.width=(r.width+pad*2)+'px'; hole.style.height=(r.height+pad*2)+'px';
+    } }
+  pop.style.left=left+'px'; pop.style.top=top+'px';
+  const nb=pop.querySelector('.svc-btn.yes'); if(nb) nb.focus();
+}
+function raTourGo(d){ _raTourI=Math.max(0,_raTourI+d); raTourShow(); }
+function raTourEnd(){ _raTourI=-1; const ov=document.getElementById('raTour'); if(ov) ov.remove(); document.removeEventListener('keydown',raTourKey); window.removeEventListener('resize',raTourShow); RA.ui=RA.ui||{}; RA.ui.toured=true; _raSave(); }
+function raTourKey(e){ if(e.key==='Escape') raTourEnd(); else if(e.key==='ArrowRight') raTourGo(1); else if(e.key==='ArrowLeft') raTourGo(-1); }
 function raAgentEx(t){ RA.agent.req=t; _raSave(); const el=document.getElementById('raAgIn'); if(el){ el.value=t; el.focus(); } }
 const RA_AG_ST={run:['진행 중','run'],ok:['완료','ok'],warn:['확인 필요','warn'],err:['중단','err'],skip:['건너뜀','skip']};
 function raAgentOut(){
