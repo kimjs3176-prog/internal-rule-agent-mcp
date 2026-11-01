@@ -998,3 +998,17 @@ test('구성 단순화: 메뉴는 작업+더 보기 둘, 예시는 넷만 먼저
   vm.runInContext(`RA.ui.exMore=true;`, c);
   assert.ok((c.raAgentView().match(/class="ra-ag-ex"/g) || []).length > 4, '더 보기 후 전부');
 });
+
+test('고치기 색 표시: 지운 말·넣은 말과 사람이 고친 수정안 판별', () => {
+  const c = load();
+  const [L, R] = c.raBodyDiff('① 일비는 25,000원으로 한다.\n② 그대로 둔다.', '① 일비는 30,000원으로 한다.\n② 그대로 둔다.\n③ 새 항');
+  assert.ok(/<u class="ra-d">25<\/u>/.test(L) && !L.includes('ra-i'), L);
+  assert.ok(/<u class="ra-i">30<\/u>/.test(R) && R.includes('<u class="ra-i">③ 새 항</u>') && R.includes('② 그대로 둔다.'), R);
+  // 입력칸과 같은 글자·같은 줄 수(뒤 칸 정렬)
+  const nb = 'a <b>\n\n둘째 줄', hl = c.raBodyHl('a\n둘째 줄', nb);
+  assert.equal(hl.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>'), nb + '\n');
+  assert.equal(c.raBodyHl('', '신설 본문'), '<u class="ra-i">신설 본문</u>\n');
+  // AI 수정안은 AI 원문과 견준다
+  assert.equal(c.raHumanEdited({ type: 'modify', no: '1', title: 't', body: 'AI 본문', ai: 'AI 본문', aiTitle: 't' }), false);
+  assert.equal(c.raHumanEdited({ type: 'modify', no: '1', title: 't', body: 'AI 본문 고침', ai: 'AI 본문', aiTitle: 't' }), true);
+});

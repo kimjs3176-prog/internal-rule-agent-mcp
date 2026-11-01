@@ -1214,3 +1214,16 @@ a.svc-btn[target="_blank"][href^="http"]::after{position:static;inset:auto;}
 .ra-ag-more .ra-ag-ex-t{color:var(--color-accent);}
 .ra-keynote{display:flex;align-items:center;gap:var(--space-sm);}
 .ra-keynote>span{flex:1;}
+/* 고치기: 개정 의도 바로 아래 ‘수정안 만들기’ */
+.ra-intent-go{margin-top:calc(-1 * var(--space-2xs));}
+.ra-intent-go .ra-sub{flex:1;min-width:200px;}
+/* 고치기: 개정안 입력칸 뒤에 새로 넣은 말 바탕색 — 글자는 입력칸이 그리고, 뒤 칸은 같은 자리에 색만 깐다 */
+.ra-hl{position:relative;}
+.ra-hl .ra-hl-b,.ra-hl .ra-ta.ra-hl-t{font:var(--text-md)/1.9 var(--font-text);padding:var(--space-xs) var(--space-sm);border:var(--rule-hair) solid transparent;border-radius:var(--radius-ctl);
+  white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;letter-spacing:normal;tab-size:4;box-sizing:border-box;scrollbar-gutter:stable;margin:0;}
+.ra-hl .ra-hl-b{position:absolute;inset:0;overflow:hidden;color:transparent;pointer-events:none;background:var(--color-sheet);}
+.ra-hl .ra-ta.ra-hl-t{position:relative;display:block;width:100%;background:transparent;border-color:var(--color-muted);field-sizing:content;min-height:7.5em;}
+.ra-hl .ra-ta.ra-hl-t:hover{border-color:var(--color-ink-2);}
+.ra-hl-b u.ra-i{color:transparent;font-weight:inherit;background:color-mix(in srgb,var(--color-accent) 20%,transparent);border-radius:2px;text-decoration-color:var(--color-accent);}
+.ra-old u.ra-d{background:color-mix(in srgb,var(--color-bad) 10%,transparent);border-radius:2px;}
+.ra-chg.t-appx .ra-hl .ra-ta.ra-hl-t{max-height:520px;}
