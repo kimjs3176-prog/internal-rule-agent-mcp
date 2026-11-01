@@ -921,3 +921,18 @@ test('지시문 수치 반영: 표는 열을 맞춰서만, 조문은 낱말 바�
   assert.equal(A.purpose, '일비를 30,000원으로 조정하려는 것임.');
   assert.equal(A.changes[0].body, '일비·숙박비 및 식비는 〔별표 2〕에 따라 지급한다.', '금액이 없는 조문은 그대로');
 });
+
+test('대상 고르기: 전부 선택(검색 중이면 찾은 것만, 삭제된 조 빼고)·선택 취소', () => {
+  const c = load();
+  vm.runInContext(`_raArts={title:'여비규정',articles:[{no:'1',title:'목적',body:'가'},{no:'2',title:'정의',body:'일비'},{no:'3',title:'',body:'삭제',deleted:true}],
+    appendix:[{id:'별표 1',head:'',body:'일비 표'},{id:'별지 제1호 서식',head:'',body:'신청서'}]}; RA.amend.slug='여비규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.filter='';`, c);
+  c.raSelAll(true);
+  let A = c.__RA().amend;
+  assert.equal(Object.keys(A.sel).sort().join(','), '1,2', '삭제된 조는 빼고');
+  assert.equal(Object.keys(A.selx).length, 2);
+  c.raSelAll(false); A = c.__RA().amend;
+  assert.equal(c.raSelCount(), 0);
+  vm.runInContext(`RA.amend.filter='일비';`, c); c.raSelAll(true); A = c.__RA().amend;
+  assert.equal(Object.keys(A.sel).join(','), '2'); assert.equal(Object.keys(A.selx).join(','), '별표 1', '찾은 것만');
+  assert.ok(c.raArtsView().includes('찾은 것 모두 선택') && c.raArtsView().includes('선택 취소'));
+});

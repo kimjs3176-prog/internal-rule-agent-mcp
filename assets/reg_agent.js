@@ -998,12 +998,27 @@ function raArtsView(){
       html+=`<label class="ra-art"><input type="checkbox" ${(A.selx||{})[x.id]?'checked':''} onchange="raSelX('${_a(x.id)}',this.checked)">`+
         `<span class="ra-art-n">${_e(x.id)}</span><span class="ra-art-t">${_e(raAppxTitle(x))}</span><span class="ra-art-b">${_e(x.body.replace(/\n/g,' ').slice(0,90))}</span></label>`; }); }
   const nsel=Object.values(A.sel).filter(Boolean).length+Object.values(A.selx||{}).filter(Boolean).length;
-  return `<div class="ra-meta">「${_e(_raArts.title)}」 ${_e(_raArts.revision||'')}${RA_VR}${_raArts.articles.length}개 조${X.length?`${RA_VR}별표·서식 ${X.length}개`:''}${RA_VR}선택 <b id="raSelCnt">${nsel}</b>개 <input class="ra-in sm" style="max-width:200px" placeholder="조문·별표 검색" value="${_e(A.filter||'')}" oninput="RA.amend.filter=this.value;document.getElementById('raArtList').innerHTML=raArtsList()"></div><div class="ra-arts" id="raArtList">${html}</div>`;
+  return `<div class="ra-meta">「${_e(_raArts.title)}」 ${_e(_raArts.revision||'')}${RA_VR}${_raArts.articles.length}개 조${X.length?`${RA_VR}별표·서식 ${X.length}개`:''}${RA_VR}선택 <b id="raSelCnt">${nsel}</b>개 <input class="ra-in sm" style="max-width:200px" placeholder="조문·별표 검색" value="${_e(A.filter||'')}" oninput="RA.amend.filter=this.value;document.getElementById('raArtList').innerHTML=raArtsList();raSelAllLabel()">`+
+    `<span class="ra-row ra-selall"><button class="svc-btn sm" id="raSelAllBtn" onclick="raSelAll(true)">${raIc('check')}${q?'찾은 것 모두 선택':'전부 선택'}</button><button class="svc-btn sm ghost" onclick="raSelAll(false)" ${nsel?'':'disabled'} id="raSelNoneBtn">선택 취소</button></span></div><div class="ra-arts" id="raArtList">${html}</div>`;
 }
 function raArtsList(){ const t=document.createElement('div'); t.innerHTML=raArtsView(); const l=t.querySelector('#raArtList'); return l?l.innerHTML:''; }
 function raSelCount(){ const A=RA.amend; return Object.keys(A.sel||{}).length+Object.keys(A.selx||{}).length; }
-function raSel(no,on){ if(on) RA.amend.sel[no]=true; else delete RA.amend.sel[no]; _raSave(); const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount(); raWizSync('amend'); }
-function raSelX(id,on){ const A=RA.amend; A.selx=A.selx||{}; if(on) A.selx[id]=true; else delete A.selx[id]; _raSave(); const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount(); raWizSync('amend'); }
+function raSel(no,on){ if(on) RA.amend.sel[no]=true; else delete RA.amend.sel[no]; _raSave(); const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount(); const nb=document.getElementById('raSelNoneBtn'); if(nb) nb.disabled=!raSelCount(); raWizSync('amend'); }
+function raSelX(id,on){ const A=RA.amend; A.selx=A.selx||{}; if(on) A.selx[id]=true; else delete A.selx[id]; _raSave(); const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount(); const nb=document.getElementById('raSelNoneBtn'); if(nb) nb.disabled=!raSelCount(); raWizSync('amend'); }
+// 전부 선택(검색 중이면 찾은 것만, 삭제된 조는 빼고) · 선택 취소(조문·별표 모두)
+function raSelAll(on){
+  const A=RA.amend; if(!_raArts) return; A.selx=A.selx||{};
+  if(!on){ A.sel={}; A.selx={}; }
+  else { const q=(A.filter||'').replace(/\s+/g,'');
+    _raArts.articles.forEach(a=>{ if(!a.deleted&&(!q||(a.no+a.title+a.body).replace(/\s+/g,'').includes(q))) A.sel[a.no]=true; });
+    raArr(_raArts.appendix).forEach(x=>{ if(!q||(x.id+x.head+x.body).replace(/\s+/g,'').includes(q)) A.selx[x.id]=true; }); }
+  _raSave();
+  const l=document.getElementById('raArtList'); if(l) l.innerHTML=raArtsList();
+  const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount();
+  const nb=document.getElementById('raSelNoneBtn'); if(nb) nb.disabled=!raSelCount();
+  raWizSync('amend');
+}
+function raSelAllLabel(){ const b=document.getElementById('raSelAllBtn'); if(b) b.lastChild.textContent=(RA.amend.filter||'').trim()?'찾은 것 모두 선택':'전부 선택'; }
 function raSelHint(){ const n=raSelCount(); return `${raIc('info')}${n?`조문·별표 <b>${n}</b>개를 골랐습니다. “다음”을 눌러 고치세요.`:'고칠 조문이나 별표·서식을 체크하세요. 신설만 하거나 AI에게 맡기려면 체크하지 않아도 됩니다.'}`; }
 function raOld(no){ return _raArts?_raArts.articles.find(a=>a.no===no):null; }
 // ── 별표·서식 블록 ─────────────────────────────────────────────────────────
