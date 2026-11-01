@@ -645,7 +645,8 @@ function raDelegView(){
   else if(E.lawArts){
     const q=(E.lawQ||'').replace(/\s+/g,'');
     const arts=E.lawArts.filter(a=>!q||(a.label+a.title+a.text).replace(/\s+/g,'').includes(q)).slice(0,80);
-    pick=`<div class="ra-pick"><div class="ra-pick-h">「${_e(E.lawName)}」 ${E.lawArts.length}개 조문 <input class="ra-in sm" placeholder="조문 검색(예: 위임, 정한다)" value="${_e(E.lawQ||'')}" oninput="RA.enact.lawQ=this.value;raRenderPick()"></div><div id="raPickList" class="ra-pick-l">`+
+    pick=`<div class="ra-pick"><div class="ra-pick-h">「${_e(E.lawName)}」 ${E.lawArts.length}개 조문 <input class="ra-in sm" placeholder="조문 검색(예: 위임, 정한다)" value="${_e(E.lawQ||'')}" oninput="RA.enact.lawQ=this.value;raRenderPick()">`+
+      raAllNone('raDelAll(true)','raDelAll(false)',E.dels.filter(d=>d.law===E.lawName).length,!!q)+`</div><div id="raPickList" class="ra-pick-l">`+
       arts.map(a=>`<label class="ra-pick-i"><input type="checkbox" ${E.dels.some(d=>d.law===E.lawName&&raDelArt(d)===a.label)?'checked':''} onchange="raDelToggle('${_a(a.label)}',this.checked)"><span>${a.deleg?'<span class="ra-chip warn">위임</span> ':''}<b>${_e(a.label)}</b>${a.title?`(${_e(a.title)})`:''} <em>${_e(a.deleg?raDelegSnip(a.text):a.text.slice(0,140))}</em></span></label>`).join('')+
       `</div></div>`;
   }
@@ -691,6 +692,13 @@ async function raLawLoad(){
   }catch(e){ E.lawArts=null; _toast('법제처 연결에 실패했습니다.'); }
   _raBusy.law=false; E.lawQ=''; raRerender('enact');
 }
+function raDelAll(on){
+  const E=RA.enact; if(!E.lawArts) return; const q=(E.lawQ||'').replace(/\s+/g,'');
+  E.dels=E.dels.filter(d=>d.law!==E.lawName);
+  if(on) E.lawArts.filter(a=>!q||(a.label+a.title+a.text).replace(/\s+/g,'').includes(q)).slice(0,80)
+    .forEach(a=>E.dels.push({law:E.lawName, art:a.label, title:a.title||'', text:a.text.slice(0,1500)}));
+  raDirty('enact'); _raSave(); raRerender('enact');
+}
 function raDelToggle(label, on){
   const E=RA.enact; const a=(E.lawArts||[]).find(x=>x.label===label); if(!a) return;
   E.dels=E.dels.filter(d=>!(d.law===E.lawName&&raDelArt(d)===label));
@@ -724,10 +732,16 @@ function raSimView(){
   const nref=Object.keys(E.refs||{}).length;
   return `<div class="ra-meta">검색어: ${S.tokens.map(t=>`<span class="ra-chip">${_e(t)}</span>`).join('')}${S.semantic?' <span class="ra-chip sem">의미 검색 포함</span>':''}${RA_VR}참고로 고른 조문 <b id="raRefCnt">${nref}</b>개</div>`+
     S.regs.map((g,gi)=>`<div class="ra-simc"><div class="ra-simc-h"><b>${_e(g.title)}</b><span class="ra-sub">${_e(g.category)}${RA_VR}${_e(g.revision)}${RA_VR}${g.n_articles}개 조</span>`+
-      `<a class="ra-link" href="${raRegUrl(g.slug)}" target="_blank" rel="noopener">원문</a><button class="ra-link" onclick="this.closest('.ra-simc').classList.toggle('toc')">조문 체계</button></div>`+
+      `<a class="ra-link" href="${raRegUrl(g.slug)}" target="_blank" rel="noopener">원문</a><button class="ra-link" onclick="this.closest('.ra-simc').classList.toggle('toc')">조문 체계</button>`+
+      (g.articles.length>1?raAllNone(`raRefAll(${gi},true)`,`raRefAll(${gi},false)`,g.articles.filter(a=>E.refs[g.slug+'|'+a.no]).length):'')+`</div>`+
       `<div class="ra-toc">${g.toc.map(t=>_e(t)).join(''+RA_VR+'')}</div>`+
       g.articles.map(a=>{ const k=g.slug+'|'+a.no; return `<label class="ra-sima"><input type="checkbox" ${E.refs[k]?'checked':''} onchange="raRefToggle('${_a(g.slug)}','${_a(a.no)}',${gi},this.checked)">`+
         `<span><b>${_e(raLbl(a.no))}(${_e(a.title)})</b>${a.src.includes('sem')?' <span class="ra-chip sem">의미</span>':''}<br><em>${_e(a.body.slice(0,260))}${a.body.length>260?'…':''}</em></span></label>`; }).join('')+`</div>`).join('');
+}
+function raRefAll(gi, on){
+  const E=RA.enact, g=E.sim&&E.sim.regs[gi]; if(!g) return;
+  g.articles.forEach(a=>{ const k=g.slug+'|'+a.no; if(on) E.refs[k]={reg:g.title, no:a.no, title:a.title, body:a.body}; else delete E.refs[k]; });
+  _raSave(); raRerender('enact');
 }
 function raRefToggle(slug, no, gi, on){
   const E=RA.enact, g=E.sim.regs[gi], a=g.articles.find(x=>x.no===no); const k=slug+'|'+no;
@@ -1005,6 +1019,10 @@ function raArtsList(){ const t=document.createElement('div'); t.innerHTML=raArts
 function raSelCount(){ const A=RA.amend; return Object.keys(A.sel||{}).length+Object.keys(A.selx||{}).length; }
 function raSel(no,on){ if(on) RA.amend.sel[no]=true; else delete RA.amend.sel[no]; _raSave(); const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount(); const nb=document.getElementById('raSelNoneBtn'); if(nb) nb.disabled=!raSelCount(); raWizSync('amend'); }
 function raSelX(id,on){ const A=RA.amend; A.selx=A.selx||{}; if(on) A.selx[id]=true; else delete A.selx[id]; _raSave(); const c=document.getElementById('raSelCnt'); if(c) c.textContent=raSelCount(); const nb=document.getElementById('raSelNoneBtn'); if(nb) nb.disabled=!raSelCount(); raWizSync('amend'); }
+// 여러 개를 고르는 목록에 붙이는 단추 한 쌍. filtered면 “찾은 것 모두 선택”, 고른 것이 없으면 “선택 취소”는 흐리게
+function raAllNone(onAll, onNone, n, filtered, id){
+  return `<span class="ra-selall"${id?` id="${id}"`:''}><button class="svc-btn sm" onclick="${onAll}">${raIc('check')}${filtered?'찾은 것 모두 선택':'전부 선택'}</button>`+
+    `<button class="svc-btn sm ghost" onclick="${onNone}" ${n?'':'disabled'}>선택 취소</button></span>`; }
 // 전부 선택(검색 중이면 찾은 것만, 삭제된 조는 빼고) · 선택 취소(조문·별표 모두)
 function raSelAll(on){
   const A=RA.amend; if(!_raArts) return; A.selx=A.selx||{};
@@ -2097,6 +2115,7 @@ function raDocsBuild(mode){
   return B;
 }
 function raPicks(mode){ const S=RA[mode]; if(!Array.isArray(S.picks)||!S.picksV2){ S.picks=raSubmitDefaults(mode); S.picksV2=1; } return S.picks; }
+function raPickAll(mode,on){ const S=RA[mode]; S.picks=on?RA_DOCS[mode].map(x=>x[0]).filter(k=>!(k==='review'&&!S.review)):[]; _raSave(); raRerender(mode); }
 function raPickSet(mode,k,on){ const P=raPicks(mode).filter(x=>x!==k); if(on) P.push(k); RA[mode].picks=RA_DOCS[mode].map(x=>x[0]).filter(x=>P.includes(x)); _raSave(); }
 function raDocsView(mode){
   const S=RA[mode]; const tab=S.docTab||'law';
@@ -2107,7 +2126,8 @@ function raDocsView(mode){
   else if(B.blk[tab]) body=raBlocksHtml(B.blk[tab])+raSubEditor(mode,tab);
   else body=`<pre class="ra-doc">${_e(B[tab])}</pre>`;
   const picks=raPicks(mode);
-  const all=`<span class="ra-picks" title="저장할 문서">`+RA_DOCS[mode].map(([k,l])=>{ const off=k==='review'&&!S.review;
+  const pickable=RA_DOCS[mode].map(x=>x[0]).filter(k=>!(k==='review'&&!S.review));
+  const all=raAllNone(`raPickAll('${mode}',true)`,`raPickAll('${mode}',false)`,picks.filter(k=>pickable.includes(k)).length)+`<span class="ra-picks" title="저장할 문서">`+RA_DOCS[mode].map(([k,l])=>{ const off=k==='review'&&!S.review;
     return `<label class="ra-pk-c${off?' dis':''}"${off?' title="심의 사전검토를 실행하면 넣을 수 있습니다"':''}><input type="checkbox" class="ra-docpick" value="${k}" ${picks.includes(k)&&!off?'checked':''} ${off?'disabled':''} onchange="raPickSet('${mode}','${k}',this.checked)"><span>${raIc(RA_DOC_IC[k]||'doc')}${l}</span></label>`; }).join('')+`</span>`;
   return raSubmitPanel(mode,B)+`<div class="ra-dtabs">${tabs}</div><div class="ra-docbox">${body}</div>`+
     `<div id="raNota">${raNotaView(mode)}</div>`+
@@ -3056,6 +3076,11 @@ function raHealthOpen(slug, code){
 function raHealthPick(slug, i, on){ const H=RA.health; H.pick=H.pick||{}; H.pick[slug]=H.pick[slug]||{}; H.pick[slug][i]=on; _raSave(); const r=raHealthRow(slug); if(!r) return; const code=(H.open||{})[slug]||'all'; const n=raHealthPicked(r).filter(x=>code==='all'||x.code===code).length;
   document.querySelectorAll('[data-hgo]').forEach(b=>{ if(b.dataset.hgo===slug) b.lastChild.textContent=`고른 ${n}건으로 개정 작업`; });
   document.querySelectorAll('.ra-hdet input[type=checkbox]').forEach(c=>{ const m=(c.getAttribute('onchange')||'').match(/raHealthPick\('([^']*)',(\d+)/); if(m&&m[1]===slug&&+m[2]===i) c.checked=on; }); }
+function raHealthPickAll(slug, on){
+  const r=raHealthRow(slug); if(!r) return; const code=(RA.health.open||{})[slug]||'all';
+  raArr(r.issues).forEach((x,i)=>{ if(x.code!=='dupreg'&&(code==='all'||x.code===code)) raHealthPick(slug,i,on); });
+  const b=document.querySelector('.ra-hpick-all'); if(b) b.innerHTML=raAllNone(`raHealthPickAll('${_a(slug)}',true)`,`raHealthPickAll('${_a(slug)}',false)`,on?1:0);
+}
 function raHealthPicked(r){ const p=((RA.health.pick||{})[r.slug])||{}; return raArr(r.issues).filter((x,i)=>p[i]!==false&&x.code!=='dupreg'); }   // 중복 등록은 조문 개정 대상이 아니다
 function raHealthDetail(r){
   const code=(RA.health.open||{})[r.slug]; if(!code) return '';
@@ -3063,6 +3088,8 @@ function raHealthDetail(r){
   const mark=(t,term)=>{ const s=_e(t||''); return term?s.split(_e(term)).join(`<mark>${_e(term)}</mark>`):s; };
   const rows=iss.map((x,i)=>({x,i})).filter(({x})=>code==='all'||x.code===code);
   let h='';
+  const pickRows=rows.filter(({x})=>x.code!=='dupreg');
+  if(pickRows.length>1) h+=`<div class="ra-row ra-hpick-all">`+raAllNone(`raHealthPickAll('${_a(r.slug)}',true)`,`raHealthPickAll('${_a(r.slug)}',false)`,pickRows.filter(({i})=>p[i]!==false).length)+`</div>`;
   if(rows.length) h+=`<ul class="ra-hlist">`+rows.map(({x,i})=>`<li>${x.code==='dupreg'?'':`<label class="ra-hpick"><input type="checkbox" ${p[i]!==false?'checked':''} onchange="raHealthPick('${_a(r.slug)}',${i},this.checked)" aria-label="${_e(raLbl(x.no))} 문제를 개정 작업에 넣기"></label>`}<div>`+
       `<div class="ra-hl-h"><span class="ra-chip ${['ref','xref','dup','order'].includes(x.code)?'hi':'warn'}">${_e(RA_HCODE[x.code]||x.code)}</span>${x.no?`<b>${_e(raLbl(x.no))}${x.art_title?`(${_e(x.art_title)})`:''}</b>`:''}</div>`+
       `<div class="ra-hl-m">${_e(String(x.msg||'').replace(/^제\d+조(?:의\d+)?(?:의|에서|에)\s+/,'').replace(x.new?/\s*\(유사: [^)]*\)$/:/$^/,''))}</div>`+
@@ -3148,7 +3175,8 @@ async function _raBulkRun(){
   U.res=d; U.resBig=false; U.sel={}; d.regs.forEach(g=>U.sel[g.slug]=keep&&g.slug in keep?keep[g.slug]:true); U.docTab=U.docTab||'amend'; _raSave(); raRerender('bulk');
 }
 function raBulkSel(slug,on){ RA.bulk.sel[slug]=on; _raSave(); raBulkDocsRedraw(); }
-function raBulkSelAll(on){ Object.keys(RA.bulk.sel).forEach(k=>RA.bulk.sel[k]=on); _raSave(); document.querySelectorAll('.ra-detg .ra-bulk-i>input[type=checkbox]').forEach(x=>{ x.checked=on; }); raBulkDocsRedraw(); }
+function raBulkSelAll(on){ const R=RA.bulk.res; (R?R.regs.map(g=>g.slug):Object.keys(RA.bulk.sel)).forEach(k=>RA.bulk.sel[k]=on); _raSave(); document.querySelectorAll('.ra-detg .ra-bulk-i>input[type=checkbox]').forEach(x=>{ x.checked=on; });
+  const b=document.getElementById('raBulkAllNone'); if(b) b.innerHTML=raAllNone('raBulkSelAll(true)','raBulkSelAll(false)',on?1:0); raBulkDocsRedraw(); }
 function raBulkDocsRedraw(){ const b=document.querySelector('#raSecDocs .ra-sec-b'); if(b) b.innerHTML=raBulkDocsView(); else raRerender('bulk'); }
 function raBulkResView(){
   const R=RA.bulk.res; if(!R) return RA.bulk.resBig&&RA.bulk.old?`<div class="ra-empty sm">${raIc('bulk')}지난 결과는 커서 브라우저에 저장하지 않았습니다. <button class="svc-btn sm" onclick="raBulkRun()">다시 찾기</button></div>`:`<div class="ra-empty sm">${raIc('bulk')}용어를 넣고 “영향 내규 찾기”</div>`;
@@ -3158,7 +3186,7 @@ function raBulkResView(){
   return `<div class="ra-split"><div><div class="ra-swap"><span class="ra-swap-o">${_e(R.old)}</span>${raIc('arrow')}<span class="ra-swap-n">${_e(R.new)}</span></div>`+
     raStats([{v:R.reg_count,l:`개 ${RA_ORG.reg_word}`,ic:'doc',tone:'acc'},{v:R.total,l:'곳 수정',ic:'amend',tone:'acc'},{v:nsel,l:'문서에 포함',ic:'check',tone:nsel?'ok':'n'}])+`</div><div>`+
     raBars(R.regs.slice(0,8).map(g=>({l:g.reg,n:g.count})),'곳','내규별 수정 위치 수')+(R.regs.length>8?`<div class="ra-meta">외 ${R.regs.length-8}개 ${_e(RA_ORG.reg_word)}</div>`:'')+`</div></div>`+
-    `<div class="ra-meta"><button class="ra-link" onclick="raBulkSelAll(true)">모두 선택</button><button class="ra-link" onclick="raBulkSelAll(false)">모두 해제</button></div>`+
+    `<div class="ra-row" id="raBulkAllNone">${raAllNone('raBulkSelAll(true)','raBulkSelAll(false)',nsel)}</div>`+
     `<div class="ra-detg">`+R.regs.map(g=>`<div class="ra-bulk-i"><input type="checkbox" aria-label="「${_e(g.reg)}」 문서에 포함" ${sel[g.slug]?'checked':''} onchange="raBulkSel('${_a(g.slug)}',this.checked)">`+
       `<details class="ra-det" ontoggle="raBulkOpen(this,'${_a(g.slug)}')"><summary><b>「${_e(g.reg)}」</b> <span class="ra-chip">${g.count}곳</span> <a class="ra-link" href="${raRegUrl(g.slug)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">원문</a></summary><div class="ra-bulk-b"></div></details></div>`).join('')+`</div>`;
 }
@@ -3293,6 +3321,8 @@ async function raAdvExpc(d){
   _raSave(); raAdvExpcRedraw(d);
 }
 function raAdvExpcRedraw(d){ const el=document.getElementById('raAdvExpc'); if(el&&RA.advise.res===d) el.outerHTML=raAdvExpcView(d); }
+function raAdvExpcAll(on){ const d=RA.advise.res, E=d&&d.expc; if(!E) return; raArr(E.items).forEach(x=>{ x.pick=!!on; }); _raSave();
+  const b=document.getElementById('raAdvExpc'); if(b) b.outerHTML=raAdvExpcView(d); else raRerender('advise'); }
 function raAdvExpcPick(i, on){ const d=RA.advise.res, x=d&&d.expc&&raArr(d.expc.items)[i]; if(!x) return; x.pick=!!on; _raSave(); }
 function raAdvExpcView(d){
   const E=d&&d.expc; if(!E) return '<div id="raAdvExpc"></div>';
@@ -3300,7 +3330,7 @@ function raAdvExpcView(d){
   let body;
   if(E.loading) body=`<div class="ra-hint">${raIc('search')}법제처 법령해석례를 찾는 중...</div>`;
   else if(!raArr(E.items).length) body=`<div class="ra-hint">${E.error?_e(E.error):'질의와 겹치는 법령해석례를 찾지 못했습니다.'} <button class="ra-link" onclick="raAdvExpc(RA.advise.res)">다시 찾기</button></div>`;
-  else body=`<ul class="ra-expc">${E.items.map((x,i)=>`<li><div><a class="ra-link" href="${_e(x.url)}" target="_blank" rel="noopener">${_e(x.title)}</a></div>`+
+  else body=(E.items.length>1?`<div class="ra-row" id="raExpcAll">${raAllNone('raAdvExpcAll(true)','raAdvExpcAll(false)',E.items.filter(x=>x.pick).length)}</div>`:'')+`<ul class="ra-expc">${E.items.map((x,i)=>`<li><div><a class="ra-link" href="${_e(x.url)}" target="_blank" rel="noopener">${_e(x.title)}</a></div>`+
       `<div class="ra-sub">${_e(x.by||'법제처')} ${_e(x.date||'')} 회신${x.org?`${RA_VR}질의 ${_e(x.org)}`:''}${x.no?`${RA_VR}안건번호 ${_e(x.no)}`:''}${raArr(x.match).length?`${RA_VR}겹친 낱말 ${x.match.map(w=>`<span class="ra-chip">${_e(w)}</span>`).join('')}`:x.body?''+RA_VR+'본문에 질의 낱말이 모두 나옴':''}</div>`+
       (x.question||x.answer?`<details class="ra-det"><summary>질의요지·회답 보기</summary>${x.question?`<div class="ra-adv-b"><b>질의요지</b> ${_e(x.question)}</div>`:''}${x.answer?`<div class="ra-adv-b"><b>회답</b> ${_e(x.answer)}</div>`:''}</details>`:'')+
       `<label class="ra-chk"><input type="checkbox" ${x.pick?'checked':''} onchange="raAdvExpcPick(${i},this.checked)"> 회신서에 참고로 넣기</label></li>`).join('')}</ul>`+
@@ -4119,6 +4149,7 @@ function raValView(){
   const mine=g.val!=null&&g.unit===B.unit?`<span class="ra-sub">우리 기관 현행 ${raValFmt(g.old,B.unit)} → 개정안 ${raValFmt(g.val,B.unit)}</span>`:'';
   h+=raStats([{v:B.rows.length,l:'조회한 기관 규정'},{v:found.length,l:`“${B.item}” 수치를 찾은 곳`,tone:found.length?'acc':'n'},
     {v:st?raValFmt(st.med,B.unit):'—',l:'중앙값(포함한 곳)'},{v:st?`${raValFmt(st.min,B.unit)}~${raValFmt(st.max,B.unit)}`:'—',l:'범위'}])+(mine?`<div class="ra-row">${mine}</div>`:'');
+  if(found.length>1) h+=`<div class="ra-row">${raAllNone('raValUseAll(true)','raValUseAll(false)',used.length)}</div>`;
   if(found.length) h+=`<div class="ra-tbl-w"><table class="ra-tbl ra-valcmp"><thead><tr><th>포함</th><th>기관</th><th>규정·조문</th><th>수치</th><th>문장</th></tr></thead><tbody>`+
     B.rows.map((r,i)=>r.matches.length?`<tr><td><input type="checkbox" aria-label="${_e(r.org)} 포함" ${r.use?'checked':''} onchange="raValUse(${i},this.checked)"></td><td>${_e(r.org)}</td>`+
       `<td>${r.url?`<a class="ra-link" href="${_e(r.url)}" target="_blank" rel="noopener">${_e(r.title)}</a>`:_e(r.title)}<div class="ra-sub">${r.matches[0].no==='별표'?'별표':_e(raLbl(r.matches[0].no||''))}${r.matches[0].title?`(${_e(r.matches[0].title)})`:''}</div></td>`+
@@ -4128,6 +4159,7 @@ function raValView(){
   if(st) h+=`<div class="ra-row"><button class="svc-btn" onclick="raValRef()">${raIc('doc')}참고 자료에 넣기</button><span class="ra-hint">고른 기관 ${st.n}곳의 수치를 개정 이유서 근거로 씁니다.</span></div>`;
   return h;
 }
+function raValUseAll(on){ const B=raVal(); raArr(B.rows).forEach(r=>{ if(r.matches&&r.matches.length) r.use=!!on; }); _raSave(); const box=document.getElementById('raValBox'); if(box) box.innerHTML=raValView(); }
 function raValUse(i,on){ const B=raVal(); if(B.rows&&B.rows[i]){ B.rows[i].use=!!on; _raSave(); const box=document.getElementById('raValBox'); if(box) box.innerHTML=raValView(); } }
 function raValText(B){ if(!B||!B.rows) return ''; const used=B.rows.filter(r=>r.use&&r.matches.length), st=raValStats(used.map(r=>r.matches[0].first)); if(!st) return '';
   return `유관 기관 사규(알리오, ${B.at} 조회)의 ${B.item}: ${st.n}곳 중앙값 ${raValFmt(st.med,B.unit)}(${raValFmt(st.min,B.unit)}~${raValFmt(st.max,B.unit)}). `+
@@ -4170,11 +4202,18 @@ function raAlioView(mode){
   let pick='';
   if(S.scope==='pick'&&D){ const q=(S.pq||'').replace(/\s+/g,'');
     const list=D.orgs.filter(o=>o.id!==D.self&&(!q||(o.name+o.dept).replace(/\s+/g,'').includes(q))).slice(0,60);
-    pick=`<div class="ra-pick"><div class="ra-pick-h">기관 고르기 <b>${S.picked.length}</b>곳 <input class="ra-in sm" placeholder="기관명·주무부처" value="${_e(S.pq||'')}" oninput="raAl('${mode}').pq=this.value;raAlioRedraw('${mode}')"></div><div class="ra-pick-l">`+
+    pick=`<div class="ra-pick"><div class="ra-pick-h">기관 고르기 <b>${S.picked.length}</b>곳 <input class="ra-in sm" placeholder="기관명·주무부처" value="${_e(S.pq||'')}" oninput="raAl('${mode}').pq=this.value;raAlioRedraw('${mode}')">`+
+      raAllNone(`raAlioPickAll('${mode}',true)`,`raAlioPickAll('${mode}',false)`,S.picked.length,!!q)+`</div><div class="ra-pick-l">`+
       list.map(o=>`<label class="ra-pick-i"><input type="checkbox" ${S.picked.includes(o.id)?'checked':''} onchange="raAlioPick('${mode}','${_a(o.id)}',this.checked)"><span><b>${_e(o.name)}</b> <em>${_e(o.dept)}${RA_VR}${_e(o.type)}</em></span></label>`).join('')+`</div></div>`; }
   return `<div class="ra-al" id="raAlio">`+head+pick+`<div id="raAlioRes">${raAlioResView(mode)}</div></div>`;
 }
 function raAlioRedraw(mode){ const b=document.getElementById('raAlio'); if(b) b.outerHTML=raAlioView(mode); }
+function raAlioPickAll(mode,on){
+  const S=raAl(mode), D=_raAlioOrgs; if(!D) return;
+  if(!on) S.picked=[];
+  else { const q=(S.pq||'').replace(/\s+/g,''); D.orgs.filter(o=>o.id!==D.self&&(!q||(o.name+o.dept).replace(/\s+/g,'').includes(q))).slice(0,60).forEach(o=>{ if(!S.picked.includes(o.id)) S.picked.push(o.id); }); }
+  _raSave(); raAlioRedraw(mode);
+}
 function raAlioPick(mode,id,on){ const S=raAl(mode); S.picked=S.picked.filter(x=>x!==id); if(on) S.picked.push(id); _raSave(); }
 function raAlioStop(mode){ _raAlioRun++; raAl(mode).busy=false; _raSave(); raAlioRedraw(mode); }
 async function raAlioSearch(mode){
@@ -4238,9 +4277,16 @@ function raAlioRuleView(mode,k,h,O){
   const arts=(d.articles.some(rel)?d.articles.filter(rel):d.articles).slice(0,8);
   return `<div class="ra-meta">${_e(d.file.fileName)}${RA_VR}${d.count}개 조${d.versions>1?`${RA_VR}제·개정 이력 ${d.versions}건 중 현행본`:''} <a class="ra-link" href="${_e(d.url)}" target="_blank" rel="noopener">알리오 원문</a></div>`+
     (d.warning?`<div class="ra-note ra-note-i">${raIc('info')}<span>${_e(d.warning)}</span></div>`+(d.excerpt?`<pre class="ra-doc" style="max-height:220px">${_e(d.excerpt)}</pre>`:''):'')+
+    (arts.length>1?`<div class="ra-row">${raAllNone(`raAlioRefAll('${mode}','${_a(k)}',true)`,`raAlioRefAll('${mode}','${_a(k)}',false)`,arts.filter(a=>sel[`alio|${k}|${a.no}`]).length)}</div>`:'')+
     arts.map(a=>{ const key=`alio|${k}|${a.no}`;
       return `<label class="ra-sima"><input type="checkbox" ${sel[key]?'checked':''} onchange="raAlioRef('${mode}','${_a(key)}',this.checked)"><span><b>${_e(raLbl(a.no))}(${_e(a.title)})</b>${rel(a)?' <span class="ra-chip sem">관련</span>':''}<br><em>${_e(a.body.slice(0,320))}${a.body.length>320?'…':''}</em></span></label>`; }).join('')+
     (d.toc.length?`<details class="ra-det"><summary>조문 체계 ${d.toc.length}개 조</summary><div class="ra-toc" style="display:block">${d.toc.map(_e).join(''+RA_VR+'')}</div></details>`:'');
+}
+function raAlioRefAll(mode, k, on){
+  const S=raAl(mode), O=S.open[k], d=O&&O.data; if(!d) return;
+  const rel=x=>x.rel!==undefined?x.rel:x.score>0;
+  (d.articles.some(rel)?d.articles.filter(rel):d.articles).slice(0,8).forEach(a=>raAlioRef(mode,`alio|${k}|${a.no}`,on));
+  raAlioResRedraw(mode);
 }
 function raAlioRef(mode, key, on){
   const S=raAl(mode), sel=raAlioSel(mode); const [,org,idx,no]=key.split('|');

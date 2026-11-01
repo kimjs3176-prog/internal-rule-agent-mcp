@@ -936,3 +936,34 @@ test('대상 고르기: 전부 선택(검색 중이면 찾은 것만, 삭제된 
   assert.equal(Object.keys(A.sel).join(','), '2'); assert.equal(Object.keys(A.selx).join(','), '별표 1', '찾은 것만');
   assert.ok(c.raArtsView().includes('찾은 것 모두 선택') && c.raArtsView().includes('선택 취소'));
 });
+
+test('여러 개 고르는 목록: 전부 선택·선택 취소', () => {
+  const c = load();
+  vm.runInContext(`raRerender=()=>{}; raRedraw=()=>{};`, c);
+  // 문서 받기: 사전검토 전에는 사전검토 의견서를 빼고 전부
+  vm.runInContext(`RA.amend.review=null; RA.amend.picks=['law'];`, c);
+  c.raPickAll('amend', true);
+  let P = c.__RA().amend.picks; assert.ok(P.length > 3 && !P.includes('review'));
+  c.raPickAll('amend', false); assert.equal(c.__RA().amend.picks.length, 0);
+  // 일괄 정비: 결과의 내규 모두
+  vm.runInContext(`raBulkDocsRedraw=()=>{}; RA.bulk.res={regs:[{slug:'a'},{slug:'b'}]}; RA.bulk.sel={a:true};`, c);
+  c.raBulkSelAll(true); assert.equal(Object.entries(c.__RA().bulk.sel).filter(([, v]) => v).map(([k]) => k).sort().join(','), ['a', 'b'].join(','));
+  c.raBulkSelAll(false); assert.equal(Object.values(c.__RA().bulk.sel).filter(Boolean).length, 0);
+  // 제정: 우리 기관 비슷한 규정의 조문(내규별)
+  vm.runInContext(`RA.enact.refs={}; RA.enact.sim={regs:[{slug:'s',title:'여비규정',articles:[{no:'1',title:'목적',body:'가'},{no:'2',title:'정의',body:'나'}]}]};`, c);
+  c.raRefAll(0, true); assert.equal(Object.keys(c.__RA().enact.refs).length, 2);
+  c.raRefAll(0, false); assert.equal(Object.keys(c.__RA().enact.refs).length, 0);
+  // 제정: 상위법 위임 조항(검색 중이면 찾은 것만, 다른 법령 고른 것은 그대로)
+  vm.runInContext(`raDirty=()=>{}; RA.enact.lawName='농촌진흥법'; RA.enact.lawQ='위임'; RA.enact.dels=[{law:'다른법',art:'제1조'}];
+    RA.enact.lawArts=[{label:'제1조',title:'목적',text:'목적'},{label:'제2조',title:'위임',text:'위임한다'},{label:'제3조',title:'',text:'위임된 사항'}];`, c);
+  c.raDelAll(true); assert.equal(c.__RA().enact.dels.map(d => d.law + d.art).join(','), ['다른법제1조', '농촌진흥법제2조', '농촌진흥법제3조'].join(','));
+  c.raDelAll(false); assert.equal(c.__RA().enact.dels.map(d => d.law).join(','), ['다른법'].join(','));
+  // 다른 기관 수치 비교: 수치를 찾은 기관만
+  vm.runInContext(`RA.amend.valcmp={item:'일비',unit:'원',rows:[{org:'가',matches:[{first:1}],use:false},{org:'나',matches:[],use:false}]};`, c);
+  c.raValUseAll(true); assert.equal(c.__RA().amend.valcmp.rows.map(r => r.use).join(','), [true, false].join(','));
+  c.raValUseAll(false); assert.equal(c.__RA().amend.valcmp.rows.map(r => r.use).join(','), [false, false].join(','));
+  // 단추 모양: 찾는 중이면 “찾은 것 모두 선택”, 고른 것이 없으면 선택 취소 흐림
+  assert.ok(c.raAllNone('a()', 'b()', 0, true).includes('찾은 것 모두 선택'));
+  assert.ok(/선택 취소/.test(c.raAllNone('a()', 'b()', 0)) && c.raAllNone('a()', 'b()', 0).includes('disabled'));
+  assert.ok(!c.raAllNone('a()', 'b()', 2).includes('disabled'));
+});
