@@ -1012,3 +1012,34 @@ test('고치기 색 표시: 지운 말·넣은 말과 사람이 고친 수정안
   assert.equal(c.raHumanEdited({ type: 'modify', no: '1', title: 't', body: 'AI 본문', ai: 'AI 본문', aiTitle: 't' }), false);
   assert.equal(c.raHumanEdited({ type: 'modify', no: '1', title: 't', body: 'AI 본문 고침', ai: 'AI 본문', aiTitle: 't' }), true);
 });
+
+test('AI 없이 지시문 반영: 낱말 바꾸기·조사 맞춤·대상 자동 찾기·조 삭제', () => {
+  const c = load();
+  assert.equal(JSON.stringify(c.raRepReq('여비를 출장비로 바꿔')), '{"a":"여비","b":"출장비"}');
+  assert.equal(JSON.stringify(c.raRepReq('“기획운영본부”를 “경영기획본부”로 변경')), '{"a":"기획운영본부","b":"경영기획본부"}');
+  assert.equal(c.raRepReq('일비를 3만원으로 올려줘'), null, '수치는 낱말 바꾸기가 아님');
+  // 조사 맞춤 · 합성어 안쪽은 그대로
+  const r = c.raRepJosa('여비는 지급한다. 국내여비와 여비를 정산하고 여비로 쓴다.', '여비', '출장경비');
+  assert.equal(r.s, '출장경비는 지급한다. 국내여비와 출장경비를 정산하고 출장경비로 쓴다.'); assert.equal(r.n, 3);
+  assert.equal(c.raRepJosa('본부는 여비로', '여비', '출장금').s, '본부는 출장금으로');
+  // 고른 조문이 없어도 내규에서 찾아 담고 바꾼다
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[{no:'1',title:'목적',body:'이 규정은 여비 지급을 정한다.'},{no:'2',title:'정의',body:'용어 뜻'},{no:'7',title:'가족',body:'가족 여비는 지급한다.'}],appendix:[]};
+    RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.purpose='';`, c);
+  const A = vm.runInContext('RA.amend', c);
+  const v = c.raRuleApply(A, '여비를 출장비로 바꿔');
+  assert.equal(v.n, 2); assert.equal(A.changes.map(x => x.no).join(','), '1,7');
+  assert.ok(A.changes[0].body.includes('출장비 지급') && A.valNote.includes('2곳') && A.purpose.includes('“출장비”로'));
+  // 조 삭제
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  assert.equal(c.raRuleApply(A, '제2조는 삭제해 줘').n, 1); assert.equal(A.changes[0].type, 'delete');
+});
+
+test('제정 초안 색 표시: 고친 곳·채울 곳(○○)', () => {
+  const c = load();
+  const D = { text: '제1조(목적) 이 지침은 비행 계획을 정한다.\n1. ○○\n2. △△', orig: '제1조(목적) 이 지침은 ○○을 정한다.\n1. ○○\n2. △△' };
+  const h = c.raEnHl(D);
+  assert.ok(h.includes('<mark class="ra-ph">○○</mark>') && h.includes('<mark class="ra-ph">△△</mark>') && /<u class="ra-i">[^<]*비행/.test(h), h);
+  assert.equal(c.raPhCount(D.text), 2);
+  assert.ok(c.raPhBar(D).includes('<b>2</b>곳') && c.raPhBar(D).includes('다음 채울 곳'));
+  assert.ok(c.raPhBar({ text: '끝', orig: '끝' }).includes('채울 곳 없음'));
+});

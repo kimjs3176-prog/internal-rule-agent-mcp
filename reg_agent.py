@@ -1253,7 +1253,7 @@ def template_enact(b: dict) -> dict:
         {"no": "2", "title": "정의",
          "body": f"이 {kind}에서 사용하는 용어의 뜻은 다음과 같다.\n1. “○○”이란 ○○을 말한다.\n2. “△△”이란 △△을 말한다."},
         {"no": "3", "title": "적용범위",
-         "body": f"○○에 관하여 다른 내규에 특별한 규정이 있는 경우를 제외하고는 이 {kind}에서 정하는 바에 따른다."},
+         "body": f"{purpose if purpose != '○○' else '○○'}에 관하여 다른 내규에 특별한 규정이 있는 경우를 제외하고는 이 {kind}에서 정하는 바에 따른다."},
     ]
     n = 4
     for line in [x.strip(" -·•\t") for x in (b.get("contents") or "").split("\n") if x.strip()]:
