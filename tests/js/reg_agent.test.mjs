@@ -1083,3 +1083,21 @@ test('개정문 문형: “같은 항”은 앞 문장의 마지막 항, 통째 
   const t = S({ no: '6', title: '장소', body: '제4조의 규정에 의하여 의뢰받은 시험은 센터에서 한다.' }, { no: '6', title: '장소', body: '제4조의 규정에 의하여 의뢰받은 시험은 본부에서 한다. 다만, 따로 정한다.' });
   assert.ok(!/^제6조를 다음과 같이 한다\. \| 제4조/.test(t), t);
 });
+
+test('조 삭제: 같은 내규에서 그 조를 인용하는 조를 함께 담고, 다른 법령의 같은 번호는 빼기', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[
+      {no:'9',title:'가',body:'제20조에 따른 여비를 지급한다.'},
+      {no:'10',title:'나',body:'「근로기준법」 제20조에 따른다. 법 제20조도 같다.'},
+      {no:'11',title:'다',body:'제20조의2에 따른다.'},
+      {no:'20',title:'가족여비',body:'가족에게 지급한다.'},
+      {no:'24',title:'사망',body:'① 가족(제20조제1항의 규정에 의한 가족)에게 지급한다.'}],appendix:[]};
+    RA.amend.title='여비규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[];`, c);
+  assert.equal(c.raCiting('20').map(x => x.no).join(','), '9,24');
+  const A = vm.runInContext('RA.amend', c);
+  const r = c.raRuleApply(A, '제20조 삭제');
+  assert.equal(r.n, 1); assert.equal(r.cites.join(','), '9,24');
+  assert.equal(A.changes.map(x => x.no + ':' + x.type).join(','), '9:modify,20:delete,24:modify');
+  assert.ok(A.valNote.includes('제9조, 제24조') && A.changes[2].cite === '20');
+  assert.ok(c.raChgOldHtml(A.changes[2], c.raOld('24')).includes('<mark class="ra-cite">제20조제1항</mark>'));
+});

@@ -1245,3 +1245,5 @@ a.svc-btn[target="_blank"][href^="http"]::after{position:static;inset:auto;}
 /* 단계 설명은 읽기 좋은 폭으로 */
 .ra-ag-d{max-width:92ch;line-height:1.7;}
 .ra-subp>summary .ra-chip{margin-left:4px;}
+/* 삭제한 조를 가리키는 인용 — 고칠 곳 */
+mark.ra-cite{background:var(--color-warn-wash);color:var(--color-warn);font-weight:600;border-bottom:2px solid var(--color-warn);padding:0 1px;}
