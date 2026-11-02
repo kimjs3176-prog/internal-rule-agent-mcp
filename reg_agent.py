@@ -1222,6 +1222,18 @@ def _outline_block(outline) -> str:
     return "\n".join(lines)
 
 
+def _purpose_of(title: str) -> str:
+    """제정 목적을 비웠을 때 내규명에서 무엇을 정하는지 뽑는다 — 종류 이름(규정·지침 등)만 떼어 낸다.
+    “업무용 드론 운영지침” → “업무용 드론 운영”, “개인정보 보호규정” → “개인정보 보호”. 남는 말이 없거나 자리표시면 “○○”."""
+    t = re.sub(r"\s*\(.*?\)\s*$", "", (title or "").strip())
+    for suf in ("시행세칙", "시행규칙", *sorted(_REG_SUFFIX, key=len, reverse=True)):
+        if t.endswith(suf):
+            t = t[: -len(suf)].strip()
+            break
+    t = re.sub(r"\s*(?:에\s*관한|운영에\s*관한)$", "", t).strip()
+    return t if len(t) >= 2 and not re.search(r"[○△□]", t) else "○○"
+
+
 def template_enact(b: dict) -> dict:
     """AI 없이 쓰는 표준 조문 골격."""
     title = (b.get("title") or "○○ 운영규칙").strip()
@@ -1229,7 +1241,7 @@ def template_enact(b: dict) -> dict:
     if kind == "시행세칙":
         kind = "세칙"                                         # “이 세칙은 …” 이 표준 자기 지칭
     eun = _josa(kind)
-    purpose = (b.get("purpose") or "○○").strip().rstrip(".")
+    purpose = (b.get("purpose") or "").strip().rstrip(".") or _purpose_of(title)   # 비우면 내규명에서(“업무용 드론 운영지침” → 업무용 드론 운영)
     # “안전관리에 관한 사항을 정함” → “안전관리” (뒤에 “에 필요한 사항”을 붙이므로 겹치지 않게)
     purpose = re.sub(r"\s*(?:에\s*관한|에\s*필요한)\s*사항(?:\s*을\s*정함|\s*을\s*정한다)?$|\s*을\s*정함$", "", purpose) or "○○"
     dels = b.get("delegations") or []
