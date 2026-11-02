@@ -52,5 +52,19 @@ def test_template_scope_uses_purpose(ra):
     d = ra.template_enact({"title": "업무용 드론 운영지침", "purpose": "업무용 드론의 안전한 운영"})
     scope = next(a for a in d["articles"] if a["title"] == "적용범위")
     assert scope["body"].startswith("업무용 드론의 안전한 운영에 관하여") and "○○" not in scope["body"]
-    d2 = ra.template_enact({"title": "업무용 드론 운영지침"})
+    d2 = ra.template_enact({"title": "○○ 운영규칙"})                      # 내규명에서도 뽑을 수 없으면 자리표시
     assert next(a for a in d2["articles"] if a["title"] == "적용범위")["body"].startswith("○○에 관하여")
+
+
+def test_template_purpose_from_title(ra):
+    """제정 목적을 비우면 내규명에서 뽑아 목적·적용범위·세부사항·제정 이유의 ○○을 채운다(수동 입력 줄이기)"""
+    assert ra._purpose_of("업무용 드론 운영지침") == "업무용 드론 운영"
+    assert ra._purpose_of("개인정보 보호규정") == "개인정보 보호"
+    assert ra._purpose_of("보안업무 시행세칙") == "보안업무"
+    assert ra._purpose_of("기록물 관리에 관한 규정") == "기록물 관리"
+    assert ra._purpose_of("규정") == "○○" and ra._purpose_of("○○ 운영규칙") == "○○"
+    d = ra.template_enact({"title": "업무용 드론 운영지침"})
+    txt = "\n".join(a["body"] for a in d["articles"] if a["title"] != "정의")
+    assert "○○" not in txt and "업무용 드론 운영에 필요한 사항" in txt
+    assert d["reason"]["purpose"].startswith("업무용 드론 운영에 필요한")
+    assert ra.template_enact({"title": "업무용 드론 운영지침", "purpose": "드론 안전"})["articles"][0]["body"].count("드론 안전") == 1   # 적은 목적이 우선
