@@ -1607,10 +1607,12 @@ function raMvApply(arts, m, retarget){
 }
 function raAmendFullText(){
   if(!_raArts) return null; const A=RA.amend;
-  const map=new Map(_raArts.articles.map(a=>[a.no,{...a}]));
-  A.changes.forEach(c=>{ if(c.type==='delete') map.set(c.no,{no:c.no,title:'',body:'',deleted:true,chapter:(map.get(c.no)||{}).chapter||''});
-    else map.set(c.no,{no:c.no,title:c.title,body:c.body,chapter:(map.get(c.no)||{}).chapter||''}); });
-  const arts=raMvApply([...map.values()].sort((x,y)=>raCmp(x.no,y.no)));   // 조 이동·인용 정정까지 반영한 최종 모습
+  // 번호가 겹치는 조(서식 속 협약서 조문 등)도 빠뜨리지 않는다 — 수정안은 그 번호의 첫 조에, 정렬은 같은 번호끼리 원래 순서 유지
+  const list=_raArts.articles.map(a=>({...a}));
+  A.changes.forEach(c=>{ const i=list.findIndex(a=>a.no===c.no), ch=i>=0?(list[i].chapter||''):'';
+    const v=c.type==='delete'?{no:c.no,title:'',body:'',deleted:true,chapter:ch}:{no:c.no,title:c.title,body:c.body,chapter:ch};
+    if(i>=0) list[i]=v; else list.push(v); });
+  const arts=raMvApply(list.sort((x,y)=>raCmp(x.no,y.no)));   // 조 이동·인용 정정까지 반영한 최종 모습
   const appx=raAppxAll().map(raXText).join('\n');            // 별표·서식도 붙여 점검(본문의 [별표 N] 인용 ↔ 별표 존재)
   return {text:arts.map(raArtText).join('\n')+(appx?'\n'+appx:''), addenda:A.addenda||'시행한다', arts};
 }
@@ -2112,7 +2114,9 @@ function raRoundTrip(){
   const exp=raAmendFullText(), grp=xs=>{ const m=new Map(); xs.forEach(a=>{ const k=raNormNo(a.no); if(!m.has(k)) m.set(k,[]); m.get(k).push(a); }); return m; };
   const want=grp(exp?exp.arts:[]), got=grp(res.arts);                 // 조 번호가 겹치는 내규(서식 속 협약서 조문 등)는 같은 번호 안의 순서로 짝짓는다
   const diffs=[]; const nos=new Set([...want.keys(),...got.keys()]);
-  nos.forEach(no=>{ const ws=want.get(no)||[], gs=got.get(no)||[]; for(let k=0;k<Math.max(ws.length,gs.length);k++){ const w=ws[k], g=gs[k]; if(raRtNorm(w)!==raRtNorm(g)) diffs.push({no, exp:w?raArtText(w):'(없음)', got:g?raArtText(g):'(없음)'}); } });
+  nos.forEach(no=>{ const ws=(want.get(no)||[]).slice(), gs=(got.get(no)||[]).slice();
+    if(ws.length>1||gs.length>1){ for(let k=ws.length-1;k>=0;k--){ const j=gs.findIndex(g=>raRtNorm(g)===raRtNorm(ws[k])); if(j>=0){ ws.splice(k,1); gs.splice(j,1); } } }   // 번호가 겹치면 순서가 아니라 내용으로 짝짓는다
+    for(let k=0;k<Math.max(ws.length,gs.length);k++){ const w=ws[k], g=gs[k]; if(raRtNorm(w)!==raRtNorm(g)) diffs.push({no, exp:w?raArtText(w):'(없음)', got:g?raArtText(g):'(없음)'}); } });
   const wx=raAppxAll(), nx=s=>String(s||'').replace(/\s+/g,' ').trim();
   // 같은 이름의 별표가 둘 이상 실린 내규(옛 별표·부칙 속 별표)가 있어 이름이 아니라 같은 이름 안의 순서로 짝짓는다
   const ax={}; res.appx.forEach(x=>{ (ax[x.id]=ax[x.id]||[]).push(x); }); const used={};

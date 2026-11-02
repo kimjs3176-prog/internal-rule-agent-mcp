@@ -1101,3 +1101,17 @@ test('조 삭제: 같은 내규에서 그 조를 인용하는 조를 함께 담�
   assert.ok(A.valNote.includes('제9조, 제24조') && A.changes[2].cite === '20');
   assert.ok(c.raChgOldHtml(A.changes[2], c.raOld('24')).includes('<mark class="ra-cite">제20조제1항</mark>'));
 });
+
+test('조 번호가 겹치는 내규: 전체 본문에서 빠뜨리지 않고, 왕복 검증이 거짓 불일치를 내지 않음', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'m',title:'매뉴얼',articles:[
+      {no:'4',title:'운영',body:'운영기관은 사업을 관리한다.'},
+      {no:'12',title:'계약의 효력',body:'본 협약은 서명한 날부터 효력이 있다.'},
+      {no:'12',title:'관계법령의 준수',body:'운영기관은 법령을 지킨다.'}],appendix:[]};
+    RA.amend.title='매뉴얼'; RA.amend.slug='m'; RA.amend.lawStyle='fine'; RA.amend.fullRev=false; RA.amend.sel={}; RA.amend.selx={}; RA.amend.appx=[];
+    RA.amend.changes=[{type:'modify',no:'4',title:'운영',body:'운영기관은 사업을 총괄한다.'}];`, c);
+  const t = c.raAmendFullText();
+  assert.equal(t.arts.filter(a => a.no === '12').length, 2, '같은 번호의 두 조가 모두 남음');
+  const rt = c.raRoundTrip();
+  assert.equal(rt.diffs.length, 0, JSON.stringify(rt.diffs).slice(0, 200));
+});
