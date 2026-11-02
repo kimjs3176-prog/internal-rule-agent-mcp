@@ -68,3 +68,10 @@ def test_template_purpose_from_title(ra):
     assert "○○" not in txt and "업무용 드론 운영에 필요한 사항" in txt
     assert d["reason"]["purpose"].startswith("업무용 드론 운영에 필요한")
     assert ra.template_enact({"title": "업무용 드론 운영지침", "purpose": "드론 안전"})["articles"][0]["body"].count("드론 안전") == 1   # 적은 목적이 우선
+
+
+def test_bulk_sentence_same_article_no_double_space(ra):
+    """앞 문장과 같은 조의 본문 전체를 고칠 때 “같은 조  중”처럼 빈칸이 두 번 들어가지 않는다"""
+    s = ra._bulk_sentence([("제7조제2항", ("기획운영본부", "경영지원실")), ("제13조의 제목", ("기획운영본부", "경영지원실")),
+                           ("제13조", ("기획운영본부는", "경영지원실은"))], "기획운영본부", "경영지원실")
+    assert "  " not in s and "같은 조 중 “기획운영본부는”을 “경영지원실은”으로 한다." in s, s

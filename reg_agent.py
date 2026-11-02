@@ -2326,7 +2326,7 @@ def _bulk_sentence(pairs: list, old: str, new: str) -> str:
         where = _join_locs(locs)
         art = _split_loc(locs[0])[0]
         if last and art == last:                   # 앞 문장과 같은 조에서 이어지면 “같은 조”
-            where = re.sub(r"^" + re.escape(art) + r"(?=제|의|\s|$)", "같은 조 ", where).replace("같은 조 의", "같은 조의").replace("  ", " ")
+            where = re.sub(r"^" + re.escape(art) + r"(?=제|의|\s|$)", "같은 조 ", where).replace("같은 조 의", "같은 조의").replace("  ", " ").strip()   # 조 전체(“제13조”)면 “같은 조 중”
         parts.append(f"{where} 중 “{o_}”{_josa(o_, ('을', '를'))} {each}“{n_}”{_ro(n_)} ")
         last = _split_loc(locs[-1])[0]
     return "하고, ".join(parts) + "한다."
