@@ -1255,6 +1255,21 @@ function raRuleUndo(A, add){
   add.arts.forEach(([no,was])=>{ A.changes=A.changes.filter(c=>c.no!==no); if(!was) delete A.sel[no]; });
   add.xs.forEach(([id,was])=>{ A.appx=raArr(A.appx).filter(x=>x.id!==id); if(!was) delete A.selx[id]; });
 }
+// 같은 내규에서 제N조를 인용하는 다른 조(“제20조에 따른”, “제9조 및 제20조”). 다른 법령·내규의 조(“「…법」 제2조”, “법 제5조”)는 뺀다
+function raCiteHits(body, no){
+  const m=String(no).match(/^(\d+)(?:의(\d+))?$/); if(!m) return [];
+  const re=new RegExp(`제\\s*${m[1]}\\s*조${m[2]?`\\s*의\\s*${m[2]}`:'(?!\\s*의\\s*\\d)'}(?:\\s*제\\s*\\d+\\s*[항호])*`,'g'), t=String(body||''), out=[];
+  let h; while((h=re.exec(t))){ const pre=t.slice(Math.max(0,h.index-14),h.index).replace(/\s+$/,'');
+    if(/[」』]$|(?:법|령|규칙|규정|정관|세칙|지침|요령|조례|협약|같은|동)$/.test(pre)) continue;    // 다른 법령·내규의 조
+    if(/[0-9가-힣]$/.test(t.slice(Math.max(0,h.index-1),h.index))) continue;                   // “부칙제2조” 같은 붙은 말
+    out.push({i:h.index, s:h[0]}); }
+  return out;
+}
+function raCiting(no){
+  if(!_raArts) return [];
+  return raArr(_raArts.articles).filter(a=>!a.deleted&&a.no!==no).map(a=>{ const h=raCiteHits(a.body,no)[0]; if(!h) return null;
+    const ctx=String(a.body).slice(Math.max(0,h.i-6), h.i+h.s.length+8).replace(/\s+/g,' ').trim(); return {no:a.no,title:a.title,body:a.body,hit:ctx}; }).filter(Boolean);
+}
 // 찾는 말이 내규에 없을 때 앞 두 글자가 같은 낱말을 보여 준다(“연차휴가” → “연차유급휴가”) — 다시 시도할 말을 바로 알게
 function raNear(key){
   if(!_raArts||!key||key.length<2) return []; const head=key.slice(0,2).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), cnt={};
@@ -1296,8 +1311,13 @@ function raRuleApply(A, text){
   const dm=t.match(/제\s*(\d+)\s*조(?:\s*의\s*(\d+))?[^。.\n]{0,12}?삭제/);
   if(dm&&_raArts){ const no=dm[2]?`${dm[1]}의${dm[2]}`:dm[1], o=raOld(no);
     if(o&&!o.deleted){ let c=A.changes.find(x=>x.no===no); if(!c){ A.sel[no]=true; c={type:'modify',no,title:o.title,body:o.body,why:''}; A.changes.push(c); A.changes.sort((x,y)=>raCmp(x.no,y.no)); }
-      c.type='delete'; c.why='지시문대로 삭제'; A.valNote=`지시문대로 ${raLbl(no)}(${o.title})를 삭제로 바꿨습니다. 이 조를 인용하는 곳은 확인·검토 단계의 인용 영향에서 확인하세요.`;
-      return {n:1, notes:[`${raLbl(no)} 삭제`]}; } }
+      c.type='delete'; c.why='지시문대로 삭제';
+      // 지운 조를 인용하는 같은 내규의 조 — 사람이 가장 자주 놓치는 곳이라 바로 수정안 칸에 담고 인용 부분을 짚어 준다
+      const cites=raCiting(no), add=[];
+      cites.forEach(x=>{ if(A.changes.some(y=>y.no===x.no)) return; A.sel[x.no]=true; A.changes.push({type:'modify',no:x.no,title:x.title,body:x.body,cite:no,why:`삭제한 ${raLbl(no)}를 인용 — “${x.hit}” 부분을 고치세요`}); add.push(x.no); });
+      A.changes.sort((x,y)=>raCmp(x.no,y.no));
+      A.valNote=`지시문대로 ${raLbl(no)}(${o.title})를 삭제로 바꿨습니다. `+(cites.length?`이 조를 인용하는 ${cites.map(x=>raLbl(x.no)).join(', ')}${raJosa(raLbl(cites[cites.length-1].no),['을','를'])} 수정안 칸에 함께 담았으니 인용 부분(“${cites[0].hit}” 등)을 고치세요.`:'같은 내규 안에 이 조를 인용하는 곳은 없습니다. 다른 내규의 인용은 확인·검토 단계의 인용 영향에서 확인하세요.');
+      return {n:1, notes:[`${raLbl(no)} 삭제`+(cites.length?` · 인용하는 ${cites.map(x=>raLbl(x.no)).join(', ')} 함께 담음`:'')], cites:cites.map(x=>x.no)}; } }
   return raVqReq(t)?{q:raVqReq(t), n:0, notes:[]}:null;
 }
 function raChanged(c){
@@ -1401,7 +1421,7 @@ function raChangesView(){
     (A.fullRev&&_raArts&&_raArts.has_appendix?`<span class="ra-chip">${raIc('info')}별표·서식 ${raAppxAll().length}개를 전부개정안 뒤에 붙입니다(고친 것은 고친 대로)</span>`:'')+`</div>`+
     (A.model?`<div class="ra-meta"><span class="ra-chip sem">${raIc('spark')}${_e(A.model)}</span>${raTip('AI 수정안은 반드시 검토 후 사용하세요.')}${raAiProvLine('amend')}</div>`:'')+A.changes.map((c,i)=>{
     const o=raOld(c.no);
-    return raIdleWrap(!raChanged(c)&&raAnyEff(), `${raLbl(c.no)}(${c.title||(o&&o.title)||''})`, `<div class="ra-chg t-${c.type}"><div class="ra-chg-h"><select class="ra-in sm" onchange="raChg(${i},'type',this.value)">${Object.entries(tl).map(([k,v])=>`<option value="${k}"${c.type===k?' selected':''}>${v}</option>`).join('')}</select>`+
+    return raIdleWrap(!raChanged(c)&&raAnyEff()&&!c.cite, `${raLbl(c.no)}(${c.title||(o&&o.title)||''})`, `<div class="ra-chg t-${c.type}"><div class="ra-chg-h"><select class="ra-in sm" onchange="raChg(${i},'type',this.value)">${Object.entries(tl).map(([k,v])=>`<option value="${k}"${c.type===k?' selected':''}>${v}</option>`).join('')}</select>`+
       `<b>${_e(raLbl(c.no))}</b><input class="ra-in sm" style="max-width:220px" placeholder="조 제목" value="${_e(c.title)}" oninput="raChg(${i},'title',this.value,1)" ${c.type==='delete'?'disabled':''}>`+
       (c.why?`<span class="ra-sub">${_e(c.why)}</span>`:'')+`<span class="ra-chip warn" id="raNc${i}"${raChanged(c)?' hidden':''}>변경 없음</span>`+raAiChip(c,i)+`<button class="ra-x" title="이 수정안 빼기" onclick="raChgDel(${i})" aria-label="빼기">${raIc('x')}</button></div>`+`<div id="raSen${i}">${raSenPreview(c)}</div>`+
       `<div class="ra-chg-b"><div class="ra-old"><div class="ra-lab">현행</div><div id="raOd${i}">${raChgOldHtml(c,o)}</div></div>`+
@@ -1418,7 +1438,10 @@ function raChangesView(){
 function raChgOldHtml(c,o){
   if(!o||o.deleted) return '<span class="ra-mu">&lt;신 설&gt;</span>';
   if(c.type==='delete') return `<u class="ra-d">${_e(raArtText(o)).replace(/\n/g,'<br>')}</u>`;
-  if(!raChanged(c)) return _e(raArtText(o)).replace(/\n/g,'<br>');
+  if(!raChanged(c)){ let h=_e(raArtText(o)).replace(/\n/g,'<br>');
+    if(c.cite){ const t=raArtText(o), hs=raCiteHits(t,c.cite); let k=0, out='';                    // 지운 조를 가리키는 인용
+      hs.forEach(x=>{ out+=_e(t.slice(k,x.i))+`<mark class="ra-cite">${_e(x.s)}</mark>`; k=x.i+x.s.length; }); h=(out+_e(t.slice(k))).replace(/\n/g,'<br>'); }
+    return h; }
   return raCmpCell(o,{no:c.no,title:c.title,body:c.body},false)[0];
 }
 // 줄 단위로 짝지은 뒤 줄 안은 낱말 단위로 견준다 → [현행 쪽(지운 말 표시), 개정 쪽(넣은 말 표시)] — 줄은 \n으로 잇는다
