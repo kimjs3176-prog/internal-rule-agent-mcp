@@ -99,3 +99,13 @@ def test_plan_marks_explicit_articles(client):
     assert p.get("explicit") is True and [a["no"] for a in p["articles"]] == ["15"]
     q = client.post("/api/regagent/plan", json={"request": "여비규정에서 여비를 출장비로 바꿔줘"}).get_json()["plan"]
     assert not q.get("explicit")
+
+
+def test_plan_enact_splits_purpose_clause(ra):
+    """“…하기 위해 ○○지침을 새로 만들어줘” — 목적 구절은 목적(명사구)으로, 내규명은 나머지에서"""
+    p = ra.heuristic_plan("업무용 드론을 안전하게 운영하기 위해 드론 운영지침을 새로 만들어줘")
+    assert (p["title"], p["purpose"], p["background"]) == ("드론 운영지침", "업무용 드론의 안전한 운영", "업무용 드론을 안전하게 운영하기")
+    assert ra.heuristic_plan("개인정보 유출을 막기 위해 개인정보 처리지침을 새로 만들어줘")["purpose"] == "개인정보 유출 방지"
+    assert ra.heuristic_plan("재택근무를 제도화하려고 재택근무 운영규정을 새로 만들어줘")["purpose"] == "재택근무의 제도화"
+    q = ra.heuristic_plan("업무용 드론 운영지침 제정해줘")
+    assert q["title"] == "업무용 드론 운영지침" and "background" not in q

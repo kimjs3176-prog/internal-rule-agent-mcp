@@ -1756,10 +1756,10 @@ function raDocReview(c, mode){
 // 문서 세트
 // ══════════════════════════════════════════════════════════════════════════
 const RA_DOCS={
-  enact:[['agenda','심의안건서'],['law','내규안'],['reason','제정 이유서'],['cmp','신구조문대비표'],['notice','대국민 사전예고문'],['staff','직원 의견수렴 공고'],['opinion','의견수렴 결과'],['regul','자체 규제심사서'],['corrupt','부패영향평가 기초자료'],['review','사전검토 의견서']],
-  amend:[['agenda','심의안건서'],['law','개정문'],['reason','개정 이유서'],['cmp','신구조문대비표'],['notice','대국민 사전예고문'],['staff','직원 의견수렴 공고'],['opinion','의견수렴 결과'],['regul','자체 규제심사서'],['corrupt','부패영향평가 기초자료'],['review','사전검토 의견서']],
+  enact:[['report','검토 보고서'],['agenda','심의안건서'],['law','내규안'],['reason','제정 이유서'],['cmp','신구조문대비표'],['notice','대국민 사전예고문'],['staff','직원 의견수렴 공고'],['opinion','의견수렴 결과'],['regul','자체 규제심사서'],['corrupt','부패영향평가 기초자료'],['review','사전검토 의견서']],
+  amend:[['report','검토 보고서'],['agenda','심의안건서'],['law','개정문'],['reason','개정 이유서'],['cmp','신구조문대비표'],['notice','대국민 사전예고문'],['staff','직원 의견수렴 공고'],['opinion','의견수렴 결과'],['regul','자체 규제심사서'],['corrupt','부패영향평가 기초자료'],['review','사전검토 의견서']],
 };
-const RA_DOC_IC={law:'doc',reason:'tip',cmp:'amend',notice:'info',staff:'proc',review:'check',amend:'doc',addenda:'bulk',agenda:'doc',opinion:'proc',regul:'check',corrupt:'alert'};
+const RA_DOC_IC={report:'search',law:'doc',reason:'tip',cmp:'amend',notice:'info',staff:'proc',review:'check',amend:'doc',addenda:'bulk',agenda:'doc',opinion:'proc',regul:'check',corrupt:'alert'};
 function raDocCtx(mode){
   if(mode==='enact'){
     const E=RA.enact, D=E.draft||{}; const p=raParse(D.text||'');
@@ -2339,7 +2339,7 @@ function raDocsBuild(mode){
   const c=raDocCtx(mode);
   const cmp=raDocCmpRows(c);
   const B={c, law:raDocLaw(c), reason:raDocReason(c), notice:raDocNotice(c,false), staff:raDocNotice(c,true), review:raDocReview(c,mode), cmp, blk:{}};
-  B.blk.agenda=raAgendaBlocks(c,mode); B.blk.opinion=raOpinionBlocks(c,mode); B.blk.regul=raRegulBlocks(c,mode); B.blk.corrupt=raCorruptBlocks(c,mode);
+ B.blk.report=raReportBlocks(c,mode); B.blk.agenda=raAgendaBlocks(c,mode); B.blk.opinion=raOpinionBlocks(c,mode); B.blk.regul=raRegulBlocks(c,mode); B.blk.corrupt=raCorruptBlocks(c,mode);
   Object.keys(B.blk).forEach(k=>{ B[k]=raBlocksText(B.blk[k]); });     // 복사·표기 점검용 글
   return B;
 }
@@ -2509,6 +2509,79 @@ function raAgendaBlocks(c, mode, picks){
     `3. 주요골자`,...(main.length?main:['○○']).map((x,i)=>`  ${RA_GANA(i)}. ${x}`),'',`4. 관련근거 및 기타사항`,...raAgendaEtc(c,mode).map((x,i)=>`  ${RA_GANA(i)}. ${x}`),'',
     raAttach(c,P)].join('\n');
   return [{t:'p',text:`${RA_ORG.reg_word}심의 안건`,titleBold:1},cover,{t:'break'},{t:'p',text:`${what}\n\n${body}`,titleBold:1}];
+}
+// ══ 자료 조사 → 정리 → 검토 보고서 ══ 제·개정 목적(지시문)만으로 근거 자료를 모아 내부 검토 보고서 초안까지 만든다
+// 모으는 것: ① 우리 기관 관련 내규·조문 ② 그 내규들이 인용한 법령 ③ 다른 기관 사례(알리오, 닿으면) ④ (개정) 인용 영향
+async function raResearch(mode){
+  const S=RA[mode], isA=mode==='amend';
+  const purpose=isA?String(S.intent||''):[S.purpose,S.contents].filter(Boolean).join(' ');
+  const R={at:raToday(0), purpose, own:[], laws:[], alio:[], alioNote:''};
+  const keys=raKeyWords([S.title,purpose].join(' '), isA?S.title:'');
+  R.keys=keys;
+  const sm=keys.length?await raPost('/api/regagent/similar',{query:keys.join(' '),limit:8}).catch(()=>null):null;
+  const core=isA?[]:raKeyWords(S.title), must=core.length?core:keys;   // 제정은 내규명의 핵심 낱말(“드론”)이 있어야 관련 내규로 본다
+  const hit=t=>must.some(k=>String(t||'').includes(k));                 // “운영지침”처럼 흔한 말로만 걸린 내규는 뺀다 — 핵심 낱말이 실제로 있는 것만
+  if(sm&&sm.success) R.own=raArr(sm.regs).filter(g=>(!isA||g.slug!==S.slug)&&(hit(g.title)||raArr(g.articles).some(a=>hit(a.title)||hit(a.body))))
+    .slice(0,4).map(g=>({reg:g.title,slug:g.slug,arts:raArr(g.articles).filter(a=>hit(a.title)||hit(a.body)).concat(raArr(g.articles)).filter((a,i,ar)=>ar.findIndex(x=>x.no===a.no)===i).slice(0,2).map(a=>({no:a.no,title:a.title}))}));
+  const texts=[];                                                  // 법령은 대상 내규(개정) 또는 관련 내규(제정)가 인용한 것
+  if(isA&&_raArts) _raArts.articles.forEach(a=>texts.push(a.body||''));
+  else for(const g of R.own.slice(0,3)){ const d=await raGet('/api/regagent/articles?slug='+encodeURIComponent(g.slug)).catch(()=>null); if(d&&d.success) d.articles.forEach(a=>texts.push(a.body||'')); }
+  const cnt={}, shown={};                                          // 띄어쓰기만 다른 같은 법령(「개인정보보호법」·「개인정보 보호법」)은 하나로 — 띄어 쓴 이름을 보인다
+  texts.join('\n').replace(/「([^」「]{2,40}?(?:법률|법|시행령|시행규칙))」/g,(x,n)=>{ n=n.replace(/\s+/g,' ').trim(); const k=n.replace(/\s/g,''); cnt[k]=(cnt[k]||0)+1; if(!shown[k]||n.split(' ').length>shown[k].split(' ').length) shown[k]=n; return x; });
+  R.laws=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,n])=>({name:shown[k],n}));
+  const refs=isA?Object.values(S.alioRefs||{}):Object.values(S.refs||{}).filter(r=>r.org);
+  R.alio=refs.slice(0,6).map(r=>({org:r.org||'',reg:r.reg||'',no:r.no||'',title:r.title||''}));
+  if(!R.alio.length) R.alioNote=_raAlioDown?'알리오에 연결되지 않아 조회하지 못함(연결되는 곳에서 “다른 기관(알리오)”로 보완)':'조회한 사례 없음(필요하면 “다른 기관(알리오)”에서 찾아 보완)';
+  S.research=R; _raSave(); return R;
+}
+// 요청에서 자료를 찾을 핵심 낱말 — 내규 종류·흔한 동사·내규명 자체는 뺀다(“드론 운영지침을 새로 만들어줘” → 드론)
+const RA_KEY_STOP=/^(?:운영|관리|업무|지침|규정|규칙|세칙|요령|기준|사항|관련|새로|신규|제정|개정|만들|만들어|바꿔|올려|내려|해줘|위해|위하여|필요|대한|관한|경우|기관|직원|내규|안전|정도|내용|조문|제도화|현실화|처리|지원|시행|사무|방지|개선|강화|마련)$/;
+function raKeyWords(t, skip){
+  const out=[]; String(t||'').replace(/「[^」]*」/g,' ').replace(/제\s*\d+\s*조(?:의\s*\d+)?/g,' ').split(/[^가-힣A-Za-z0-9]+/).forEach(w=>{
+    w=w.replace(/(?:으로|에서|에게|하기|하는|하게|하여|해서|하려고|이란|이며|이고|을|를|은|는|이|가|의|에|와|과|로|도|만)$/,'');
+    w=w.replace(/(?:운영지침|운영규정|운영규칙|관리규정|관리규칙|관리지침|시행세칙|규정|규칙|지침|세칙|요령|기준)$/,'');
+    if(w.length>=2&&!RA_KEY_STOP.test(w)&&!/^\d/.test(w)&&!(skip&&String(skip).includes(w))&&!out.includes(w)) out.push(w); });
+  return out.slice(0,6); }
+// 요청의 목적 구절(“출장비 현실화를 위해 …” → 출장비 현실화)
+function raWhyOf(t){ const m=String(t||'').match(/^\s*(.{2,60}?)\s*(?:을|를)?\s*위(?:해서|해|하여|한)\s/); return m?m[1].trim():''; }
+function raResearchLine(R){ return `관련 내규 ${R.own.length}건${R.own.length?`(${R.own.slice(0,3).map(g=>`「${_e(g.reg)}」`).join(', ')})`:''}${RA_VR}관련 법령 ${R.laws.length}건${R.laws.length?`(${R.laws.slice(0,3).map(l=>`「${_e(l.name)}」`).join(', ')})`:''}${RA_VR}다른 기관 사례 ${R.alio.length}건`; }
+function raReportBlocks(c, mode){
+  const S=RA[mode], R=S.research||{own:[],laws:[],alio:[]}, H=RA_CELL, isA=mode==='amend', sub=raSub_(mode), n=raSubNeeds(mode), W=RA_ORG.reg_word;
+  const what=`「${c.title}」 ${c.mode==='enact'?'제정':c.full?'전부개정':'일부개정'}`;
+  const cover={t:'table',colWidths:[11907,35721],rows:[[H('보 고 일 자',{hd:1}),H(raToday(0))],[H('담 당 부 서',{hd:1}),H(sub.dept||c.dept)],[H('보  고  자',{hd:1}),H(sub.proposer||'○○○')]]};
+  const A=[], req=isA?String(S.intent||'').trim():'', bg=isA?raWhyOf(req):(S.background||'');
+  A.push('1. 추진 배경 및 목적');
+  if(bg) A.push(`  ○ 추진 배경: ${bg}${/기$/.test(bg)?'':raJosa(bg,['을','를'])} 위함`);   // “출장비 현실화를 위함”·“…운영하기 위함"
+  A.push(`  ○ 목적: ${c.purpose||`${c.title}에 필요한 사항을 정하려는 것임.`}`);
+  if(req&&req!==c.purpose) A.push(`  ○ 요청 내용: ${req}`);
+  A.push('','2. 현황 및 문제점');
+  if(isA){ const ch=raEffChanges(), xs=raEffAppx();
+    ch.slice(0,4).forEach(x=>{ const o=raOld(x.no); if(!o){ A.push(`  ○ ${raLbl(x.no)} 신설 필요`); return; } const b=String(o.body||'').replace(/\s+/g,' '); A.push(`  ○ 현행 ${raLbl(x.no)}(${o.title}): ${b.slice(0,80)}${b.length>80?'…':''}`); });
+    if(ch.length>4) A.push(`  ○ 그 밖에 ${ch.length-4}개 조`);
+    xs.slice(0,3).forEach(x=>{ const o=raOldX(x.id); A.push(`  ○ 현행 ${x.id}${o?`(${raAppxTitle(o)})`:''}`); });
+    if(!ch.length&&!xs.length) A.push('  ○ ○○'); }
+  else A.push(R.own.length?`  ○ ${c.title}에 해당하는 ${W}가 없고, 관련 사항이 ${R.own.slice(0,3).map(g=>`「${g.reg}」`).join('·')} 등에 흩어져 있어 기준이 분명하지 않음`:`  ○ ${c.title}에 관한 ${W}가 없어 업무 기준이 분명하지 않음`);
+  A.push('','3. 자료조사 결과',`  가. 우리 기관 관련 ${W}`,...(R.own.length?R.own.map(g=>`    - 「${g.reg}」 ${g.arts.map(a=>`${raLbl(a.no)}(${a.title})`).join(', ')}`):['    - 관련 '+W+' 없음']),
+    '  나. 관련 법령',...(R.laws.length?R.laws.map(l=>`    - 「${l.name}」(${isA?'현행 '+W:'관련 '+W}에서 ${l.n}회 인용)`):['    - 인용된 법령 없음(근거 법령 확인 필요)']),
+    '  다. 다른 기관 사례',...(R.alio.length?R.alio.map(r=>`    - ${raAlioRefLine(r)}`):[`    - ${R.alioNote||'조회한 사례 없음'}`]));
+  if(isA&&S.impact&&S.impact.summary){ const m=S.impact.summary; A.push('  라. 인용 영향',`    - 같은 ${W} 안 인용 ${m.inner}건, 다른 ${W}의 조문 인용 ${m.outer}건, ${W}명 인용 ${m.mention_regs}개`); }
+  const main=raMainItems(c);
+  A.push('',`4. ${c.word} 주요 내용`,...(main.length?main:['○○']).map((x,i)=>`  ${RA_GANA(i)}. ${x}`));
+  const out=[{t:'p',text:`${what} 검토 보고`,titleBold:1},cover,{t:'p',text:A.join('\n')}];
+  if(isA){ const rows=raDocCmpRows(c).slice(0,Math.min(5,raEffAll().length)), cut=t=>{ t=String(t||''); return t.length>220?t.slice(0,220)+'…':t; };   // 조문만(별표 바뀐 값은 주요 내용에 적혀 있다)
+    if(rows.length) out.push({t:'table',colWidths:[23814,23814],rows:[[H('현    행',{hd:1}),H('개 정 안',{hd:1})],...rows.map(r=>[H(cut(r[2])),H(cut(r[3]))])]}); }
+  const B=[], lint=raArr(S.lint), rv=S.review, cntL=l=>lint.filter(i=>i.level===l).length;
+  B.push('5. 검토 의견',`  가. 형식 점검: ${S.lint?`오류 ${cntL('error')}건, 주의 ${cntL('warn')}건`:'미실시(확인·검토 단계에서 실행)'}`,
+    `  나. 심의 사전검토: ${rv&&rv.rows?`적합 ${rv.rows.filter(r=>r.status==='ok').length}, 확인 필요 ${rv.rows.filter(r=>r.status==='check').length}, 보완 필요 ${rv.rows.filter(r=>r.status==='warn').length}`:'미실시'}`);
+  if(isA) B.push(`  다. 개정문 검증: ${S.rt?(S.rt.ok?'개정문을 현행에 적용한 결과가 개정안과 일치':'불일치 — 확인 필요'):'미실시'}`);
+  const todo=lint.filter(i=>i.level==='error'||i.level==='warn').slice(0,3).map(i=>`    - ${i.msg}`);
+  if(todo.length) B.push(`  ${isA?'라':'다'}. 보완할 사항`,...todo);
+  B.push('','6. 향후 추진 일정',
+    ...[[`관련 부서 협의`,n.agree||!n.answered],[`대국민 사전예고(${RA_ORG.notice_days}일 이상)`,n.notice],[`직원 의견수렴(${RA_ORG.staff_days}일 이상)`,n.staff],[`${W}심의`,true],['발령·공포 및 '+W+'관리대장 등록',true]]
+      .filter(x=>x[1]).map((x,i)=>`  ${i+1}) ${x[0]}`),
+    '',`붙임  1. ${c.mode==='enact'?'제정안':'신구조문대비표'} 1부.`,`      2. ${c.mode==='enact'?'제정 이유서':'개정문'} 1부.  끝.`);
+  out.push({t:'p',text:B.join('\n')});
+  return out;
 }
 // 의견수렴 결과(사전예고·직원 의견수렴): 제출 의견과 반영 여부·사유
 function raOpinionBlocks(c, mode){
@@ -3015,6 +3088,7 @@ async function raAgAmend(P, step, fin, stop){
   fin(s,`${d.articles.length}개 조 중 ${tg.length?tg.map(a=>`${raLbl(a.no)}(${_e(a.title)})`).join(', '):'대상 조문 없음 — AI가 목차를 보고 고릅니다'}`+(raArr(P.missing).length?`<br>요청한 ${P.missing.map(raLbl).join(', ')}는 이 ${_e(RA_ORG.reg_word)}에 없어 내용이 가까운 조문을 골랐습니다.`:''), raArr(P.missing).length?'warn':'ok');
   A.alioRefs=await raAgAlioStep('amend', raAlioGuess('amend'), [A.intent,...tg.map(a=>a.title)].join(' '), step, fin,   // 조를 짚은 요청·AI 없는 규칙 개정은 다른 기관 자료를 쓰지 않으니 기다리지 않는다
     P.explicit?`${tg.map(a=>raLbl(a.no)).join('·')}${raJosa(raLbl(tg[tg.length-1]?tg[tg.length-1].no:'1'),['을','를'])} 짚은 요청이라 다른 기관 조사는 건너뛰고 바로 고칩니다.`:!raHasAi()?'AI 키 없이 규칙으로 고치는 요청이라 다른 기관 조사는 건너뜁니다(AI 수정안을 쓸 때만 참고합니다).':'');
+  s=step('자료 조사·정리'); { const R=await raResearch('amend'); fin(s, raResearchLine(R)+'<br>검토 보고서의 “자료조사 결과”에 정리합니다.'); }
   s=step('수정안 작성');
   let ok=false;
   if(raHasAi()){
@@ -3062,13 +3136,15 @@ async function raAgAmend(P, step, fin, stop){
   await raAgCheck('amend',step,fin);
   s=step('개정문 검증'); { const rt=raRtRun(); fin(s, rt&&rt.ok?`개정문을 현행에 되돌려 적용한 결과가 수정안과 일치합니다(조 ${rt.n}개${rt.nx?`·별표 ${rt.nx}개`:''})`:`개정문 적용 결과가 수정안과 ${rt?rt.diffs.length:'?'}곳 다릅니다 — 확인 단계의 “개정문 검증”을 보세요`, rt&&rt.ok?'ok':'warn'); }
   s=step('절차 판단'); fin(s,raAgProc(P.reg.category));
-  s=step('문서 세트 준비'); fin(s,'개정문'+RA_VR+'개정 이유서'+RA_VR+'신구조문대비표'+RA_VR+'대국민 사전예고문'+RA_VR+'직원 의견수렴 공고'+RA_VR+'사전검토 의견서');
-  RA.agent.done={title:`「${A.title}」 개정안이 준비됐습니다`,sub:vr&&vr.n?`${vr.rep?(vr.scoped?'적은 조에서 지시한 낱말을 바꾸고':'지시한 낱말을 내규 안 모든 곳에서 바꾸고'):vr.q?'지시한 수치를 반영하고':'지시대로 조를 삭제하고'} 점검까지 마쳤습니다. 결과 화면에서 바뀐 곳(색 표시)을 확인하고 한글·Word로 저장하세요.`:'결과 화면에서 문장을 다듬고 한글·Word로 저장하세요.',
-    acts:[['개정 결과 열기',"RA.amend.step=1;raTab('amend')",1],['문서 세트로 바로 가기',"raTab('amend');setTimeout(()=>raGoDoc('amend','cmp'),80)"]]};
+  s=step('검토 보고서 초안'); fin(s,'추진 배경·목적'+RA_VR+'현황 및 문제점'+RA_VR+'자료조사 결과'+RA_VR+'주요 내용(신구 대비)'+RA_VR+'검토 의견'+RA_VR+'향후 추진 일정');
+  s=step('문서 세트 준비'); fin(s,'검토 보고서'+RA_VR+'개정문'+RA_VR+'개정 이유서'+RA_VR+'신구조문대비표'+RA_VR+'대국민 사전예고문'+RA_VR+'직원 의견수렴 공고'+RA_VR+'사전검토 의견서');
+  A.docTab='report';
+  RA.agent.done={title:`「${A.title}」 자료조사·개정안·검토 보고서가 준비됐습니다`,sub:vr&&vr.n?`${vr.rep?(vr.scoped?'적은 조에서 지시한 낱말을 바꾸고':'지시한 낱말을 내규 안 모든 곳에서 바꾸고'):vr.q?'지시한 수치를 반영하고':'지시대로 조를 삭제하고'} 점검까지 마쳤습니다. 결과 화면에서 바뀐 곳(색 표시)을 확인하고 한글·Word로 저장하세요.`:'결과 화면에서 문장을 다듬고 한글·Word로 저장하세요.',
+    acts:[['검토 보고서 열기',"raTab('amend');setTimeout(()=>raGoDoc('amend','report'),80)",1],['개정 결과 열기',"RA.amend.step=1;raTab('amend')"]]};
 }
 async function raAgEnact(P, step, fin, stop){
   const E=RA.enact; raGenBump('enact');
-  Object.assign(E,{step:2,title:P.title||'',purpose:P.purpose||'',contents:P.contents||'',dels:[],sim:null,refs:{},draft:null,lint:null,review:null,nota:null,ab:null,picks:null});
+  Object.assign(E,{step:2,title:P.title||'',purpose:P.purpose||'',background:P.background||'',contents:P.contents||'',dels:[],sim:null,refs:{},draft:null,lint:null,review:null,nota:null,ab:null,picks:null});
   E.category=raCatOf(E.title)||E.category||'규칙';
   let s=step('유사 규정 조사');
   const sm=await raPost('/api/regagent/similar',{query:[E.title,E.purpose,E.contents].join(' ').slice(0,600),limit:6});
@@ -3077,6 +3153,7 @@ async function raAgEnact(P, step, fin, stop){
     fin(s,'참고 조문: '+Object.values(E.refs).map(r=>`「${_e(r.reg)}」 ${raLbl(r.no)}(${_e(r.title)})`).join(', ')); }
   else fin(s,'비슷한 조문을 찾지 못했습니다.','skip');
   Object.assign(E.refs, await raAgAlioStep('enact', raAlioGuess('enact')||E.title, [E.purpose,E.contents].join(' '), step, fin));
+  s=step('자료 조사·정리'); { const R=await raResearch('enact'); fin(s, raResearchLine(R)+'<br>검토 보고서의 “자료조사 결과”에 정리합니다.'); }
   s=step(raHasAi()?'조문 체계·초안 작성':'표준 조문 골격 작성');
   const d=await raPost('/api/regagent/draft',{mode:'enact',title:E.title,category:E.category,purpose:E.purpose,contents:E.contents,delegations:[],refs:Object.values(E.refs),outline:raEnactOutline(),...raAi()});
   if(!d.success) stop(s,d.error||'초안 작성 실패');
@@ -3086,9 +3163,11 @@ async function raAgEnact(P, step, fin, stop){
   fin(s,`「${_e(E.title||'새 내규')}」 ${r.articles.length}개 조: `+r.articles.slice(0,8).map(a=>_e(a.title)).join(''+RA_VR+'')+(r.template?'<br>AI 키가 없어 표준 골격으로 작성했습니다.':''), r.template?'warn':'ok');
   await raAgCheck('enact',step,fin);
   s=step('절차 판단'); fin(s,raAgProc(E.category==='규정'?'규정':E.category));
-  s=step('문서 세트 준비'); fin(s,'내규안'+RA_VR+'제정 이유서'+RA_VR+'신구조문대비표'+RA_VR+'대국민 사전예고문'+RA_VR+'직원 의견수렴 공고'+RA_VR+'사전검토 의견서');
-  RA.agent.done={title:`「${E.title||'새 내규'}」 제정안이 준비됐습니다`,sub:'결과 화면에서 조문을 다듬고 문서 세트를 저장하세요.',
-    acts:[['제정 결과 열기',"RA.enact.step=2;raTab('enact')",1],['문서 세트로 바로 가기',"raTab('enact');setTimeout(()=>raGoDoc('enact','law'),80)"]]};
+  s=step('검토 보고서 초안'); fin(s,'추진 배경·목적'+RA_VR+'현황 및 문제점'+RA_VR+'자료조사 결과'+RA_VR+'주요 내용'+RA_VR+'검토 의견'+RA_VR+'향후 추진 일정');
+  s=step('문서 세트 준비'); fin(s,'검토 보고서'+RA_VR+'내규안'+RA_VR+'제정 이유서'+RA_VR+'신구조문대비표'+RA_VR+'대국민 사전예고문'+RA_VR+'직원 의견수렴 공고'+RA_VR+'사전검토 의견서');
+  E.docTab='report';
+  RA.agent.done={title:`「${E.title||'새 내규'}」 자료조사·제정안·검토 보고서가 준비됐습니다`,sub:'검토 보고서를 확인하고, 조문을 다듬은 뒤 한글·Word로 저장하세요.',
+    acts:[['검토 보고서 열기',"raTab('enact');setTimeout(()=>raGoDoc('enact','report'),80)",1],['제정 결과 열기',"RA.enact.step=2;raTab('enact')"]]};
 }
 // 개정 요청의 낱말이 그 내규에 없을 때 — 같은 요청을 모든 내규 일괄 정비로 이어서 실행
 let _raBulkGo=null;

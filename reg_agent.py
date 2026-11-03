@@ -3773,6 +3773,23 @@ _EDIT_RE = re.compile(r"(개정(?![된되])|고쳐|고치|바꿔|바꾸|신설(?
 _ASK_FIRST = re.compile(r"((?<=[가-힣])도\s*되나|해야\s*하나|해야\s*되나|하면\s*되나|할\s*수\s*있나)")   # “올려도 되나요?”는 묻는 말
 
 
+def _noun_purpose(why: str) -> str:
+    """요청의 목적 구절을 조문에 넣기 좋은 명사구로: “A를 B하게 C하기” → “A의 B한 C”, “A를 C하기” → “A의 C”."""
+    w = re.sub(r"\s*(?:하기|하는\s*것|하고자|하려고|기)$", "", (why or "").strip())
+    m = re.match(r"^(.+?)(?:을|를)\s+([가-힣]+?)하게\s+([가-힣]+)$", w)
+    if m:
+        return f"{m.group(1)}의 {m.group(2)}한 {m.group(3)}"
+    m = re.match(r"^(.+?)(?:을|를)\s+([가-힣]+)$", w)
+    if m:
+        verb = _VERB_NOUN.get(m.group(2))                # “막(기)” → 방지: 고유어 동사는 한자어 명사로
+        return f"{m.group(1)} {verb}" if verb else f"{m.group(1)}의 {m.group(2)}"
+    return w
+
+
+_VERB_NOUN = {"막": "방지", "줄이": "감소", "낮추": "인하", "높이": "향상", "올리": "인상", "늘리": "확대", "지키": "보호", "만들": "마련",
+              "없애": "해소", "돕": "지원", "알리": "안내", "바로잡": "정비", "살리": "활성화", "아끼": "절감", "세우": "수립"}
+
+
 def heuristic_plan(req: str) -> dict:
     t = (req or "").strip()
     plan = {"mode": "amend", "intent": t, "reasoning": []}
@@ -3816,13 +3833,21 @@ def heuristic_plan(req: str) -> dict:
         plan["reasoning"].append(f"상위 법령 「{plan['law']}」 개정에 따른 영향 분석으로 판단")
         return plan
     if _ENACT_RE.search(t) and not re.search(r"개정", t):
-        tm = re.search(r"([가-힣A-Za-z0-9·\s]{2,30}?(?:규정|규칙|지침|요령|기준|세칙))", t)
+        # “업무용 드론을 안전하게 운영하기 위해 드론 운영지침을 새로 만들어줘” — 목적 구절은 떼어 목적으로, 내규명은 나머지에서
+        why, t_name = "", t
+        pm = re.match(r"\s*(.{4,80}?)\s*(?:을|를)?\s*위(?:해서|해|하여|한)\s+(.+)$", t) or re.match(r"\s*(.{4,80}?)\s*(?:하려고|하고자)\s+(.+)$", t)
+        if pm:
+            why, t_name = pm.group(1).strip(), pm.group(2)
+        tm = re.search(r"([가-힣A-Za-z0-9·\s]{2,30}?(?:규정|규칙|지침|요령|기준|세칙))", t_name)
         title = re.sub(r"^(새로운?|신규|새)\s*", "", tm.group(1).strip()) if tm else ""
         if not title:                                  # “드론 관련 내규를 새로 만들어줘” → “드론 운영지침”
             kw = compare_keyword(t)
             title = f"{kw} 운영지침" if kw else ""
         core = re.sub(r"\s*(시행세칙|운영지침|운영규정|운영규칙|관리규정|관리규칙|관리지침|규정|규칙|세칙|지침|요령|기준)$", "", title).strip()
-        plan.update(mode="enact", title=title, purpose=f"{core}에 관한 사항" if core else "", contents="")
+        purpose = _noun_purpose(why) if why else ""                         # “업무용 드론을 안전하게 운영하기” → “업무용 드론의 안전한 운영”
+        plan.update(mode="enact", title=title, purpose=purpose or (f"{core}에 관한 사항" if core else ""), contents="")
+        if why:
+            plan["background"] = why
         plan["reasoning"].append("새 내규를 만드는 요청으로 판단" + (f" — 내규명 「{title}」" if title else ""))
         return plan
     plan["reasoning"].append("기존 내규 조문을 고치는 요청으로 판단")
