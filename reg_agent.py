@@ -3868,6 +3868,7 @@ def _resolve_targets(plan: dict, req: str):
                 plan["reasoning"].append("관련 조문: " + ", ".join(art_label(n) for n in nos) + " (내용 일치도 기준)")
     else:
         plan["reasoning"].append("요청에 적힌 조문: " + ", ".join(art_label(n) for n in nos))
+        plan["explicit"] = True                     # 사용자가 조를 짚었다 — 그 조만 빠르게 고친다
     plan["articles"] = [{"no": a["no"], "title": a["title"]} for a in reg["articles"] if a["no"] in nos]
 
 
