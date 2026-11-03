@@ -148,3 +148,12 @@ a:hover{text-decoration-thickness:2px;}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:1ms !important;animation-iteration-count:1 !important;transition-duration:1ms !important;scroll-behavior:auto !important;}
 }
+
+/* Web Interface Guidelines(vercel-labs) 점검 반영 */
+:root{color-scheme:light;}
+button,a,summary,label,[role="button"],input,select,textarea{touch-action:manipulation;}   /* 두 번 눌러 확대 지연 없이 */
+.modal-bg,.modal{overscroll-behavior:contain;}                                         /* 대화상자 안 스크롤이 뒤 화면으로 번지지 않게 */
+.skip-link{position:absolute;left:var(--space-sm);top:-60px;z-index:1000;background:var(--color-ink);color:var(--color-sheet);padding:var(--space-xs) var(--space-md);border-radius:var(--radius-ctl);font-weight:600;text-decoration:none;}
+.skip-link:focus{top:var(--space-sm);}
+#main:focus{outline:none;}
+h1,h2,h3{text-wrap:balance;}
