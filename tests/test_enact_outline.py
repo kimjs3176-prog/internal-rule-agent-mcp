@@ -75,3 +75,19 @@ def test_bulk_sentence_same_article_no_double_space(ra):
     s = ra._bulk_sentence([("제7조제2항", ("기획운영본부", "경영지원실")), ("제13조의 제목", ("기획운영본부", "경영지원실")),
                            ("제13조", ("기획운영본부는", "경영지원실은"))], "기획운영본부", "경영지원실")
     assert "  " not in s and "같은 조 중 “기획운영본부는”을 “경영지원실은”으로 한다." in s, s
+
+
+def test_addenda_date_check(ra):
+    """제·개정안 부칙: 달력에 없는 시행일은 오류, 이미 지난 시행일은 소급인지 확인(경과조치 날짜는 보지 않음)"""
+    import datetime as dt
+    t = dt.date(2026, 11, 3)
+    f = lambda a: [(i["level"], i["code"]) for i in ra._addenda_date_issues(a, t)]
+    assert f("이 규정은 2026년 1월 1일부터 시행한다.") == [("warn", "addate")]
+    assert f("이 규정은 2026년 2월 30일부터 시행한다.") == [("error", "addate")]
+    assert f("이 규정은 2027. 1. 1.부터 시행한다.") == [] and f("이 규정은 발령한 날부터 시행한다.") == []
+    assert f("제1조(시행일) 이 규정은 발령한 날부터 시행한다.\n제2조(경과조치) 2024년 3월 31일까지 존치한다.") == []
+
+
+def test_lint_text_mode_reports_past_effective(client):
+    r = client.post("/api/regagent/lint", json={"text": "제1조(목적) 이 규정은 목적을 정한다.", "addenda": "이 규정은 2020년 1월 1일부터 시행한다.", "title": "시험규정"}).get_json()
+    assert any(i["code"] == "addate" and i["level"] == "warn" for i in r["issues"])

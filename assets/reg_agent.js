@@ -2967,8 +2967,8 @@ async function raAgAdvise(P, step, fin, stop){
 async function raAgCheck(mode, step, fin){
   let s=step('조문 점검');
   let body;
-  if(mode==='enact'){ const D=RA.enact.draft; body={text:D.text,addenda:D.addenda,title:RA.enact.title}; }
-  else { const t=raAmendFullText(); body={text:t.text,addenda:t.addenda,title:RA.amend.title}; }
+  if(mode==='enact'){ const D=RA.enact.draft; body={text:D.text,addenda:raDocCtx('enact').addenda,title:RA.enact.title}; }   // 문서에 실리는 부칙(시행일 칸 반영)으로 점검
+  else { const t=raAmendFullText(); body={text:t.text,addenda:raDocCtx('amend').addenda,title:RA.amend.title,base_slug:RA.amend.slug}; }
   const li=await raPost('/api/regagent/lint',body);
   if(li.success){
     let iss=li.issues; if(mode==='amend'){ const nos=new Set(RA.amend.changes.map(c=>c.no)); iss=iss.filter(i=>!i.no||nos.has(i.no)); }

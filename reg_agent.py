@@ -1801,6 +1801,31 @@ def ra_upper():
                     "candidates": cands[:120], "truncated": len(cands) > 120})
 
 
+_ADD_DATE = re.compile(r"(\d{4})\s*(?:년\s*|\.\s*)(\d{1,2})\s*(?:월\s*|\.\s*)(\d{1,2})\s*(?:일|\.)?\s*(?:부터|에)\s*시행")
+
+
+def _addenda_date_issues(addenda: str, today=None) -> list:
+    """제·개정안 부칙의 시행일 점검(사람이 자주 틀리는 곳): 달력에 없는 날짜는 오류, 이미 지난 날짜는 소급 적용인지 확인.
+    경과조치의 “…까지 존치” 같은 날짜는 보지 않는다 — “…부터 시행” 앞의 날짜만."""
+    import datetime as _dt
+    today = today or _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=9))).date()     # 한국 시간
+    out = []
+    for m in _ADD_DATE.finditer(addenda or ""):
+        y, mo, d = (int(x) for x in m.groups())
+        shown = f"{y}년 {mo}월 {d}일"
+        try:
+            day = _dt.date(y, mo, d)
+        except ValueError:
+            out.append({"level": "error", "code": "addate", "no": "", "msg": f"부칙의 시행일 “{shown}”은 달력에 없는 날짜입니다.",
+                        "fix": "날짜를 확인하세요."})
+            continue
+        if day < today:
+            out.append({"level": "warn", "code": "addate", "no": "",
+                        "msg": f"부칙의 시행일 “{shown}”이 이미 지났습니다. 소급 적용하려는 것이 아니면 앞으로의 날짜나 “발령한 날”로 고치세요.",
+                        "fix": "시행일을 앞으로의 날짜로"})
+    return out
+
+
 @bp.route("/api/regagent/lint", methods=["POST"])
 def ra_lint():
     """조문 점검. body: {text, title} | {slug} | {all:true}"""
@@ -1837,6 +1862,7 @@ def ra_lint():
     # 개정안 본문에는 별표·서식이 따라오지 않으므로 비교할 때는 원 내규의 것을 쓴다(“해결됨” 오표시 방지)
     iss = lint_articles(p["articles"], add, p["appendix"] or (base["appendix"] if base else ""), b.get("title", ""),
                         draft_base={a["no"]: a["body"] for a in base["articles"]} if base else {})
+    iss = _addenda_date_issues(add) + iss            # 새로 쓰는 부칙만: 없는 날짜·이미 지난 시행일
     if not p["articles"]:
         iss.insert(0, {"level": "error", "code": "noart", "no": "",
                        "msg": "“제1조(목적)” 형식의 조문을 찾지 못했습니다.", "fix": ""})
