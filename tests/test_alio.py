@@ -47,6 +47,7 @@ def fake_alio(monkeypatch, ra):
         raise AssertionError(path)
 
     monkeypatch.setattr(alio, "_request", fake)
+    monkeypatch.setattr(alio, "reachable", lambda force=False: True)      # 시험에서는 실제 알리오에 닿는지 확인하지 않는다
     return calls
 
 
@@ -87,8 +88,35 @@ def test_alio_network_error_is_json(client, monkeypatch, ra):
     def boom(*a, **k):
         raise alio.AlioError("NETWORK", "알리오 연결 실패: ConnectTimeout")
     monkeypatch.setattr(alio, "_request", boom)
+    monkeypatch.setattr(alio, "reachable", lambda force=False: True)
     r = client.get("/api/regagent/alio/orgs")
     assert r.status_code == 502 and "다시 시도" in r.get_json()["error"]
+
+
+def test_alio_unreachable_fails_fast(client, monkeypatch, ra):
+    """알리오에 닿지 않으면(사내망·차단) 기관 목록·검색이 재시도하며 기다리지 않고 바로 알린다"""
+    import alio, time
+    calls = []
+    monkeypatch.setattr(alio, "_request", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(AssertionError("요청하면 안 됨")))
+    monkeypatch.setattr(alio, "reachable", lambda force=False: False)
+    t = time.time()
+    r = client.get("/api/regagent/alio/orgs")
+    s = client.post("/api/regagent/alio/search", json={"q": "여비", "orgs": ["C0105"]})
+    assert r.status_code == 502 and s.status_code == 502 and "연결하지 못했습니다" in r.get_json()["error"]
+    assert not calls and time.time() - t < 1
+
+
+def test_alio_reachable_is_cached(monkeypatch):
+    import alio
+    n = []
+
+    class _S:
+        def head(self, *a, **k):
+            n.append(1)
+            raise OSError("blocked")
+    monkeypatch.setattr(alio, "_S", _S())
+    monkeypatch.setitem(alio._REACH, "ok", None)
+    assert alio.reachable() is False and alio.reachable() is False and len(n) == 1     # 두 번째는 기억한 값
 
 
 def test_alio_base_title():
