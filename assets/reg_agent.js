@@ -1284,6 +1284,19 @@ function raRepLeft(a){
   return [...out];
 }
 function raWhere(w){ return w.length>8?w.slice(0,8).join(', ')+` 외 ${w.length-8}곳`:w.join(', '); }   // 긴 위치 목록은 앞 여덟 곳만
+function raRepNamed(A, rp, named){
+  named.forEach(no=>{ if(!A.changes.some(c=>c.no===no)){ const o=raOld(no); A.sel[no]=true; A.changes.push({type:'modify',no,title:o.title,body:o.body,why:''}); } });
+  A.changes.sort((x,y)=>raCmp(x.no,y.no));
+  let n=0; const where=[];
+  A.changes.forEach(c=>{ if(c.type==='delete'||!named.includes(c.no)) return; const x=raRepJosa(c.body,rp.a,rp.b), y=raRepJosa(c.title,rp.a,rp.b); if(x.n+y.n){ c.body=x.s; c.title=y.s; n+=x.n+y.n; where.push(raLbl(c.no)); } });
+  const ro=raJosa(rp.b,['으로','로']);
+  if(!n){ A.valNote=`${named.map(raLbl).join(', ')}에는 “${rp.a}”${raJosa(rp.a,['이','가'])} 따로 쓰인 곳이 없습니다. 조 번호를 확인하거나, 내규 전체에서 바꾸려면 조 번호 없이 요청하세요.`; return {n:0, notes:[], rep:rp, scoped:true, missing:true}; }
+  const others=raArr(_raArts.articles).filter(o=>!o.deleted&&!named.includes(o.no)&&raRepJosa(o.body,rp.a,rp.b).n).map(o=>raLbl(o.no));
+  A.valNote=`지시문대로 ${where.join(', ')}에서 “${rp.a}”${raJosa(rp.a,['을','를'])} “${rp.b}”${ro} 바꿨습니다(${n}곳). `+
+    (others.length?`다른 조 ${others.length}곳(${raWhere(others)})에도 “${rp.a}”${raJosa(rp.a,['이','가'])} 있지만 적은 조만 바꿨습니다. 모두 바꾸려면 조 번호 없이 요청하세요.`:'이 내규의 다른 조에는 같은 말이 없습니다.');
+  if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose)) A.purpose=`“${rp.a}”${raJosa(rp.a,['을','를'])} “${rp.b}”${ro} 변경하려는 것임.`;
+  return {n, notes:[`${where.join(', ')}: “${rp.a}” → “${rp.b}” ${n}곳`+(others.length?` · 다른 조 ${others.length}곳은 그대로(적은 조만)`:'')], rep:rp, scoped:true};
+}
 function raRepApply(A, r){
   let n=0; const where=[];
   A.changes.forEach(c=>{ if(c.type==='delete') return; const x=raRepJosa(c.body,r.a,r.b), y=raRepJosa(c.title,r.a,r.b); if(x.n+y.n){ c.body=x.s; c.title=y.s; n+=x.n+y.n; where.push(raLbl(c.no)); } });
@@ -1292,13 +1305,20 @@ function raRepApply(A, r){
 }
 // 지시문 하나를 규칙으로 반영: ① “○○를 3만원으로”(수치) ② “A를 B로 바꿔”(낱말 — 내규 안 모든 곳) ③ “제N조 삭제”.
 // 사람이 놓치기 쉬운 곳(고르지 않은 조문·별표)까지 찾아 바꾸고, 애매하면(값이 여러 개) 바꾸지 않고 알린다
+// 지시문에 적은 조(“제15조의 …”) — 있으면 그 조(와 그 조의 별표)만 고친다
+function raNamedArts(t){ if(!_raArts) return []; const out=[];
+  String(t||'').replace(/제\s*(\d+)\s*조(?:\s*의\s*(\d+))?(?!\s*[^가-힣\s]{0,3}\s*삭제)/g,(x,a,b)=>{ const no=b?`${a}의${b}`:a; if(raOld(no)&&!out.includes(no)) out.push(no); return x; });
+  return out; }
 function raRuleApply(A, text){
-  const t=String(text||'');
+  const t=String(text||''), named=/삭제/.test(t)?[]:raNamedArts(t);
   if(raVqReq(t)){ let r=raVqApply(A,t);
-    if(r&&!r.n&&!r.ambiguous){ const add=raRuleEnsure(A,r.q.key); r=raVqApply(A,t); if(!(r&&r.n)) raRuleUndo(A,add); }
+    if(r&&!r.n&&!r.ambiguous){
+      if(named.length){ named.forEach(no=>{ if(!A.changes.some(c=>c.no===no)){ const o=raOld(no); A.sel[no]=true; A.changes.push({type:'modify',no,title:o.title,body:o.body,why:''}); } }); raAppxForArts(named); r=raVqApply(A,t); }   // 지정한 조와 그 조의 별표 안에서만
+      else { const add=raRuleEnsure(A,r.q.key); r=raVqApply(A,t); if(!(r&&r.n)) raRuleUndo(A,add); } }
     if(r&&(r.n||r.ambiguous)) return r;
     if(!/삭제/.test(t)) return r; }                                    // 수치 지시는 낱말 바꾸기로 넘기지 않는다(“일수”를 “20일”로 바꾸는 일이 없게)
   const rp=raRepReq(t);
+  if(rp&&named.length) return raRepNamed(A, rp, named);           // “제15조의 여비를 출장비로” — 적은 조만
   if(rp){ const add=raRuleEnsure(A,rp.a), r=raRepApply(A,rp);
     if(!r.n){ raRuleUndo(A,add); A.valNote=`「${A.title||_raArts&&_raArts.title||''}」에는 “${rp.a}”${raJosa(rp.a,['이','가'])} 따로 쓰인 곳이 없습니다. 여러 내규에 걸친 명칭이면 “더 보기 → 일괄 정비”로 모든 내규에서 찾으세요.`; return {n:0, notes:[], rep:rp, missing:true}; }
     raRuleUndo(A,{arts:add.arts.filter(([no])=>!r.where.includes(raLbl(no))), xs:add.xs.filter(([id])=>!r.where.includes(id))});   // 담았지만 바꾼 곳이 없는 카드는 뺀다
@@ -2993,7 +3013,8 @@ async function raAgAmend(P, step, fin, stop){
   const tg=raArr(P.articles).map(a=>raOld(a.no)).filter(Boolean);
   tg.forEach(a=>A.sel[a.no]=true);
   fin(s,`${d.articles.length}개 조 중 ${tg.length?tg.map(a=>`${raLbl(a.no)}(${_e(a.title)})`).join(', '):'대상 조문 없음 — AI가 목차를 보고 고릅니다'}`+(raArr(P.missing).length?`<br>요청한 ${P.missing.map(raLbl).join(', ')}는 이 ${_e(RA_ORG.reg_word)}에 없어 내용이 가까운 조문을 골랐습니다.`:''), raArr(P.missing).length?'warn':'ok');
-  A.alioRefs=await raAgAlioStep('amend', raAlioGuess('amend'), [A.intent,...tg.map(a=>a.title)].join(' '), step, fin);
+  A.alioRefs=await raAgAlioStep('amend', raAlioGuess('amend'), [A.intent,...tg.map(a=>a.title)].join(' '), step, fin,   // 조를 짚은 요청·AI 없는 규칙 개정은 다른 기관 자료를 쓰지 않으니 기다리지 않는다
+    P.explicit?`${tg.map(a=>raLbl(a.no)).join('·')}${raJosa(raLbl(tg[tg.length-1]?tg[tg.length-1].no:'1'),['을','를'])} 짚은 요청이라 다른 기관 조사는 건너뛰고 바로 고칩니다.`:!raHasAi()?'AI 키 없이 규칙으로 고치는 요청이라 다른 기관 조사는 건너뜁니다(AI 수정안을 쓸 때만 참고합니다).':'');
   s=step('수정안 작성');
   let ok=false;
   if(raHasAi()){
@@ -3018,6 +3039,8 @@ async function raAgAmend(P, step, fin, stop){
     if(vr&&vr.n){ s=step(vr.rep?'낱말 바꾸기':vr.q?'수치 반영':'조문 삭제'); fin(s,_e(raArr(vr.notes).join(' / '))+'<br>결과 화면에서 맞는지 확인하세요.'); } }
   if(!raEffChanges().length&&!raEffAppx().length){                // 아직 고친 곳이 없으면 점검·문서는 의미가 없다
     s=step('조문 고치기');
+    if(vr&&vr.missing&&vr.scoped){ fin(s,_e(A.valNote),'warn'); A.step=1;
+      RA.agent.done={title:`적은 조에 “${vr.rep.a}”${raJosa(vr.rep.a,['이','가'])} 없습니다`,sub:'조 번호를 확인하거나, 내규 전체에서 바꾸려면 조 번호 없이 다시 요청하세요.',acts:[['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",1]]}; return; }
     if(vr&&vr.missing){                                             // 이 내규엔 그 말이 없다 — 다른 내규에 걸친 명칭일 수 있다
       fin(s,`「${_e(A.title)}」에는 “${_e(vr.rep.a)}”${raJosa(vr.rep.a,['이','가'])} 따로 쓰인 곳이 없습니다. 여러 ${_e(RA_ORG.reg_word)}에 걸친 명칭이면 모든 ${_e(RA_ORG.reg_word)}에서 찾아 한 번에 정비할 수 있습니다.`,'warn');
       _raBulkGo=vr.rep;
@@ -3040,7 +3063,7 @@ async function raAgAmend(P, step, fin, stop){
   s=step('개정문 검증'); { const rt=raRtRun(); fin(s, rt&&rt.ok?`개정문을 현행에 되돌려 적용한 결과가 수정안과 일치합니다(조 ${rt.n}개${rt.nx?`·별표 ${rt.nx}개`:''})`:`개정문 적용 결과가 수정안과 ${rt?rt.diffs.length:'?'}곳 다릅니다 — 확인 단계의 “개정문 검증”을 보세요`, rt&&rt.ok?'ok':'warn'); }
   s=step('절차 판단'); fin(s,raAgProc(P.reg.category));
   s=step('문서 세트 준비'); fin(s,'개정문'+RA_VR+'개정 이유서'+RA_VR+'신구조문대비표'+RA_VR+'대국민 사전예고문'+RA_VR+'직원 의견수렴 공고'+RA_VR+'사전검토 의견서');
-  RA.agent.done={title:`「${A.title}」 개정안이 준비됐습니다`,sub:vr&&vr.n?`${vr.rep?'지시한 낱말을 내규 안 모든 곳에서 바꾸고':vr.q?'지시한 수치를 반영하고':'지시대로 조를 삭제하고'} 점검까지 마쳤습니다. 결과 화면에서 바뀐 곳(색 표시)을 확인하고 한글·Word로 저장하세요.`:'결과 화면에서 문장을 다듬고 한글·Word로 저장하세요.',
+  RA.agent.done={title:`「${A.title}」 개정안이 준비됐습니다`,sub:vr&&vr.n?`${vr.rep?(vr.scoped?'적은 조에서 지시한 낱말을 바꾸고':'지시한 낱말을 내규 안 모든 곳에서 바꾸고'):vr.q?'지시한 수치를 반영하고':'지시대로 조를 삭제하고'} 점검까지 마쳤습니다. 결과 화면에서 바뀐 곳(색 표시)을 확인하고 한글·Word로 저장하세요.`:'결과 화면에서 문장을 다듬고 한글·Word로 저장하세요.',
     acts:[['개정 결과 열기',"RA.amend.step=1;raTab('amend')",1],['문서 세트로 바로 가기',"raTab('amend');setTimeout(()=>raGoDoc('amend','cmp'),80)"]]};
 }
 async function raAgEnact(P, step, fin, stop){
@@ -4703,10 +4726,13 @@ function raEnactOutline(){
 }
 function raAlioRefList(mode){ const R=mode==='enact'?RA.enact.refs:RA.amend.alioRefs; return Object.values(R||{}).filter(r=>r&&r.src==='alio'); }
 function raAlioRefLine(r){ return `${r.org} 「${r.reg}」 ${raLbl(r.no)}(${r.title})`; }
-async function raAgAlioStep(mode, q, ctx, step, fin){
+let _raAlioDown=0;                                                  // 알리오에 연결되지 않았던 때 — 10분 동안은 다시 기다리지 않는다
+async function raAgAlioStep(mode, q, ctx, step, fin, why){
   const s=step('다른 기관 사례 조사(알리오)');
+  if(why){ fin(s,why,'skip'); return {}; }
+  if(_raAlioDown&&Date.now()-_raAlioDown<600000){ fin(s,'방금 알리오에 연결되지 않아 이번에는 건너뜁니다(10분 뒤 다시 시도). 결과 화면의 “다른 기관(알리오)”에서 직접 찾을 수 있습니다.','skip'); return {}; }
   const R=String(q||'').trim()?await raAlioCollect(q, ctx):{hits:[],refs:{},opened:[],note:'',orgs:0,failed:[]};
-  if(R.note&&!R.hits.length){ fin(s,`알리오를 조회하지 못해 건너뜁니다: ${_e(R.note)}`,'skip'); return {}; }
+  if(R.note&&!R.hits.length){ if(/연결|차단|점검|시간/.test(R.note)) _raAlioDown=Date.now(); fin(s,`알리오를 조회하지 못해 건너뜁니다: ${_e(R.note)}`,'skip'); return {}; }
   if(!String(q||'').trim()){ fin(s,'내규명이 정해지지 않아 다른 기관 검색을 건너뜁니다. 결과 화면의 “참고 자료” 단계에서 찾을 수 있습니다.','skip'); return {}; }
   if(!R.hits.length){ fin(s,`유관 기관 ${R.orgs}곳에서 “${_e(q)}” 규정을 찾지 못했습니다.`+(R.failed.length?` (${R.failed.length}곳 조회 못 함)`:''),'skip'); return {}; }
   const n=Object.keys(R.refs).length;

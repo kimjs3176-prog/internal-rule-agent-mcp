@@ -1115,3 +1115,26 @@ test('조 번호가 겹치는 내규: 전체 본문에서 빠뜨리지 않고, �
   const rt = c.raRoundTrip();
   assert.equal(rt.diffs.length, 0, JSON.stringify(rt.diffs).slice(0, 200));
 });
+
+test('조를 적은 요청은 그 조만 바꾸고, 다른 조에 있는 같은 말은 알려만 준다', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[
+      {no:'1',title:'목적',body:'여비 지급을 정한다.'},
+      {no:'15',title:'일비',body:'여비는 실비로 지급한다. 여비의 정산은 따로 한다.'},
+      {no:'20',title:'가족',body:'가족 여비는 지급한다.'}],appendix:[]};
+    RA.amend.title='여비규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.purpose='';`, c);
+  const A = vm.runInContext('RA.amend', c);
+  assert.equal(c.raNamedArts('제15조의 여비를 출장비로 바꿔줘').join(','), '15');
+  const r = c.raRuleApply(A, '여비규정 제15조의 여비를 출장비로 바꿔줘');
+  assert.ok(r.scoped && r.n === 2, JSON.stringify(r));
+  assert.equal(A.changes.map(x => x.no).join(','), '15');
+  assert.ok(A.changes[0].body.startsWith('출장비는') && A.valNote.includes('다른 조 2곳'), A.valNote);
+  // 조 번호가 없으면 내규 전체
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  const r2 = c.raRuleApply(A, '여비를 출장비로 바꿔줘');
+  assert.ok(!r2.scoped && A.changes.length >= 2);
+  // 적은 조에 없는 말
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  const r3 = c.raRuleApply(A, '제1조의 수당을 보상금으로 바꿔줘');
+  assert.ok(r3.missing && r3.scoped && A.valNote.includes('제1조에는'));
+});

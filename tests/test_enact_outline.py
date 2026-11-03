@@ -91,3 +91,11 @@ def test_addenda_date_check(ra):
 def test_lint_text_mode_reports_past_effective(client):
     r = client.post("/api/regagent/lint", json={"text": "제1조(목적) 이 규정은 목적을 정한다.", "addenda": "이 규정은 2020년 1월 1일부터 시행한다.", "title": "시험규정"}).get_json()
     assert any(i["code"] == "addate" and i["level"] == "warn" for i in r["issues"])
+
+
+def test_plan_marks_explicit_articles(client):
+    """조를 적은 요청은 계획에 explicit 표시 — 에이전트가 다른 기관 조사를 건너뛰고 그 조만 고친다"""
+    p = client.post("/api/regagent/plan", json={"request": "여비규정 제15조의 일비를 3만원으로 올려줘"}).get_json()["plan"]
+    assert p.get("explicit") is True and [a["no"] for a in p["articles"]] == ["15"]
+    q = client.post("/api/regagent/plan", json={"request": "여비규정에서 여비를 출장비로 바꿔줘"}).get_json()["plan"]
+    assert not q.get("explicit")
