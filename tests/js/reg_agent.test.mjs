@@ -1153,3 +1153,13 @@ test('목적만으로 자료조사→보고서: 핵심 낱말·목적 구절·�
     '알리오에 연결되지 않아', '4. 제정 주요 내용', '5. 검토 의견', '6. 향후 추진 일정', '끝.'].forEach(k => assert.ok(t.includes(k), k + '\n' + t));
   assert.equal(vm.runInContext("RA_DOCS.enact[0][0]+RA_DOCS.amend[0][0]", c), 'reportreport');
 });
+
+test('웹 인터페이스 지침: 진행 문구는 “…”, 수정안 카드의 입력칸·선택칸에는 이름(aria-label)', () => {
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../assets/reg_agent.js'), 'utf8');
+  assert.equal((src.match(/[가-힣A-Za-z)]\.\.\.(?=['`"<)])/g) || []).length, 0, '“...” 대신 “…”');
+  const c = load();
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[{no:'3',title:'정의',body:'여비를 정한다.'}],appendix:[]};
+    RA.amend.title='여비규정'; RA.amend.appx=[]; RA.amend.changes=[{type:'modify',no:'3',title:'정의',body:'출장비를 정한다.'}];`, c);
+  const h = c.raChangesView();
+  ['aria-label="제3조 개정 유형"', 'aria-label="제3조 조 제목"', 'aria-label="제3조 개정안"'].forEach(k => assert.ok(h.includes(k), k));
+});
