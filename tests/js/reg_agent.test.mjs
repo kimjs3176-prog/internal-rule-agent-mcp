@@ -1138,3 +1138,18 @@ test('조를 적은 요청은 그 조만 바꾸고, 다른 조에 있는 같은 
   const r3 = c.raRuleApply(A, '제1조의 수당을 보상금으로 바꿔줘');
   assert.ok(r3.missing && r3.scoped && A.valNote.includes('제1조에는'));
 });
+
+test('목적만으로 자료조사→보고서: 핵심 낱말·목적 구절·검토 보고서 구성', () => {
+  const c = load();
+  assert.equal(c.raKeyWords('개인정보 처리지침').join(','), '개인정보');
+  assert.ok(!c.raKeyWords('드론 운영지침을 새로 만들어줘').includes('운영'));
+  assert.equal(c.raWhyOf('출장비 현실화를 위해 여비규정 제15조의 일비를 3만원으로 올려줘'), '출장비 현실화');
+  assert.equal(c.raWhyOf('여비규정 제15조의 일비를 3만원으로'), '');
+  vm.runInContext(`RA.enact.title='드론 운영지침'; RA.enact.background='업무용 드론을 안전하게 운영하기';
+    RA.enact.draft={text:'제1조(목적) 이 지침은 업무용 드론의 안전한 운영에 필요한 사항을 정함을 목적으로 한다.\\n제2조(비행 승인) 원장이 정한다.',addenda:'',purpose:'업무용 드론의 안전한 운영에 필요한 사항을 정하기 위하여 제정하려는 것임.',main:''};
+    RA.enact.research={own:[{reg:'정보보안규칙',slug:'x',arts:[{no:'66',title:'개인정보보호'}]}],laws:[{name:'개인정보 보호법',n:2}],alio:[],alioNote:'알리오에 연결되지 않아 조회하지 못함'};`, c);
+  const t = c.raBlocksText(c.raReportBlocks(c.raDocCtx('enact'), 'enact'));
+  ['제정 검토 보고', '1. 추진 배경 및 목적', '추진 배경: 업무용 드론을 안전하게 운영하기 위함', '3. 자료조사 결과', '「정보보안규칙」 제66조(개인정보보호)', '「개인정보 보호법」(관련 내규에서 2회 인용)',
+    '알리오에 연결되지 않아', '4. 제정 주요 내용', '5. 검토 의견', '6. 향후 추진 일정', '끝.'].forEach(k => assert.ok(t.includes(k), k + '\n' + t));
+  assert.equal(vm.runInContext("RA_DOCS.enact[0][0]+RA_DOCS.amend[0][0]", c), 'reportreport');
+});
