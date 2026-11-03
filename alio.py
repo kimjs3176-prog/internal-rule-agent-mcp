@@ -97,6 +97,31 @@ def _request(method: str, path: str, *, json_body=None, binary=False, retries=2,
     raise last or AlioError("NETWORK", "알리오 응답 시간이 초과되었습니다. 잠시 뒤 다시 시도하세요.")
 
 
+_REACH = {"ok": None, "at": 0.0}
+PROBE_TIMEOUT = float(os.environ.get("ALIO_PROBE_TIMEOUT", "2.5"))
+PROBE_TTL = 600                                         # 10분 동안은 확인 결과를 다시 쓴다
+
+
+def reachable(force: bool = False) -> bool:
+    """알리오에 닿는지 짧게(≤2.5초) 확인하고 10분 동안 기억한다.
+    사내망·차단 환경에서 기관 목록 조회가 재시도까지 하며 십수 초를 기다리던 것을 막는다."""
+    now = time.time()
+    if not force and _REACH["ok"] is not None and now - _REACH["at"] < PROBE_TTL:
+        return _REACH["ok"]
+    try:
+        r = _S.head(BASE, timeout=PROBE_TIMEOUT, allow_redirects=True)
+        ok = r.status_code < 500
+    except Exception:
+        ok = False
+    _REACH.update(ok=ok, at=now)
+    return ok
+
+
+def ensure_reachable():
+    if not reachable():
+        raise AlioError("NETWORK", "알리오에 연결하지 못했습니다(네트워크 차단 또는 사이트 점검). 연결되는 곳에서 다시 시도하세요.")
+
+
 def _json(method: str, path: str, body=None, deadline=None):
     _, txt = _request(method, path, json_body=body, deadline=deadline)
     try:

@@ -3577,6 +3577,7 @@ def _alio_err(e):
 def ra_alio_orgs():
     """알리오 기관 목록 + 우리 기관·유관 기관(org_config.json alio.peer_depts·peers)."""
     try:
+        alio.ensure_reachable()                    # 닿지 않으면 바로 알린다(재시도하며 기다리지 않음)
         orgs = alio.list_orgs()
     except alio.AlioError as e:
         return _alio_err(e)
@@ -3602,6 +3603,7 @@ def ra_alio_search():
     if not q and not cat and not b.get("all"):
         return jsonify({"success": False, "error": "규정명 검색어(예: 여비, 드론)를 넣으세요."}), 400
     try:
+        alio.ensure_reachable()
         r = alio.search(q, ids[:alio.MAX_ORGS_PER_CALL], cat)
     except alio.AlioError as e:
         return _alio_err(e)
