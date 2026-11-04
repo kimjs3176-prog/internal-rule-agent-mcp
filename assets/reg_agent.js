@@ -62,7 +62,7 @@ const RA_NAV=[
 ];
 // 처음 보는 사람이 메뉴 이름만으로 고르기 어려운 ‘작업’ 넷은 한 줄 설명을 늘 보여 준다
 const RA_NAV_SUB={agent:'한 문장으로 맡기기',health:'우리 내규 상태 보기',amend:'있는 내규 고치기',enact:'새 내규 만들기'};
-function raNavTab(k){ const t=RA_TABS.find(x=>x[0]===k); if(!t) return ''; const [,l,h]=t; return `<button class="ra-tab${RA.tab===k?' on':''}" data-k="${k}" ${RA.tab===k?'aria-current="page"':''} title="${_e(h)}" onclick="raTab('${k}')">${raIc(k)}<span class="ra-tab-t"><b>${l}</b>${RA_NAV_SUB[k]?`<small class="on">${_e(RA_NAV_SUB[k])}</small>`:`<small>${_e(h)}</small>`}</span></button>`; }
+function raNavTab(k){ const t=RA_TABS.find(x=>x[0]===k); if(!t) return ''; const [,l,h]=t; return `<button class="ra-tab${RA.tab===k?' on':''}" data-k="${k}" ${RA.tab===k?'aria-current="page"':''} title="${_e(h)}" onclick="raTab('${k}')">${raIc(k)}<span class="ra-tab-t"><b>${l}${k==='health'&&raWatchNew().length?` <span class="ra-badge" aria-label="상위법 변경 ${raWatchNew().length}건">${raWatchNew().length}</span>`:''}</b>${RA_NAV_SUB[k]?`<small class="on">${_e(RA_NAV_SUB[k])}</small>`:`<small>${_e(h)}</small>`}</span></button>`; }
 function raNavHtml(grouped){
   if(!grouped) return RA_TABS.map(t=>raNavTab(t[0])).join('');
   const open=(RA.ui&&RA.ui.nav)||{};
@@ -3247,12 +3247,12 @@ async function _raHealthLoad(){
 }
 let _raHealth=null;
 function raHealthLaws(){ return raOnce('healthLaws', _raHealthLaws); }
-async function _raHealthLaws(){
-  const H=RA.health; if(!_raHealth) return;
-  H.law=H.law||{}; const old=Date.now()-7*864e5;
+async function _raHealthLaws(opt){
+  const H=RA.health; if(!_raHealth) return; const quiet=!!(opt&&opt.quiet);
+  H.law=H.law||{}; const old=Date.now()-((opt&&opt.maxAge)||7*864e5);
   const all=raHealthNorms(_raHealth);
   let names=all.filter(n=>!H.law[n]||!(H.law[n].at>old));
-  if(!names.length) names=all.slice();          // 모두 최근에 확인했어도 누르면 다시 확인한다
+  if(!names.length){ if(quiet) return; names=all.slice(); }   // 모두 최근에 확인했어도 누르면 다시 확인한다(자동 확인은 건너뜀)
   const bar=document.getElementById('raLawProg'); let done=0, fail=0, stopped='';
   raHealthLaws.stop=false;
   for(let i=0;i<names.length;i+=6){
@@ -3266,7 +3266,46 @@ async function _raHealthLaws(){
     if(!ok){ stopped='법제처가 응답하지 않아 멈췄습니다. 잠시 뒤 다시 시도하세요'; break; }   // 한 묶음이 모두 실패하면 나머지도 실패할 가능성이 높다
   }
   H.lawErr=(fail||stopped)?{n:fail, msg:stopped||'', at:Date.now()}:null;              // 못 본 것은 화면에 남겨 “확인했다”로 오해하지 않게 한다
-  _raSave(); _toast(`상위법·행정규칙 ${done}건 확인`+(fail?`, ${fail}건 실패`:'')+(stopped?` — ${stopped}`:''),5000); raHealthLoad();
+  H.lawAt=Date.now(); if(done) await raWatchUpdate();
+  _raSave(); if(!quiet) _toast(`상위법·행정규칙 ${done}건 확인`+(fail?`, ${fail}건 실패`:'')+(stopped?` — ${stopped}`:''),5000);
+  else if(raWatchNew().length) _toast(`상위법 변경 ${raWatchNew().length}건을 찾았습니다 — 건강검진에서 확인하세요.`,7000);
+  if(RA.tab==='health'||!quiet) raHealthLoad(); else raNavRefresh();
+}
+// ── 상위법 개정 감시: 지난 확인과 견줘 새로 공포·시행된 개정을 알림으로 남긴다(확인함을 누를 때까지 메뉴에 숫자) ──
+async function raWatchUpdate(){
+  const H=RA.health, cur={}; Object.entries(H.law||{}).forEach(([k,v])=>{ if(v&&v.ef) cur[k]={ef:v.ef,next:v.next||null}; });
+  if(!Object.keys(cur).length) return;
+  const d=await raPost('/api/regagent/watch/diff',{prev:H.watchBase||null,cur}); if(!d||!d.success) return;
+  const W=H.watch||{}, key=c=>c.law+'|'+c.kind+'|'+c.ef, seen=new Set();
+  const list=raArr(d.changes).map(c=>Object.assign({},c,{found:Date.now()})).concat(raArr(W.changes)).filter(c=>{ const k=key(c); if(seen.has(k)) return false; seen.add(k); return true; });
+  H.watch={changes:list.slice(0,100), at:Date.now(), since:W.at||H.watchBaseAt||null, first:!!d.first&&!list.length};
+  H.watchBase=d.snapshot; H.watchBaseAt=Date.now(); _raSave(); raNavRefresh();
+}
+function raWatchNew(){ return raArr((RA.health.watch||{}).changes).filter(c=>!c.seen); }
+function raWatchSeen(k){ const W=RA.health.watch; if(!W) return; raArr(W.changes).forEach(c=>{ if(k==='*'||c.law+'|'+c.kind+'|'+c.ef===k) c.seen=Date.now(); }); _raSave(); raRerender('health'); raNavRefresh(); }
+function raNavRefresh(){ const nav=document.getElementById('raNav'); if(nav) nav.innerHTML=raNavHtml(true); }
+// 열 때 하루 한 번 조용히 확인(한 번이라도 직접 확인한 뒤부터, 끄기 가능) — 법제처가 막힌 망이면 조용히 멈춘다
+async function raWatchAuto(){
+  const H=RA.health; if(H.watchAuto===false||!Object.keys(H.law||{}).length) return;
+  if(H.lawAt&&Date.now()-H.lawAt<864e5) return;
+  if(_raBusy['once:healthLaws']) return; _raBusy['once:healthLaws']=true;
+  try{ if(!_raHealth){ const d=await raPost('/api/regagent/health',{law_info:H.law||{}}); if(!d.success) return; _raHealth=d; }
+    await _raHealthLaws({quiet:true, maxAge:864e5}); }
+  catch(e){} finally{ _raBusy['once:healthLaws']=false; }
+}
+setTimeout(()=>{ raWatchAuto(); },6000);
+function raWatchView(d){
+  const H=RA.health, W=H.watch, nw=raWatchNew(), auto=H.watchAuto!==false;
+  const tog=`<label class="ra-chk ra-watch-auto"><input type="checkbox" ${auto?'checked':''} onchange="RA.health.watchAuto=this.checked;_raSave()"> 화면을 열 때 하루 한 번 자동 확인</label>`;
+  if(!W) return `<div class="ra-hint">${raIc('info')}“상위법·행정규칙 최신성 확인”을 한 번 하면 그 결과를 기준으로 저장하고, 이후 확인 때마다 <b>새로 공포·시행된 개정</b>을 찾아 여기와 메뉴에 알립니다.</div>${tog}`;
+  const when=`<span class="ra-meta">마지막 확인 ${_e(new Date(W.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}))}</span>`;
+  if(!nw.length) return `<div class="ra-ok">${raIc('tick')}${W.first?'기준을 저장했습니다. 다음 확인부터 새로 공포·시행된 상위법·행정규칙을 알려 드립니다.':'지난 확인 이후 새로 공포·시행된 상위법·행정규칙이 없습니다.'}</div><div class="ra-row">${when}${tog}</div>`;
+  return `<ul class="ra-watch">`+nw.map(c=>{ const k=c.law+'|'+c.kind+'|'+c.ef, rs=raArr(c.regs), n=c.kind==='promulgated'?raDday(c.ef,d.today):null;
+      return `<li><div class="ra-watch-h"><span class="ra-chip ${c.kind==='promulgated'?'warn':''}">${c.kind==='promulgated'?'새 개정 공포':'개정 시행'}</span> ${raLawLink(c.law)}`+
+        `<span class="ra-sub">${c.kind==='promulgated'?`${c.anc?raYmdDot(c.anc)+' 공포 · ':''}${raYmdDot(c.ef)} 시행 예정${n!==null&&n>=0?` (D-${n})`:''}`:`${raYmdDot(c.prev_ef)} → ${raYmdDot(c.ef)} 시행`}${c.type?' · '+_e(c.type):''}</span></div>`+
+        `<div class="ra-sub">인용하는 ${_e(RA_ORG.reg_word)} ${rs.length}개: ${rs.slice(0,5).map(r=>`<a class="ra-link" href="${raRegUrl(r.slug)}" target="_blank" rel="noopener">${_e(r.title)}</a>`).join(', ')}${rs.length>5?` 외 ${rs.length-5}개`:''}</div>`+
+        `<div class="ra-row" style="margin:6px 0 0"><button class="svc-btn yes sm" onclick="raHealthUpper('${_a(c.law)}')">${raIc('search')}영향 조문 찾기</button><button class="svc-btn ghost sm" onclick="raWatchSeen('${_a(k)}')">확인함</button></div></li>`; }).join('')+
+    `</ul><div class="ra-row">${when}${nw.length>1?`<button class="ra-link" onclick="raWatchSeen('*')">모두 확인함</button>`:''}${tog}</div>`;
 }
 // 시행일을 확인할 상위 규범: 법률·시행령·시행규칙 + 정부 규정·훈령·예규·고시·지침(내규 제외)
 function raHealthNorms(d){ return raArr(d&&d.laws).concat(raArr(d&&d.rules)); }
@@ -3307,6 +3346,7 @@ function raHealthView(){
     (raArr(d.unfound).length&&lawN?`<div class="ra-meta" style="margin-top:4px">법제처에서 못 찾은 이름 ${d.unfound.length}건: ${d.unfound.slice(0,6).map(x=>'「'+_e(x)+'」').join(', ')}${d.unfound.length>6?' 외':''} — 약칭·옛 이름·끊긴 띄어쓰기면 조문의 법령명을 정식 명칭으로 고치세요.</div>`:'');
   return `<div class="ra-wide" id="raHealth">${seg}${tiles}`+
     `<div class="ra-grid2 ra-h2">${raSec(1,'등급 분포',raTip('막대를 누르면 아래 목록을 거릅니다'),dist+rule)}${raSec(2,'상위법·행정규칙 최신성','법제처 현행 법령·행정규칙 기준',lawSec)}</div>`+
+    raSec(3,`상위법 변경 알림${raWatchNew().length?` <span class="ra-badge">${raWatchNew().length}</span>`:''}`,raTip('지난번 법제처 확인과 견줘 새로 공포됐거나 시행된 상위법·행정규칙입니다. “영향 조문 찾기”로 고칠 조문을 바로 엽니다. 사내 서버에서는 scripts/watch_laws.py를 매일 돌려 메신저로 받을 수도 있습니다.'),raWatchView(d))+
     raSec(3,'곧 시행되는 상위법·행정규칙',raTip('공포됐지만 아직 시행 전인 상위법·행정규칙입니다(180일 안). 시행 전에 인용한 '+RA_ORG.reg_word+'를 미리 정비할 수 있습니다. “상위법·행정규칙 최신성 확인”을 누르면 함께 찾습니다.'),raUpcomingView(d,lawN))+
     raSec(4,'정비 우선순위 Top 10','점수 낮은 순',prio)+
     raSec(4,`전체 ${_e(RA_ORG.reg_word)} 진단표`,'',table)+

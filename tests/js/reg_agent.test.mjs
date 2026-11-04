@@ -1209,3 +1209,16 @@ test('대상 고르기: 조문이 없는 매뉴얼 형식 문서는 빈 목록 �
   vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[{no:'1',title:'목적',body:'x'}],appendix:[]};`, c);
   assert.ok(c.raSelHint().includes('고칠 조문이나 별표·서식을 체크하세요'));
 });
+
+test('상위법 감시: 확인하지 않은 알림만 세고, 알림 카드에서 영향 조문 찾기로 이어진다', () => {
+  const c = load();
+  vm.runInContext(`RA.health.watch={at:Date.now(),changes:[
+    {law:'근로기준법',kind:'promulgated',ef:'20990301',anc:'20990101',type:'일부개정',prev_ef:'20250101',regs:[{slug:'복무규정',title:'복무규정'}]},
+    {law:'국가재정법',kind:'enforced',ef:'20260101',anc:'',type:'',prev_ef:'20240101',regs:[],seen:1}]};`, c);
+  assert.equal(c.raWatchNew().length, 1);
+  const h = c.raWatchView({ today: '20261104' });
+  assert.ok(h.includes('새 개정 공포') && h.includes("raHealthUpper('근로기준법')") && h.includes('복무규정'), h);
+  assert.ok(!h.includes('국가재정법'));                 // 확인함 누른 것은 숨김
+  vm.runInContext(`RA.health.watch=null;`, c);
+  assert.ok(c.raWatchView({ today: '20261104' }).includes('기준으로 저장'));
+});
