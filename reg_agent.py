@@ -3135,6 +3135,80 @@ def upcoming_laws(rows: list) -> list:
 _LAW_FRESH: dict = {}
 
 
+def law_fresh_one(nm: str, look_law, look_rule) -> dict:
+    """규범 하나의 현행 시행일·다음 판(공포됐지만 시행 전) — 건강검진과 상위법 감시가 함께 쓴다."""
+    try:
+        is_law = bool(_LAW_NAME_OK.search(nm))
+        v = (look_law if is_law else (look_rule or look_law))(nm) or {}
+        if v.get("error"):
+            return {"error": str(v["error"])[:120]}
+        nx = v.get("next") if isinstance(v.get("next"), dict) else None
+        return {"ef": v.get("ef", ""), "status": v.get("status", ""), "name": v.get("name", ""),
+                "kind": "law" if is_law or v.get("kind") == "law" else "admrul",
+                "found": bool(v.get("mst") or v.get("id")) and v.get("rank", 99) <= 1,
+                **({"next": {k: str(nx.get(k) or "")[:40] for k in ("ef", "anc", "type")}} if nx else {})}
+    except Exception as e:
+        return {"error": str(e)[:120]}
+
+
+# ── 상위법 개정 감시: 지난번 확인과 견줘 “새로 공포된 개정”·“새로 시행된 개정”을 찾고 인용 내규를 붙인다 ──
+def law_cite_index() -> dict:
+    """인용하는 상위 규범명 → 그 규범을 인용하는 내규 [{slug, title}] (건강검진과 같은 이름 기준)."""
+    idx: dict = {}
+    for r in all_regs():
+        for nm in cited_laws(r, official=True) + cited_rules(r):
+            lst = idx.setdefault(nm, [])
+            if not any(x["slug"] == r["slug"] for x in lst):
+                lst.append({"slug": r["slug"], "title": r["title"]})
+    return idx
+
+
+def _watch_ent(v) -> dict:
+    nx = v.get("next") if isinstance(v.get("next"), dict) else None
+    return {"ef": str(v.get("ef") or "")[:8], "next": ({k: str(nx.get(k) or "")[:40] for k in ("ef", "anc", "type")} if nx and nx.get("ef") else None)}
+
+
+def law_watch_diff(prev, cur: dict, idx: dict = None) -> dict:
+    """prev·cur: {규범명: {ef, next:{ef,anc,type}|None}}. 처음(prev 없음)은 기준만 남기고 알림은 없다.
+    → {first, changes:[{law, kind:'promulgated'|'enforced', ef, anc, type, prev_ef, regs}], snapshot}"""
+    cur = {str(k)[:120]: _watch_ent(v) for k, v in (cur or {}).items() if isinstance(v, dict) and not v.get("error") and v.get("ef")}
+    prev = {str(k): _watch_ent(v) for k, v in prev.items() if isinstance(v, dict)} if isinstance(prev, dict) else {}
+    snap = dict(prev)
+    snap.update(cur)                                  # 이번에 못 본 규범은 지난 기준을 그대로 둔다(다음에 “새 개정”으로 오인하지 않게)
+    if not prev:
+        return {"first": True, "changes": [], "snapshot": snap}
+    changes = []
+    for nm, c in cur.items():
+        p = prev.get(nm)
+        if not p:                                     # 새로 인용하기 시작한 규범 — 기준만 잡는다
+            continue
+        nx, pnx = c["next"], p["next"]
+        if nx and (not pnx or (pnx["ef"], pnx["anc"]) != (nx["ef"], nx["anc"])):
+            changes.append({"law": nm, "kind": "promulgated", "ef": nx["ef"], "anc": nx["anc"], "type": nx["type"], "prev_ef": c["ef"]})
+        elif p["ef"] and c["ef"] > p["ef"]:
+            changes.append({"law": nm, "kind": "enforced", "ef": c["ef"], "anc": (pnx or {}).get("anc", ""), "type": (pnx or {}).get("type", ""), "prev_ef": p["ef"]})
+    if changes:
+        idx = law_cite_index() if idx is None else idx
+        lk = {_nk(k): v for k, v in idx.items()}
+        for ch in changes:
+            ch["regs"] = idx.get(ch["law"]) or lk.get(_nk(ch["law"])) or []
+    changes.sort(key=lambda x: (x["kind"] != "promulgated", x["ef"], x["law"]))
+    return {"first": False, "changes": changes, "snapshot": snap}
+
+
+@bp.route("/api/regagent/watch/diff", methods=["POST"])
+def ra_watch_diff():
+    """상위법 감시 — body {prev, cur}(화면이 건강검진에서 확인한 시행일) → 지난 확인 이후 바뀐 것과 새 기준."""
+    b = _body()
+    cur = b.get("cur") if isinstance(b.get("cur"), dict) else {}
+    if len(cur) > 1000:
+        return jsonify({"success": False, "error": "규범이 너무 많습니다(1000건 이내)."}), 400
+    prev = b.get("prev") if isinstance(b.get("prev"), dict) else None
+    if prev is not None and len(prev) > 2000:
+        prev = None
+    return jsonify({"success": True, **law_watch_diff(prev, cur)})
+
+
 @bp.route("/api/regagent/health/laws", methods=["POST"])
 def ra_health_laws():
     """상위법 최신 시행일 조회(법제처). body {names:[...]} — 서버리스 시간 제한에 맞춰 한 번에 최대 12건.
@@ -3157,18 +3231,7 @@ def ra_health_laws():
         import concurrent.futures as cf
 
         def one(nm):
-            try:
-                is_law = bool(_LAW_NAME_OK.search(nm))
-                v = (look_law if is_law else look_rule)(nm) or {}
-                if v.get("error"):
-                    return nm, {"error": str(v["error"])[:120]}
-                nx = v.get("next") if isinstance(v.get("next"), dict) else None
-                return nm, {"ef": v.get("ef", ""), "status": v.get("status", ""), "name": v.get("name", ""),
-                            "kind": "law" if is_law or v.get("kind") == "law" else "admrul",
-                            "found": bool(v.get("mst") or v.get("id")) and v.get("rank", 99) <= 1,
-                            **({"next": {k: str(nx.get(k) or "")[:40] for k in ("ef", "anc", "type")}} if nx else {})}
-            except Exception as e:
-                return nm, {"error": str(e)[:120]}
+            return nm, law_fresh_one(nm, look_law, look_rule)
         # 서버리스 시간 제한 안에서 끝내도록 전체 대기 시간을 제한한다(늦은 건은 실패로 돌려 다시 시도하게 함)
         ex = cf.ThreadPoolExecutor(max_workers=6)
         futs = {ex.submit(one, nm): nm for nm in todo}
