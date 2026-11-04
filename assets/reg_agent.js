@@ -1059,7 +1059,11 @@ function raSelAll(on){
   raWizSync('amend');
 }
 function raSelAllLabel(){ const b=document.getElementById('raSelAllBtn'); if(b) b.lastChild.textContent=(RA.amend.filter||'').trim()?'찾은 것 모두 선택':'전부 선택'; }
-function raSelHint(){ const n=raSelCount(); return `${raIc('info')}${n?`조문·별표 <b>${n}</b>개를 골랐습니다. “다음”을 눌러 고치세요.`:'고칠 조문이나 별표·서식을 체크하세요. 신설만 하거나 AI에게 맡기려면 체크하지 않아도 됩니다.'}`; }
+function raSelHint(){ const n=raSelCount();
+  // “제N조” 조문이 하나도 없는 문서(매뉴얼·안내서 형식) — 빈 목록 앞에서 막히지 않게 이유와 다음 할 일을 알린다
+  if(_raArts&&!raArr(_raArts.articles).length&&!raArr(_raArts.appendix).length)
+    return `${raIc('alert')}「${_e(_raArts.title||'')}」에는 “제N조” 형식의 조문이 없습니다(매뉴얼·안내서 형식). 그래서 조문 단위로 고를 수 없습니다. 고칠 부분을 조문 형식으로 “원문 붙여넣기”에 넣거나, 새로 조문 체계로 만들려면 제정을 쓰세요.`;
+  return `${raIc('info')}${n?`조문·별표 <b>${n}</b>개를 골랐습니다. “다음”을 눌러 고치세요.`:'고칠 조문이나 별표·서식을 체크하세요. 신설만 하거나 AI에게 맡기려면 체크하지 않아도 됩니다.'}`; }
 function raOld(no){ return _raArts?_raArts.articles.find(a=>a.no===no):null; }
 // ── 별표·서식 블록 ─────────────────────────────────────────────────────────
 function raOldX(id){ return _raArts?raArr(_raArts.appendix).find(x=>x.id===id):null; }
