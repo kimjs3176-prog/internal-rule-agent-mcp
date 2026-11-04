@@ -1200,3 +1200,12 @@ test('다른 기관 프로필: 근거 조항이 빈칸이면 빈 괄호를 쓰�
   assert.ok(c.raWho('사장').includes('w-head'));
   assert.ok(c.raWho('주무부서').includes('w-dept'));
 });
+
+test('대상 고르기: 조문이 없는 매뉴얼 형식 문서는 빈 목록 대신 이유와 다음 할 일을 알린다', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'m',title:'여비업무 처리지침',articles:[],appendix:[]}; RA.amend.sel={}; RA.amend.selx={};`, c);
+  const h = c.raSelHint();
+  assert.ok(h.includes('“제N조” 형식의 조문이 없습니다') && h.includes('원문 붙여넣기'), h);
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[{no:'1',title:'목적',body:'x'}],appendix:[]};`, c);
+  assert.ok(c.raSelHint().includes('고칠 조문이나 별표·서식을 체크하세요'));
+});
