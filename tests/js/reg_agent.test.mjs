@@ -1189,3 +1189,14 @@ test('에이전트: 수치 지시를 못 바꾸면 결론 줄에 이유와 비�
   c.raAgentRetryKey('연차유급휴가');        // 실행 중이면 바꾸지 않는다
   assert.equal(c.__RA().agent.req, '복무규정의 연차휴가 일수를 20일로 해줘');
 });
+
+test('다른 기관 프로필: 근거 조항이 빈칸이면 빈 괄호를 쓰지 않고, 기관장 호칭이 달라도 결재선을 알아본다', () => {
+  const c = load();
+  vm.runInContext(`RA.amend.review={rows:[{t:'내규의 필요성',ref:'',status:'ok',items:[]},{t:'내용의 적합성',ref:'제7조',status:'ok',items:[]}]};`, c);
+  const out = c.raOutReview({ title: '복무규정', word: '개정' }, 'amend');
+  assert.ok(out.items[0].t.startsWith('내규의 필요성: '), out.items[0].t);
+  assert.ok(out.items[1].t.startsWith('내용의 적합성(제7조): '), out.items[1].t);
+  vm.runInContext(`RA_ORG=Object.assign({},RA_ORG,{head:'사장'});`, c);
+  assert.ok(c.raWho('사장').includes('w-head'));
+  assert.ok(c.raWho('주무부서').includes('w-dept'));
+});

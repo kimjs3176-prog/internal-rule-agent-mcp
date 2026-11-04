@@ -1742,7 +1742,7 @@ function raReviewView(d){
   return raStack([{n:cnt('warn'),l:'보완 필요',tone:'bad'},{n:cnt('check'),l:'확인 필요',tone:'warn'},{n:cnt('ok'),l:'적합',tone:'ok'}],'심의기준 판정')+
     (d.model?`<div class="ra-meta"><span class="ra-chip sem">${raIc('spark')}AI 의견${RA_VR}${_e(d.model)}</span></div>`:'')+
     (d.notice?`<div class="ra-note ra-note-i">${raIc('info')}<span>${_e(d.notice)}</span></div>`:'')+
-    `<div class="ra-revg">`+d.rows.map(r=>`<div class="ra-revc s-${r.status}"><div class="ra-revc-h"><span class="ra-revc-ic t-${RA_ST_TONE[r.status]}">${raIc(RA_ST_IC[r.status])}</span><div><b>${_e(r.t)}</b> ${raTip(r.d||'')}<div class="ra-ref">${_e(r.ref)}</div></div>`+
+    `<div class="ra-revg">`+d.rows.map(r=>`<div class="ra-revc s-${r.status}"><div class="ra-revc-h"><span class="ra-revc-ic t-${RA_ST_TONE[r.status]}">${raIc(RA_ST_IC[r.status])}</span><div><b>${_e(r.t)}</b> ${raTip(r.d||'')}${r.ref?`<div class="ra-ref">${_e(r.ref)}</div>`:''}</div>`+
       `<span class="ra-st st-${RA_ST[r.status][1]}">${RA_ST[r.status][0]}</span></div>`+
       (r.items.length?`<ul class="ra-revc-l">${r.items.map(i=>`<li>${_e(i.msg)}</li>`).join('')}</ul>`:'')+
       (r.ai?`<div class="ra-aiop">${raIc('spark')}${_e(r.ai)}</div>`:'')+`</div>`).join('')+`</div>`+
@@ -2329,7 +2329,7 @@ function raOutNotice(c, staff){
 function raOutReview(c, mode){
   const d=RA[mode].review; if(!d) return null;
   const ai=d.model?'(AI) ':'';                               // AI가 쓴 의견은 자동 점검 결과와 구분해 적는다
-  const items=d.rows.map(r=>({t:`${r.t}(${r.ref}): ${RA_ST[r.status][0]}`, s:[...r.items.map(x=>x.msg), ...(r.ai?[`${ai}검토의견: ${r.ai}`]:[])]}));
+  const items=d.rows.map(r=>({t:`${r.t}${r.ref?`(${r.ref})`:''}: ${RA_ST[r.status][0]}`, s:[...r.items.map(x=>x.msg), ...(r.ai?[`${ai}검토의견: ${r.ai}`]:[])]}));
   if(d.delegation) items.push({t:`${ai}위임 범위·상위법 저촉 검토`, s:[d.delegation]});
   if(d.overall) items.push({t:`${ai}종합의견`, s:[d.overall]});
   return {title:`「${c.title}」 ${c.word}(안) 심의 사전검토 의견서`, lead:`검토 기준: 「${raRules()}」 심의사항, 검토일: ${raToday(0)}`+(d.model?` · (AI) 표시는 AI 검토의견(${d.model})`:''), items, tail:'끝.'};
@@ -4389,7 +4389,7 @@ function raEvidence(s, mode){
 function raStepGo(id){ const el=document.getElementById('raStep-'+id); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 function raWho(who){
   const w=String(who||'');
-  const k=/감사/.test(w)?'audit':/이사회|원장|기관장/.test(w)&&!/주무부서$/.test(w)?'head':/→/.test(w)?'flow':/내규관리부서/.test(w)&&!/주무/.test(w)?'mgmt':/·/.test(w)?'flow':'dept';
+  const k=/감사/.test(w)?'audit':(/이사회|원장|기관장/.test(w)||(RA_ORG&&RA_ORG.head&&w.includes(RA_ORG.head)))&&!/주무부서$/.test(w)?'head':/→/.test(w)?'flow':/내규관리부서/.test(w)&&!/주무/.test(w)?'mgmt':/·/.test(w)?'flow':'dept';
   return `<span class="ra-who w-${k}">${_e(w)}</span>`;
 }
 const RA_SS={done:'완료',next:'지금 할 일',locked:'선행 대기',tbd:'조건 미정',todo:'대기'};
@@ -4433,7 +4433,7 @@ function raPlanExport(fmt){
   const when=s=>{ if(s.st==='tbd') return '조건 확인 필요'; const r=sc.m[s.id]; if(!r) return ''; return r.e>r.s?`${raAddD(sc.start,r.s)} ~ ${raAddD(sc.start,r.e)}`:raAddD(sc.start,r.s); };
   const state=s=>s.done?`완료${s.doneAt?' '+s.doneAt:''}`:s.st==='tbd'?'미정':s.locked?'선행 대기':st.next&&st.next.id===s.id?'진행':'예정';
   const rows=[['순번','단계','담당','근거','예정일','산출 문서','상태'].map(t=>({t,hd:1})),
-    ...st.live.map(s=>[{t:String(s.no)},{t:s.t+(s.optional&&!/선택/.test(s.t)?'(선택)':'')},{t:s.who||''},{t:`「${raRules()}」 ${s.ref||''}`},{t:when(s)},{t:s.docs.map(d=>names[d]).filter(Boolean).join(', ')},{t:state(s)}])];
+    ...st.live.map(s=>[{t:String(s.no)},{t:s.t+(s.optional&&!/선택/.test(s.t)?'(선택)':'')},{t:s.who||''},{t:s.ref?`「${raRules()}」 ${s.ref}`:''},{t:when(s)},{t:s.docs.map(d=>names[d]).filter(Boolean).join(', ')},{t:state(s)}])];
   const head=[`「${title}」 ${mode==='amend'?'개정':mode==='enact'?'제정':'제·개정'} 추진계획표`,'',
     `기준일 ${sc.start} · 예상 시행 가능일 ${sc.end}${sc.tbd?'(잠정)':''} (최소 ${sc.total}일${sc.brk.length?': '+sc.brk.join(' + '):''})`+(sc.target?` · 목표 시행일 ${sc.target} (${sc.slack>=0?`여유 ${sc.slack}일`:`${-sc.slack}일 부족`})`:''),
     `해당 여부: `+raPQ().map(q=>`${raQLabel(q.k)} ${a[q.k]?raALabel(q.k,a[q.k]):'미답변'}`).join(' · '),''].join('\n');

@@ -16,6 +16,9 @@ python scripts/import_regulations.py samples/public_org/regs --reset
 
 # 2) 기관 프로필을 바꿔 서버 실행
 ORG_CONFIG=samples/public_org/org_config.json PORT=5200 python run_local.py
+
+# 3) 설정 점검 — 근거 조항이 우리 규칙에 있는지 등
+ORG_CONFIG=samples/public_org/org_config.json python scripts/check_org_config.py
 ```
 
-자동 시험은 `tests/test_public_org.py`입니다. 들여오기부터 조문 해석, 인용 영향, 제정 초안, 건강검진까지 확인합니다.
+단계별 자세한 안내는 `docs/contest/다른기관_도입안내.md`에 있습니다. 자동 시험은 `tests/test_public_org.py`입니다. 들여오기부터 조문 해석, 인용 영향, 제정 초안, 건강검진까지 확인합니다.

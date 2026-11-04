@@ -4982,7 +4982,7 @@ def _cmt_name(raw: str) -> str:
     keep = [toks.pop()]
     while toks:
         t = toks.pop()
-        if re.search(r"[을를이가은는에의여서고며다한된될할와과로라해시우면게도만]$", t) or t in ("다음", "각", "그", "이", "및", "또는", "농진원", "본원") \
+        if re.search(r"[을를이가은는에의여서고며다한된될할와과로라해시우면게도만]$", t) or t in ("다음", "각", "그", "이", "및", "또는", "본원", ORG.get("org_short") or "", ORG.get("org_name") or "") \
                 or len(keep) >= 3:
             break
         keep.insert(0, t)

@@ -1477,7 +1477,7 @@ PORT = int(os.environ.get("PORT", 5100))
 if __name__ == "__main__":
     url = f"http://localhost:{PORT}"
     print("=" * 50)
-    print("  🌾  KOAT 규정 제·개정 에이전트")
+    print("  🌾  규정 제·개정 에이전트")
     print(f"  🔗  {url}")
     print("  종료: Ctrl+C")
     print("=" * 50)
