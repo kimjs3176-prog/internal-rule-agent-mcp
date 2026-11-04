@@ -1163,3 +1163,29 @@ test('웹 인터페이스 지침: 진행 문구는 “…”, 수정안 카드�
   const h = c.raChangesView();
   ['aria-label="제3조 개정 유형"', 'aria-label="제3조 조 제목"', 'aria-label="제3조 개정안"'].forEach(k => assert.ok(h.includes(k), k));
 });
+
+test('수치 지시: 숫자가 낱말 앞에 오는 꼴(“15일의 연차휴가”)도 바꾸고, 낱말 뒤 꼴이 있으면 그쪽만', () => {
+  const c = load();
+  const q = c.raVqReq('복무규정 제6조의 연차휴가 일수를 20일로 해줘');
+  assert.equal(q.key, '연차휴가');
+  assert.equal(c.raVqInText('① 1년간 8할 이상 출근한 직원에게는 15일의 연차휴가를 준다.', q).body, '① 1년간 8할 이상 출근한 직원에게는 20일의 연차휴가를 준다.');
+  assert.equal(c.raVqInText('15일의 유급 연차휴가를 준다.', q).body, '20일의 유급 연차휴가를 준다.');
+  // 낱말 뒤 꼴이 있으면 앞 꼴은 보지 않는다(같은 문장에서 두 번 바꾸지 않음)
+  assert.equal(c.raVqInText('연차휴가는 15일로 하고, 10일의 연차휴가는 이월한다.', q).body, '연차휴가는 20일로 하고, 10일의 연차휴가는 이월한다.');
+  // 이미 목표 값이면 그대로, 단위가 다르면 손대지 않음
+  assert.equal(c.raVqInText('연차휴가는 20일로 한다. 3년의 연차휴가', q).n, 0);
+  assert.equal(c.raVqInText('15시간의 연차휴가', q).n, 0);
+  // 숫자와 낱말 사이가 멀면 바꾸지 않음
+  assert.equal(c.raVqInText('15일 이내에 신청한 직원의 연차휴가', q).n, 0);
+});
+
+test('에이전트: 수치 지시를 못 바꾸면 결론 줄에 이유와 비슷한 말 다시 요청 버튼을 둔다', () => {
+  const src = fs.readFileSync(path.join(root, 'assets/reg_agent.js'), 'utf8');
+  assert.ok(src.includes('값을 찾지 못했습니다`'), '못 찾음 결론');
+  assert.ok(src.includes("raAgentRetryKey('${w}')"), '비슷한 말 다시 요청 버튼');
+  assert.ok(src.includes('값이 여러 곳에 서로 달라 그대로 두었습니다'), '애매한 값 결론');
+  const c = load();
+  vm.runInContext(`RA.agent.req='복무규정의 연차휴가 일수를 20일로 해줘'; RA.agent.running=true; _raRetryKey='연차휴가';`, c);
+  c.raAgentRetryKey('연차유급휴가');        // 실행 중이면 바꾸지 않는다
+  assert.equal(c.__RA().agent.req, '복무규정의 연차휴가 일수를 20일로 해줘');
+});

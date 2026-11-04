@@ -1155,7 +1155,12 @@ function raVqInText(body, q){
   const ure=q.unit==='원'?'(?:만\\s*원|천\\s*원|원)':q.unit==='%'?'(?:%|퍼센트)':q.unit;
   const re=new RegExp(`(${raVqKeyRe(q.key)}[^\\n.。]{0,30}?)(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${ure})`,'g');
   let n=0; const olds=[];
-  const out=String(body).replace(re,(all,pre,num,unit)=>{ const old=raVqNum(num,unit); if(old===q.val) return all; n++; olds.push(num+unit); return pre+raVqFmt(q.val,num,unit); });
+  let out=String(body).replace(re,(all,pre,num,unit)=>{ const old=raVqNum(num,unit); if(old===q.val) return all; n++; olds.push(num+unit); return pre+raVqFmt(q.val,num,unit); });
+  // 낱말 뒤에서 못 찾으면 숫자가 앞에 오는 꼴(“15일의 연차휴가”·“3년간의 수습기간”)을 본다 — 숫자 바로 뒤에 그 낱말이 붙은 곳만
+  if(!n&&!re.test(String(body))){
+    const re2=new RegExp(`(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${ure})((?:\\s*간)?(?:\\s*의)?\\s*(?:[가-힣]{1,4}\\s+)?${raVqKeyRe(q.key)})`,'g');
+    out=out.replace(re2,(all,num,unit,post)=>{ const old=raVqNum(num,unit); if(old===q.val) return all; n++; olds.push(num+unit); return raVqFmt(q.val,num,unit)+post; });
+  }
   return {body:out, n, olds};
 }
 // 줄로 풀린 표(“구 분 / 머리… / 제1호 / 칸… / 제2호 …”)에서 열을 찾아 그 열의 숫자만 바꾼다
@@ -3122,8 +3127,16 @@ async function raAgAmend(P, step, fin, stop){
         acts:[[`모든 ${RA_ORG.reg_word}에서 찾기(일괄 정비)`,"raAgentGoBulk()",1],['개정 화면 열기',"RA.amend.step=1;raTab('amend')"]]};
       return; }
     fin(s,'대상 조문'+(relX.length?'과 관련 별표를':'을')+' 수정안 칸에 담았습니다. '+(vr&&vr.ambiguous?`“${_e(vr.q.key)}” 값이 여러 곳에 서로 다르게 있어(${vr.ambiguous.slice(0,4).map(x=>_e(x.replace(/ → .*$/,''))).join(' / ')}) 어느 것인지 추측하지 않고 그대로 두었습니다. 조 번호를 넣어 다시 요청하거나 직접 고치세요. `:vr&&vr.q?`“${_e(vr.q.key)}” 값이 들어 있는 곳을 찾지 못해 바꾸지 않았습니다${raNear(vr.q.key).length?` — 이 ${_e(RA_ORG.reg_word)}에 있는 비슷한 말: ${raNear(vr.q.key).map(w=>'“'+_e(w)+'”').join(', ')}`:'(조 번호·용어를 확인하세요)'}. `:'')+'문장을 고친 뒤 확인·검토 단계로 넘어가세요.','warn');
-    A.step=1; RA.agent.done={title:`「${A.title}」 개정 대상 조문을 준비했습니다`,sub:'결과 화면의 “고치기” 단계에서 조문 문장을 고치면 대비표·개정문·문서가 바로 만들어집니다.',
-      acts:[['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",1]]};
+    A.step=1;
+    // 수치 지시를 못 바꾼 이유를 결론 줄에 올린다 — 단계 안내까지 내려 읽지 않아도 다음 행동을 알 수 있게(비슷한 말로 바로 다시 요청)
+    const vq=vr&&vr.q, near=vq&&!vr.ambiguous?raNear(vr.q.key).filter(w=>/^[가-힣]+$/.test(w)).slice(0,2):[];
+    _raRetryKey=vq?vr.q.key:null;
+    RA.agent.done=vq&&vr.ambiguous?{title:`“${vr.q.key}” 값이 여러 곳에 서로 달라 그대로 두었습니다`,sub:`${vr.ambiguous.slice(0,4).map(x=>x.replace(/ → .*$/,'')).join(' / ')}${vr.ambiguous.length>4?' 외':''} — 어느 값인지 추측하지 않았습니다. 고치기 단계에서 해당 값을 직접 고치세요.`,
+        acts:[['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",1]]}
+      :vq?{title:`「${A.title}」에서 “${vr.q.key}” 값을 찾지 못했습니다`,sub:near.length?`이 ${RA_ORG.reg_word}에는 ${near.map(w=>'“'+w+'”').join(', ')}${raJosa(near[near.length-1],['이','가'])} 있습니다. 그 말로 다시 요청하거나 고치기 단계에서 직접 고치세요.`:'조 번호·용어를 확인해 다시 요청하거나 고치기 단계에서 직접 고치세요.',
+        acts:near.map((w,i)=>[`“${w}”${raJosa(w,['으로','로'])} 다시 요청`,`raAgentRetryKey('${w}')`,i?0:1]).concat([['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",near.length?0:1]])}
+      :{title:`「${A.title}」 개정 대상 조문을 준비했습니다`,sub:'결과 화면의 “고치기” 단계에서 조문 문장을 고치면 대비표·개정문·문서가 바로 만들어집니다.',
+        acts:[['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",1]]};
     return;
   }
   s=step('인용 영향 분석');
@@ -3171,6 +3184,10 @@ async function raAgEnact(P, step, fin, stop){
 }
 // 개정 요청의 낱말이 그 내규에 없을 때 — 같은 요청을 모든 내규 일괄 정비로 이어서 실행
 let _raBulkGo=null;
+// 수치 지시에서 못 찾은 낱말을 그 내규에 있는 비슷한 말로 바꿔 다시 실행(“연차휴가” → “연차유급휴가”)
+let _raRetryKey=null;
+function raAgentRetryKey(w){ const k=_raRetryKey; if(!k||!w||RA.agent.running) return; _raRetryKey=null;
+  RA.agent.req=String(RA.agent.req||'').split(k).join(w); const el=document.getElementById('raAgIn'); if(el) el.value=RA.agent.req; raAgentRun(); }
 function raAgentGoBulk(){ const r=_raBulkGo; if(!r) return; _raBulkGo=null;
   RA.agent.req=`모든 ${RA_ORG.reg_word}에서 “${r.a}”${raJosa(r.a,['을','를'])} “${r.b}”${raJosa(r.b,['으로','로'])} 바꿔줘`; const el=document.getElementById('raAgIn'); if(el) el.value=RA.agent.req; raAgentRun(); }
 async function raAgBulk(P, step, fin, stop){
