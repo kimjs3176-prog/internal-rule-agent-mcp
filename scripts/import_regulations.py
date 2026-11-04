@@ -3,7 +3,7 @@
 사용법
     python scripts/import_regulations.py <내규 파일 폴더> [--reset] [--dry-run]
 
-    · 폴더 안의 .hwpx .docx .html .htm .txt .md (.pdf .hwp 는 원본 보관만) 를 읽어
+    · 폴더 안의 .hwpx .hwp .docx .html .htm .txt .md .pdf 를 읽어(.hwp 는 본문 글자를 뽑고, .pdf 는 원본을 보여 주며 글자 층이 있으면 검색에 쓴다)
       regulations/<규정명>/index.html·text.txt 와 regulations_manifest.json 을 만든다.
     · 파일명이 규정명이 된다. "인사규정(2025년도 1월 일부개정).hwpx" 처럼 괄호 안은 개정 정보로 쓴다.
     · --reset 을 주면 기존 regulations/ 와 매니페스트를 비우고 새로 만든다(다른 기관 최초 설정).

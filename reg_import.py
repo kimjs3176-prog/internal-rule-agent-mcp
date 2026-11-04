@@ -1,6 +1,6 @@
 """기관 내규 원문 → 에이전트 데이터(regulations/<slug>/ + regulations_manifest.json) 변환.
 
-HWPX·DOCX·HTML·TXT·MD(·PDF·HWP는 원본 보관만)를 조문 단위로 다룰 수 있는 열람 HTML과
+HWPX·HWP·DOCX·HTML·TXT·MD(·PDF는 원본 열람, 글자 층이 있으면 검색용 본문)를 조문 단위로 다룰 수 있는 열람 HTML과
 본문 텍스트(text.txt)로 바꾼다. 다른 기관이 자기 내규를 들여올 때는
 `python scripts/import_regulations.py <폴더>` 를 쓰면 된다(이 모듈을 사용).
 """
