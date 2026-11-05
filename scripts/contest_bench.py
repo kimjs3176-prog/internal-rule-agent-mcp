@@ -170,10 +170,42 @@ def timing_bench(regs):
     return out
 
 
+def workload(regs):
+    """수작업 비교의 근거가 되는 작업량(실측) — 사람이 찾고·확인하고·고쳐야 하는 곳의 수, 현행 내규에 남은 점검 지적."""
+    import collections
+    import re
+    from api_server import app
+    c = app.test_client()
+    R = {r["title"]: r for r in regs}
+    y = R.get("여비규정")
+    out = {}
+    if y:
+        txt = "\n".join(a["body"] for a in y["articles"]) + "\n" + str(y.get("appendix", ""))
+        im15 = c.post("/api/regagent/impact", json={"slug": y["slug"], "nos": ["15"]}).get_json()
+        im20 = c.post("/api/regagent/impact", json={"slug": y["slug"], "nos": ["20"]}).get_json()
+        out["여비규정"] = {"조": len(y["articles"]), "일비_등장": txt.count("일비"), "여비_등장": len(re.findall(r"(?<![가-힣])여비", txt)),
+                        "제15조_인용": len(im15["inner"]) + sum(len(o["hits"]) for o in im15["outer"]), "제15조_관련별표": im15["summary"].get("appendix", 0),
+                        "제20조_인용": [x["no"] for x in im20["inner"]] + [f"{o['reg']} {h['no']}" for o in im20["outer"] for h in o["hits"]]}
+    b = c.post("/api/regagent/bulk", json={"old": "기획운영본부", "new": "경영기획본부", "whole": True}).get_json()
+    out["일괄정비"] = {"내규": b.get("reg_count"), "곳": b.get("total"), "전체_내규": len(regs)}
+    cnt, regs_with = collections.Counter(), collections.defaultdict(set)
+    for r in regs:
+        for i in ra.lint_articles(r["articles"], r.get("addenda", ""), r.get("appendix", ""), r["title"]):
+            if i["level"] in ("error", "warn"):
+                cnt[i["code"]] += 1
+                regs_with[i["code"]].add(r["title"])
+    out["현행_점검지적"] = {k: {"건": v, "내규": len(regs_with[k])} for k, v in cnt.most_common()}
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="정량 성과 측정(서버 쪽)")
     ap.add_argument("--json", default="")
+    ap.add_argument("--workload", action="store_true", help="수작업 비교 근거(작업량·현행 내규 점검 지적)만 출력")
     a = ap.parse_args(argv)
+    if a.workload:
+        print(json.dumps(workload(ra.all_regs()), ensure_ascii=False, indent=1))
+        return 0
     t0 = time.perf_counter()
     regs = ra.all_regs()
     inj = inject_bench(regs)
