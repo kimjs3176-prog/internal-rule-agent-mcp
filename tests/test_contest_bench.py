@@ -16,3 +16,12 @@ def test_inject_bench_detects_all_on_sample():
     for x in res:
         assert x["n"] >= 3, x
         assert x["hit"] == x["n"] and x["exact"] == x["n"], x
+
+
+def test_workload_counts():
+    """수작업 비교 문서(docs/contest/수작업비교.md)의 작업량 근거가 데이터에서 나온다."""
+    import contest_bench as cb
+    w = cb.workload(ra.all_regs())
+    assert w["여비규정"]["제20조_인용"] == ["24"] and w["여비규정"]["일비_등장"] >= 1
+    assert w["일괄정비"]["내규"] >= 1 and w["일괄정비"]["곳"] >= w["일괄정비"]["내규"]
+    assert isinstance(w["현행_점검지적"], dict)
