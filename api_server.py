@@ -42,6 +42,16 @@ else:
     ]
 CORS(app, origins=_cors_origins)
 
+
+@app.after_request
+def _security_headers(resp):
+    """vercel.json 과 같은 기본 보안 헤더 — Flask 가 직접 서빙하는 배포(Render·Railway·로컬)에서도
+    다른 사이트가 화면을 iframe 에 넣는 클릭재킹·MIME 추측을 막는다. 라우트가 정한 값은 덮지 않는다."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
+
 OC   = os.environ.get("LAW_OC", "tjsl0919")
 BASE = "https://www.law.go.kr/DRF"
 HEADERS = {
