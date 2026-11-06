@@ -899,7 +899,15 @@ function raAmendView(){
 function raLintOnlySet(){ const el=document.getElementById('raLintOnly'); if(el&&!el.checked) return null; return new Set(RA.amend.changes.map(c=>c.no)); }
 function raLintRedraw(){ const b=document.getElementById('raLint'); if(b) b.innerHTML=raLintView(RA.amend.lint, raLintOnlySet(), false, RA.amend.lintFixed); }
 function raAmendWorkMsg(){ const A=RA.amend, n=raEffChanges().length+raEffAppx().length; return n||String(A.intent||'').trim()?`지금 개정 작업(${n?`수정안 ${n}건`:'개정 의도'})을 지우고 다른 ${RA_ORG.reg_word}로 새로 시작할까요?`:''; }
+// 탭의 작업 내용 서명: 에이전트가 만든 그대로(사람이 손대지 않음)면 다시 실행해도 같은 결과를 얻으므로 덮어쓰기 전에 묻지 않는다
+function raWorkSig(mode){
+  const n=x=>String(x||'').replace(/\s+/g,' ').trim();
+  if(mode==='amend'){ const A=RA.amend; return JSON.stringify([n(A.intent), raEffChanges().map(c=>[c.type,c.no,n(c.title),n(c.body)]), raEffAppx().map(x=>[x.type,x.id,n(x.head),n(x.body)])]); }
+  if(mode==='enact'){ const E=RA.enact; return JSON.stringify([n(E.title), n(E.contents), E.draft?n(typeof E.draft==='string'?E.draft:JSON.stringify(E.draft)):'']); }
+  return '';
+}
 function raAgWorkMsg(mode){
+  const W=RA.agent&&RA.agent.sig; if(W&&W[mode]&&W[mode]===raWorkSig(mode)) return '';
   if(mode==='amend'){ const A=RA.amend, n=raEffChanges().length+raEffAppx().length; return n||String(A.intent||'').trim()?`개정 탭의 진행 중인 작업(${n?`수정안 ${n}건`:'개정 의도'})을 지우고 에이전트 결과로 바꿀까요?`:''; }
   if(mode==='enact'){ const E=RA.enact; return E.draft||String(E.contents||'').trim()?`제정 탭의 진행 중인 작업(${E.draft?'조문 초안':'기본 정보'})을 지우고 에이전트 결과로 바꿀까요?`:''; }
   if(mode==='bulk'){ const U=RA.bulk; return U.res&&String(U.reason||'').trim()?'일괄 정비 탭의 결과와 정비 사유를 지우고 새로 찾을까요?':''; }
@@ -3055,6 +3063,7 @@ async function raAgentRun(){
     else if(P.mode==='compare') await raAgCompare(P,step,fin,stop);
     else if(P.mode==='advise') await raAgAdvise(P,step,fin,stop);
     else await raAgUpper(P,step,fin,stop);
+    if(P.mode==='amend'||P.mode==='enact') G.sig={...(G.sig||{}),[P.mode]:raWorkSig(P.mode)};   // 에이전트가 만든 상태를 기억
   }catch(e){ if(e!=='stop'){ console.error(e); const last=G.steps[G.steps.length-1]; if(last&&last.st==='run') fin(last,'처리 중 오류가 났습니다.','err'); } }
   if(!G.done){                                                   // 멈췄어도 다음에 할 일은 남긴다
     const bad=G.steps.filter(x=>x.st==='err').pop(), m=G.plan&&G.plan.mode;
@@ -3363,10 +3372,10 @@ function raHealthView(){
     raSec(5,'유관 기관 규정 체계 비교',raTip('알리오에 공시된 유관 기관(같은 주무부처 등)의 내부규정 목록과 우리 기관 내규를 견줍니다. 여러 기관이 두고 있는데 우리에게 없는 규정은 제정을 검토할 만합니다.'),`<div id="raBench">${raBenchView()}</div>`)+
     `<div class="ra-foot"><button class="svc-btn ghost sm" onclick="_raHealth=null;raHealthLoad()">다시 진단</button></div></div>`;
 }
-// 건강검진 보기 전환 — 점수 요약 / 조문 오류 전체 목록(옛 ‘전체 점검’) / 내규 하나 자세히
+// 건강검진 보기 전환 — 점수 요약 / 조문 오류 전체 목록(옛 ‘전체 점검’) / 내규 하나 자세히. 오류 목록은 처음 열 때 전체 점검을 바로 돌린다(단추 한 번 덜 누르기)
 function raHealthSeg(v){
   const items=[['diag','진단 요약','점수·등급·우선순위·상위법 최신성'],['errors','오류 목록','없는 조문 인용·내규명·옛 명칭·조 번호와 같은 문장 다른 수치를 내규별로'],['one','내규 하나 점검','항·호 순서, 표기, 부칙, 별표 인용까지 자세히']];
-  return `<div class="ra-seg ra-hseg" role="tablist">`+items.map(([k,l,h])=>`<button role="tab" aria-selected="${v===k}" class="${v===k?'on':''}" title="${_e(h)}" onclick="RA.health.v='${k}';_raSave();raRerender('health')">${_e(l)}</button>`).join('')+`</div>`;
+  return `<div class="ra-seg ra-hseg" role="tablist">`+items.map(([k,l,h])=>`<button role="tab" aria-selected="${v===k}" class="${v===k?'on':''}" title="${_e(h)}" onclick="RA.health.v='${k}';_raSave();raRerender('health')${k==='errors'?";if(!RA.check.res)raCheckAll()":''}">${_e(l)}</button>`).join('')+`</div>`;
 }
 function raHealthErrorsView(){
   const all=`<div class="ra-row"><button class="svc-btn yes" onclick="raCheckAll()">${raIc('check')}기관 ${_e(RA_ORG.reg_word)} 전체 점검</button>${raTip(`모든 내규에서 없는 조문 인용·현행 목록에 없는 내규명·구 명칭(재단·이사장 등)·조 번호 중복을 찾아 내규별로 보여 줍니다. 진단 요약의 점수는 같은 결과로 매깁니다.`)}</div><div id="raChkAll">${raCheckAllView()}</div>`;

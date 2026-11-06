@@ -1228,3 +1228,22 @@ test('상위법 감시: 확인하지 않은 알림만 세고, 알림 카드에�
   vm.runInContext(`RA.health.watch=null;`, c);
   assert.ok(c.raWatchView({ today: '20261104' }).includes('기준으로 저장'));
 });
+
+test('에이전트 덮어쓰기 확인: 에이전트가 만든 그대로면 묻지 않고, 사람이 손댄 뒤에만 묻는다', () => {
+  const c = load();
+  vm.runInContext(`RA.amend.intent='제20조 삭제'; RA.amend.changes=[{type:'delete',no:'20'}]; RA.agent.sig=null;`, c);
+  assert.match(c.raAgWorkMsg('amend'), /진행 중인 작업\(수정안 1건\)/);          // 서명이 없으면(사람이 만든 작업) 묻는다
+  vm.runInContext(`RA.agent.sig={amend:raWorkSig('amend')};`, c);
+  assert.equal(c.raAgWorkMsg('amend'), '');                                       // 에이전트가 만든 그대로
+  vm.runInContext(`RA.amend.changes.push({type:'delete',no:'21'});`, c);
+  assert.match(c.raAgWorkMsg('amend'), /수정안 2건/);                              // 사람이 손대면 다시 묻는다
+  vm.runInContext(`RA.enact.title='드론 지침'; RA.enact.contents='운영';`, c);
+  assert.match(c.raAgWorkMsg('enact'), /제정 탭의 진행 중인 작업/);                // 제정 탭 서명은 따로
+});
+
+test('건강검진: 오류 목록 탭을 처음 열면 전체 점검을 바로 돌린다(결과가 있으면 다시 돌리지 않음)', () => {
+  const c = load();
+  const h = c.raHealthSeg('diag');
+  assert.match(h, /RA\.health\.v='errors';_raSave\(\);raRerender\('health'\);if\(!RA\.check\.res\)raCheckAll\(\)/);
+  assert.ok(!/RA\.health\.v='one'[^"]*raCheckAll/.test(h), '다른 탭은 점검을 돌리지 않는다');
+});
