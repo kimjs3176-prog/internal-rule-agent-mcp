@@ -62,6 +62,7 @@ class LawNotConfigured(RuntimeError):
 def _need_oc():
     if not OC:
         raise LawNotConfigured(LAW_OC_MSG)
+
 BASE = "https://www.law.go.kr/DRF"
 HEADERS = {
     "User-Agent":      ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
