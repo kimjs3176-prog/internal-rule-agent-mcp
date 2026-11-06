@@ -207,6 +207,51 @@ def _similar_reg_title(title: str, text: str, man: list):
     return None
 
 
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _host_name(v: str) -> str:
+    """Host/Origin 값 → 호스트 이름(포트·스킴·대괄호 제외, 소문자)."""
+    from urllib.parse import urlsplit
+    v = (v or "").strip()
+    if not v:
+        return ""
+    try:
+        return (urlsplit(v if "//" in v else "//" + v).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _local_browser_request() -> bool:
+    """토큰 없는 개발 서버에서 '이 PC 의 이 화면'이 보낸 요청인지.
+
+    루프백 주소만 보면 (1) 다른 사이트가 사용자의 브라우저로 폼을 보내는 CSRF,
+    (2) 악성 도메인을 127.0.0.1 로 돌리는 DNS 리바인딩, (3) 같은 PC 의 리버스 프록시를 거친
+    원격 요청이 모두 통과한다. Host 가 루프백 이름이고, 프록시 전달 헤더가 없고,
+    교차 출처(Origin·Sec-Fetch-Site)가 아닐 때만 허용한다.
+    """
+    if (request.remote_addr or "") not in ("127.0.0.1", "::1"):
+        return False
+    if _host_name(request.host) not in _LOOPBACK_HOSTS:
+        return False
+    if any(request.headers.get(h) for h in ("X-Forwarded-For", "X-Real-IP", "Forwarded")):
+        return False
+    if (request.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site":
+        return False
+    origin = request.headers.get("Origin")
+    if origin and _host_name(origin) not in _LOOPBACK_HOSTS:
+        return False
+    return True
+
+
+# 업로드 토큰 무차별 대입 방지: 접속 주소마다 실패 횟수를 세어 넘치면 잠시 거부한다
+# (X-Forwarded-For 는 위조할 수 있으므로 remote_addr 로 센다 — 실적 대장과 같은 기준)
+_TOKEN_FAILS: dict = {}
+_TOKEN_FAIL_MAX = 10
+_TOKEN_FAIL_WINDOW = 600
+TOKEN_LOCKED_MSG = "업로드 토큰 입력이 여러 번 틀려 잠시 막았습니다. 10분 뒤 다시 시도하세요."
+
+
 def _upload_authorized() -> tuple[bool, str]:
     """업로드 허용 여부와 거부 사유를 반환한다.
 
@@ -221,14 +266,26 @@ def _upload_authorized() -> tuple[bool, str]:
                            "REG_UPLOAD_TOKEN 설정이 필요합니다. 관리자에게 문의하세요.")
         # 토큰이 없으면 이 PC에서 띄운 개발 서버(루프백)만 허용한다. 공개 서버에서 익명 업로드를
         # 허용하려면 REG_UPLOAD_ALLOW_ANON=1 을 명시해야 한다(fail-closed).
-        if os.environ.get("REG_UPLOAD_ALLOW_ANON", "").strip() == "1" or \
-                (request.remote_addr or "") in ("127.0.0.1", "::1"):
+        if os.environ.get("REG_UPLOAD_ALLOW_ANON", "").strip() == "1" or _local_browser_request():
             return (True, "")
         return (False, "업로드 토큰(REG_UPLOAD_TOKEN)이 설정되지 않은 서버입니다. 관리자에게 문의하세요.")
+    ip, now = request.remote_addr or "", time.time()
+    fails = [t for t in _TOKEN_FAILS.get(ip, []) if now - t < _TOKEN_FAIL_WINDOW]
+    if len(fails) >= _TOKEN_FAIL_MAX:
+        _TOKEN_FAILS[ip] = fails
+        return (False, TOKEN_LOCKED_MSG)
     tok = (request.form.get("token") or request.headers.get("X-Upload-Token") or "").strip()
     if hmac.compare_digest(tok.encode("utf-8"), REG_UPLOAD_TOKEN.encode("utf-8")):
         return (True, "")
+    _TOKEN_FAILS[ip] = fails + [now]
+    if len(_TOKEN_FAILS) > 10000:                  # 주소가 많이 쌓이면 오래된 것부터 비운다(메모리 보호)
+        for k in [k for k, v in _TOKEN_FAILS.items() if not v or now - v[-1] >= _TOKEN_FAIL_WINDOW]:
+            _TOKEN_FAILS.pop(k, None)
     return (False, "업로드 토큰이 올바르지 않습니다.")
+
+
+def _deny(why: str):
+    return jsonify({"error": why}), (429 if why == TOKEN_LOCKED_MSG else 401)
 
 
 # ── GitHub 직접 커밋 (읽기전용 배포에서 업로드를 반영하는 경로) ────────────────
@@ -311,7 +368,9 @@ def _gh_check(force: bool = False) -> dict:
     """
     if not _gh_enabled():
         return {"ok": False, "error": ""}
-    if not force and time.time() - _GH_CHECK["ts"] < 300:
+    # recheck 는 인증 없이 부를 수 있으므로, 연달아 눌러도 15초에 한 번만 GitHub 를 부른다
+    # (반복 호출로 GITHUB_TOKEN 의 API 호출 한도를 소진시켜 업로드를 막는 것을 방지)
+    if time.time() - _GH_CHECK["ts"] < (15 if force else 300):
         return {"ok": _GH_CHECK["ok"], "error": _GH_CHECK["error"]}
     try:
         _gh("GET", f"/git/ref/heads/{GITHUB_BRANCH}")
@@ -509,7 +568,7 @@ def reg_upload():
     """개정 내규 업로드 — 변환·저장·manifest 등록."""
     _ok, _why = _upload_authorized()
     if not _ok:
-        return jsonify({"error": _why}), 401
+        return _deny(_why)
 
     f = request.files.get("file")
     if not f or not f.filename:
@@ -782,7 +841,7 @@ def reg_upload_delete():
     """
     _ok, _why = _upload_authorized()
     if not _ok:
-        return jsonify({"error": _why}), 401
+        return _deny(_why)
     jb = request.get_json(silent=True)
     slug = str(request.form.get("slug") or (jb.get("slug") if isinstance(jb, dict) else "") or "").strip()
     if not slug or "/" in slug or "\\" in slug or slug.startswith("."):
