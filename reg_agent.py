@@ -2186,11 +2186,21 @@ def _deep_fmt(o):
     return o
 
 
+LAW_OC_MISSING = "법제처 Open API 아이디(LAW_OC)가 설정되지 않아 상위법·행정규칙 조회를 쓸 수 없습니다. 관리자가 서버 환경변수 LAW_OC를 지정하세요."
+
+
+def law_ready() -> bool:
+    """법제처 조회를 쓸 수 있는가(서버 환경변수 LAW_OC). 알 수 없으면(단독 실행 등) 쓸 수 있다고 본다."""
+    f = _CTX.get("law_ready")
+    return bool(f()) if f else True
+
+
 @bp.route("/api/regagent/config")
 def ra_config():
     regs = all_regs()
     return jsonify({"success": True, "org": _deep_fmt(ORG), "reg_count": len(regs),
-                    "semantic": bool(_CTX.get("vec_ready") and _CTX["vec_ready"]()), "ledger": ledger_enabled()})
+                    "semantic": bool(_CTX.get("vec_ready") and _CTX["vec_ready"]()), "ledger": ledger_enabled(),
+                    "law": law_ready()})
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3218,6 +3228,8 @@ def ra_health_laws():
     look_law = _CTX.get("law_info")
     if not look_law:
         return jsonify({"success": False, "error": "법령 조회를 사용할 수 없습니다."}), 503
+    if not law_ready():
+        return jsonify({"success": False, "error": LAW_OC_MISSING, "law_oc_missing": True}), 503
     look_rule = _CTX.get("rule_info") or look_law
     out = {}
     todo = []

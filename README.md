@@ -87,7 +87,7 @@ node --test tests/js/*.test.mjs
 | 이름 | 용도 |
 |---|---|
 | `GEMINI_API_KEY` 등 | 서버 공용 AI 키(사용자 키가 우선) |
-| `LAW_OC` | 법제처 Open API ID |
+| `LAW_OC` | 법제처 Open API ID(코드에 기본값 없음). 없으면 상위법·행정규칙 조회만 꺼지고 화면에 안내가 나온다 |
 | `REG_UPLOAD_TOKEN` | 내규 등록 암호 |
 | `GITHUB_TOKEN`, `GITHUB_REPO` | 읽기 전용 배포에서 내규 등록·작업 실적을 저장소에 커밋 |
 | `LEDGER_ENABLED` | `1`이면 작업 실적 기관 대장을 켬(기본 꺼짐) |
