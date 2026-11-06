@@ -91,7 +91,7 @@ const RA_PAGE={
 // 기관 프로필(org_config.json) — 기관명·기관장·내규관리 규칙·절차·심의기준. 서버 /api/regagent/config
 let RA_ORG=null;
 async function raLoadOrg(){
-  try{ const d=await raGet('/api/regagent/config'); if(d&&d.org){ RA_ORG=d.org; RA_ORG._count=d.reg_count; RA_ORG._ledger=!!d.ledger; } }catch(e){}
+  try{ const d=await raGet('/api/regagent/config'); if(d&&d.org){ RA_ORG=d.org; RA_ORG._count=d.reg_count; RA_ORG._ledger=!!d.ledger; RA_ORG._law=d.law!==false; } }catch(e){}
   if(!RA_ORG) RA_ORG={org_name:'○○기관',org_short:'기관',head:'기관장',deputy:'부기관장',reg_word:'내규',rules_name:'내규관리규칙',email_domain:'example.or.kr',notice_days:20,staff_days:7,rules_summary:[],review_criteria:[],procedure:{questions:[],steps:[]}};
   const sub=document.getElementById('orgSub'); if(sub){ sub.textContent=RA_ORG.org_name; sub.title=`${RA_ORG.org_name} ${RA_ORG.reg_word} 제정·개정 실무 지원`; }
   document.title=`규정 제·개정 에이전트 · ${RA_ORG.org_short}`;
@@ -3268,6 +3268,7 @@ let _raHealth=null;
 function raHealthLaws(){ return raOnce('healthLaws', _raHealthLaws); }
 async function _raHealthLaws(opt){
   const H=RA.health; if(!_raHealth) return; const quiet=!!(opt&&opt.quiet);
+  if(RA_ORG._law===false){ if(!quiet) _toast('법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 상위법·행정규칙을 조회할 수 없습니다.',5000); return; }
   H.law=H.law||{}; const old=Date.now()-((opt&&opt.maxAge)||7*864e5);
   const all=raHealthNorms(_raHealth);
   let names=all.filter(n=>!H.law[n]||!(H.law[n].at>old));
@@ -3305,7 +3306,7 @@ function raWatchSeen(k){ const W=RA.health.watch; if(!W) return; raArr(W.changes
 function raNavRefresh(){ const nav=document.getElementById('raNav'); if(nav) nav.innerHTML=raNavHtml(true); }
 // 열 때 하루 한 번 조용히 확인(한 번이라도 직접 확인한 뒤부터, 끄기 가능) — 법제처가 막힌 망이면 조용히 멈춘다
 async function raWatchAuto(){
-  const H=RA.health; if(H.watchAuto===false||!Object.keys(H.law||{}).length) return;
+  const H=RA.health; if(H.watchAuto===false||RA_ORG._law===false||!Object.keys(H.law||{}).length) return;   // 법제처 아이디가 없으면 자동 확인도 하지 않는다
   if(H.lawAt&&Date.now()-H.lawAt<864e5) return;
   if(_raBusy['once:healthLaws']) return; _raBusy['once:healthLaws']=true;
   try{ if(!_raHealth){ const d=await raPost('/api/regagent/health',{law_info:H.law||{}}); if(!d.success) return; _raHealth=d; }
@@ -3358,10 +3359,10 @@ function raHealthView(){
     (f.g?`<button class="ra-chip btn" onclick="raHealthF('g','')">${f.g}등급만 보는 중 ${raIc('x')}<span class="ra-sr">거르기 풀기</span></button>`:'')+`<span class="ra-hint" id="raHealthN" aria-live="polite">${rows.length}건</span></div>`+
     `<div class="ra-tbl-w"><table class="ra-tbl"><thead><tr><th>${_e(RA_ORG.reg_word)}</th><th>등급</th><th>점수</th><th>최종 개정</th><th>진단</th></tr></thead><tbody id="raHealthTb">${raHealthTbody(rows)}</tbody></table></div>`;
   const rule=d.rules?`<details class="ra-det"><summary>점수 기준</summary><div class="ra-hint">100점에서 감점: 없는 조문 인용 건당 -10(최대 -30) · 다른 내규의 없는·삭제된 조문 인용 -8 · 조 번호 중복·순서 오류 -8 · 현행 목록에 없는 내규명 인용 -6 · 옛 기관명·직위 -5 · 중복 등록 의심 -10 · 개정 경과 ${_e(d.rules.age)} · ${_e(d.rules.law)}<br>등급: A 95점 이상(양호) · B 85(관심) · C 75(주의) · D 60(경고) · E 60점 미만(위험)</div></details>`:'';
-  const lawSec=`<div class="ra-row"><button class="svc-btn" onclick="raHealthLaws()">${raIc('upper')}상위법·행정규칙 최신성 확인</button>${raTip(`${_e(RA_ORG.reg_word)}가 인용한 법령 ${d.laws.length}개와 정부 규정·훈령·고시·지침 등 ${nr}개의 현행 시행일을 법제처(법령·행정규칙)에서 조회해, ${_e(RA_ORG.reg_word)} 개정일보다 나중에 시행된 것을 찾습니다. 법제처에 없는 이름(기관 자체 기준 등)은 건너뜁니다.${lawN?` (확인 ${lawN}개)`:''}`)}</div><div id="raLawProg"></div>`+
+  const lawSec=`<div class="ra-row"><button class="svc-btn" onclick="raHealthLaws()">${raIc('upper')}상위법·행정규칙 최신성 확인</button>${raTip(`${_e(RA_ORG.reg_word)}가 인용한 법령 ${d.laws.length}개와 정부 규정·훈령·고시·지침 등 ${nr}개의 현행 시행일을 법제처(법령·행정규칙)에서 조회해, ${_e(RA_ORG.reg_word)} 개정일보다 나중에 시행된 것을 찾습니다. 법제처에 없는 이름(기관 자체 기준 등)은 건너뜁니다.${lawN?` (확인 ${lawN}개)`:''}`)}</div>${RA_ORG._law===false?`<div class="ra-note">${raIc('info')}<span>법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 상위법·행정규칙 조회를 쓸 수 없습니다. 관리자가 서버 환경변수 <code>LAW_OC</code>를 지정하면 됩니다. 나머지 진단은 그대로 됩니다.</span></div>`:''}<div id="raLawProg"></div>`+
     raStats([{v:d.laws.length,l:'인용 법령',ic:'upper',tone:'acc'},{v:nr,l:'인용 행정규칙 등',ic:'doc',tone:'acc'},{v:lawN,l:'시행일 확인',ic:'check',tone:lawN?'ok':'n'},{v:lawN?d.stale_regs:'—',l:'미반영 의심 내규',ic:'alert',tone:lawN&&d.stale_regs?'warn':'n'}])+
     raMeter(lawN/nTot,'acc')+`<div class="ra-meta" style="margin-top:6px">법제처 확인 ${Math.round(lawN/nTot*100)}%</div>`+
-    (H.lawErr?`<div class="ra-chip warn" style="margin-top:6px">${raIc('alert')}법제처에 연결하지 못한 법령·규칙 ${H.lawErr.n}건${H.lawErr.msg?` — ${_e(H.lawErr.msg)}`:''} · 이 법령들의 최신성은 확인하지 못했습니다(망 차단이면 관리자가 law.go.kr 허용). <button class="ra-link" onclick="raHealthLaws()">다시 확인</button></div>`:'')+
+    (H.lawErr&&RA_ORG._law===false?'':H.lawErr?`<div class="ra-chip warn" style="margin-top:6px">${raIc('alert')}법제처에 연결하지 못한 법령·규칙 ${H.lawErr.n}건${H.lawErr.msg?` — ${_e(H.lawErr.msg)}`:''} · 이 법령들의 최신성은 확인하지 못했습니다(망 차단이면 관리자가 law.go.kr 허용). <button class="ra-link" onclick="raHealthLaws()">다시 확인</button></div>`:'')+
     (raArr(d.unfound).length&&lawN?`<div class="ra-meta" style="margin-top:4px">법제처에서 못 찾은 이름 ${d.unfound.length}건: ${d.unfound.slice(0,6).map(x=>'「'+_e(x)+'」').join(', ')}${d.unfound.length>6?' 외':''} — 약칭·옛 이름·끊긴 띄어쓰기면 조문의 법령명을 정식 명칭으로 고치세요.</div>`:'');
   return `<div class="ra-wide" id="raHealth">${seg}${tiles}`+
     `<div class="ra-grid2 ra-h2">${raSec(1,'등급 분포',raTip('막대를 누르면 아래 목록을 거릅니다'),dist+rule)}${raSec(2,'상위법·행정규칙 최신성','법제처 현행 법령·행정규칙 기준',lawSec)}</div>`+

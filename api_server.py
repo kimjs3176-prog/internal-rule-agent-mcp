@@ -52,7 +52,17 @@ def _security_headers(resp):
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     return resp
 
-OC   = os.environ.get("LAW_OC", "tjsl0919")
+
+OC   = os.environ.get("LAW_OC", "").strip()   # 법제처 Open API 아이디 — 코드에 두지 않고 서버 환경변수로만 받는다
+LAW_OC_MSG = "법제처 Open API 아이디(LAW_OC)가 설정되지 않아 법령 조회를 쓸 수 없습니다. 관리자가 서버 환경변수 LAW_OC를 지정하세요."
+
+class LawNotConfigured(RuntimeError):
+    """LAW_OC 가 없어 법제처를 부를 수 없음 — 연결 실패와 구분해 알린다."""
+
+def _need_oc():
+    if not OC:
+        raise LawNotConfigured(LAW_OC_MSG)
+
 BASE = "https://www.law.go.kr/DRF"
 HEADERS = {
     "User-Agent":      ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -113,6 +123,7 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 def _law_get_json(params: dict, timeout=None) -> dict:
+    _need_oc()
     timeout = timeout or _T_JSON
     last_err = None
     for attempt in range(3):
@@ -135,6 +146,7 @@ def _law_get_json(params: dict, timeout=None) -> dict:
 
 def _law_get_xml(endpoint: str, params: dict, timeout=None) -> ET.Element:
     """법제처 XML 조회. 연결이 끊기면 한 번만 다시 시도한다(연결 거부·차단은 바로 실패)."""
+    _need_oc()
     timeout = timeout or _T_XML
     last_err = None
     for attempt in range(2):
@@ -768,6 +780,8 @@ def get_law_related():
     """법령명 → 관련 법령(상위·하위법, 준용·피준용 등). 법제처 체계도·관련법령 API를 쓰고,
     둘 다 실패하면 시행령·시행규칙 이름을 추정해 돌려준다(source=guess)."""
     name = re.sub(r"[「」]", "", request.args.get("name", "")).strip()
+    if not OC:
+        return jsonify({"success": False, "error": LAW_OC_MSG, "law_oc_missing": True}), 503
     if len(name) < 2:
         return jsonify({"success": False, "error": "법령명을 입력하세요."}), 400
     hit = _REL_CACHE.get(name)
@@ -816,6 +830,8 @@ def get_law_articles():
     law_name = request.args.get("name", "").strip()
     if not law_name:
         return jsonify({"error": "name 파라미터가 필요합니다"}), 400
+    if not OC:
+        return jsonify({"error": LAW_OC_MSG, "law_oc_missing": True}), 503
     try:
         # Step 1~3: 법령ID(현행 본문) → 현행 시행본 MST 순으로 조회
         tried = []
@@ -1478,6 +1494,7 @@ _reg_agent.register(
     law_info=lambda name: _lookup_law(name, "law"),
     rule_info=_lookup_rule,
     law_xml=_law_get_xml,
+    law_ready=lambda: bool(OC),
 )
 
 
