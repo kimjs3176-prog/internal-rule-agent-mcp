@@ -87,10 +87,13 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
 
   await p.goto(URL, { waitUntil: 'networkidle' }); await p.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} }); await p.reload({ waitUntil: 'networkidle' });
   await p.mouse.move(1500, 700);
+  // 음성 맞춤용 동기 표시: 왼쪽 위에 0.4초 동안 자홍색 네모를 띄우고 그 시각을 남긴다(contest_demo_build.py가 영상에서 찾아 시각 차이를 잰다)
+  await p.evaluate(() => { const d = document.createElement('div'); d.id = '__sync'; d.style.cssText = 'position:fixed;left:0;top:0;width:48px;height:48px;background:#ff00ff;z-index:2147483647'; document.body.appendChild(d); });
+  const syncT = now(); await wait(400); await p.evaluate(() => document.getElementById('__sync').remove());
   // ── 제목
   await scene('제목');
   await card(`<h1>규정 제·개정 에이전트</h1><p>2026 공공 AI 대전환 챌린지 · 세션 2 지정과제 ③</p><p style="margin-top:28px;color:#93c5fd !important">AI 키 없이 · 외부망(법제처·알리오) 없이 · 실제 내규 126건</p>`);
-  await say('규정 제·개정 에이전트 시연입니다. AI 키와 외부망 없이,\n실제 내규 126건으로 보여 드립니다.', { ms: 5500 });
+  await say('규정 제·개정 에이전트 시연입니다. AI 키와 외부망 없이,\n실제 내규 126건으로 보여 드립니다.', { ms: 5500, v: '규정 제·개정 에이전트 시연입니다. AI 키와 외부망 없이, 실제 내규 백이십육 건으로 보여 드립니다.' });
   await quiet(); await uncard();
 
   // ── ① 문제 제기
@@ -193,7 +196,7 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   fs.renameSync(vpath, OUT + '/raw.webm');
   const ts = x => { const ms = Math.round(x * 1000); const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; };
   fs.writeFileSync(OUT + '/subs.srt', subs.map((x, i) => `${i + 1}\n${ts(x.s)} --> ${ts(x.e)}\n${x.text}\n`).join('\n'));
-  fs.writeFileSync(OUT + '/timing.json', JSON.stringify({ total, scenes, timing, dialogs, errs, subs }, null, 1));
+  fs.writeFileSync(OUT + '/timing.json', JSON.stringify({ total, syncT, scenes, timing, dialogs, errs, subs }, null, 1));
   console.log('총 길이', total.toFixed(1) + 's', '| 자막', subs.length, '| 장면', scenes.map(s => s.t.slice(0, 6) + '@' + s.s.toFixed(0)).join(', '));
   console.log('단계 시간', JSON.stringify({ health: timing.health, errorsTab: timing.errorsTab, agent: timing.agentAmend, check: timing.checkAll, hwpx: timing.hwpx, bulk: timing.bulk, del: timing.del, delDialog: timing.delDialog }));
   console.log('대화상자', dialogs.length ? dialogs : '없음', '| 페이지 오류', errs.length ? errs : '없음');
