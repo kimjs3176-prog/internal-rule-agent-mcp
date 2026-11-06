@@ -42,6 +42,17 @@ else:
     ]
 CORS(app, origins=_cors_origins)
 
+
+@app.after_request
+def _security_headers(resp):
+    """vercel.json 과 같은 기본 보안 헤더 — Flask 가 직접 서빙하는 배포(Render·Railway·로컬)에서도
+    다른 사이트가 화면을 iframe 에 넣는 클릭재킹·MIME 추측을 막는다. 라우트가 정한 값은 덮지 않는다."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
+
+
 OC   = os.environ.get("LAW_OC", "").strip()   # 법제처 Open API 아이디 — 코드에 두지 않고 서버 환경변수로만 받는다
 LAW_OC_MSG = "법제처 Open API 아이디(LAW_OC)가 설정되지 않아 법령 조회를 쓸 수 없습니다. 관리자가 서버 환경변수 LAW_OC를 지정하세요."
 

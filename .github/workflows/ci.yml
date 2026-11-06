@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# 테스트만 돌리므로 저장소 읽기 권한만 준다(최소 권한)
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
