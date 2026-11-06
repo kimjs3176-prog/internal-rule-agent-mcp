@@ -1196,10 +1196,13 @@ function raVqInTable(body, q){
 // 개정 작업(A)의 수정안·별표에 지시문의 수치를 넣는다 → {q, n, notes[]} (바꾼 곳이 없으면 n=0)
 function raVqApply(A, text){
   const q=raVqReq(text); if(!q) return null;
-  const plan=[];                                                  // [대상, 새 본문, 바꿀 현행 값들, 설명]
-  A.changes.forEach(c=>{ if(c.type==='delete') return; const r=raVqInText(c.body,q); if(r.n) plan.push([c,r.body,r.olds,`${raLbl(c.no)} ${r.olds.join('·')} → ${raVqFmt(q.val,r.olds[0].replace(/[^\d,.]/g,''),r.olds[0].replace(/[\d,.\s]/g,''))}`,0]); });
+  const plan=[];                                                  // [대상, 새 본문, 바꿀 현행 값들, 설명, 별표 여부, 보고서용 기록]
+  A.vqLog=null;
+  A.changes.forEach(c=>{ if(c.type==='delete') return; const r=raVqInText(c.body,q); if(r.n){ const neu=raVqFmt(q.val,r.olds[0].replace(/[^\d,.]/g,''),r.olds[0].replace(/[\d,.\s]/g,'')); plan.push([c,r.body,r.olds,`${raLbl(c.no)} ${r.olds.join('·')} → ${neu}`,0,{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
   raArr(A.appx).forEach(x=>{ if(x.type==='delete') return; const t=raVqInTable(x.body,q), r=t&&t.n?t:raVqInText(x.body,q);
-    if(r.n) plan.push([x,r.body,t&&t.n?t.olds.map(o=>o+(q.unit==='원'?'원':q.unit)):r.olds,t&&t.n?`${x.id} 표 “${t.col}” 열 ${t.where.join('·')} ${[...new Set(t.olds)].join('·')} → ${raVqFmt(q.val,t.olds[0],'')}`:`${x.id} ${r.olds.join('·')} → ${raVqFmt(q.val,r.olds[0].replace(/[^\d,.]/g,''),r.olds[0].replace(/[\d,.\s]/g,''))}`,1]); });
+    if(r.n){ const tb=t&&t.n, u=q.unit==='원'?'원':q.unit, neu=tb?raVqFmt(q.val,t.olds[0],'')+u:raVqFmt(q.val,r.olds[0].replace(/[^\d,.]/g,''),r.olds[0].replace(/[\d,.\s]/g,''));
+      plan.push([x,r.body,tb?t.olds.map(o=>o+u):r.olds,tb?`${x.id} 표 “${t.col}” 열 ${t.where.join('·')} ${[...new Set(t.olds)].join('·')} → ${raVqFmt(q.val,t.olds[0],'')}`:`${x.id} ${r.olds.join('·')} → ${neu}`,1,
+        tb?{col:t.col,where:t.where.join('·'),old:[...new Set(t.olds)].map(o=>o+u).join('·'),neu}:{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
   if(!plan.length) return {q, n:0, notes:[]};
   const vals=new Set(plan.flatMap(p=>p[2]).map(o=>raVqNum(String(o).replace(/[^\d,.]/g,''),String(o).replace(/[\d,.\s]/g,''))));
   if(vals.size>1){                                                // “일수를 20일로” — 1일·5일·30일이 다 걸리면 어느 것인지 사람도 헷갈린다. 추측하지 않는다
@@ -1207,6 +1210,7 @@ function raVqApply(A, text){
     return {q, n:0, notes:[], ambiguous:plan.map(p=>p[3])}; }
   let n=0; const notes=[];
   plan.forEach(([o,body,olds,note,isX])=>{ o.body=body; n+=olds.length; notes.push(note); if(isX) o.why=o.why&&!/수치가 여기 있으면/.test(o.why)?o.why:`지시문의 “${q.key}” 값 반영 — 확인하세요`; });
+  A.vqLog=plan.map(([o,,,,isX,info])=>Object.assign({id:isX?o.id:o.no,isX:!!isX,key:q.key},info));       // 검토 보고서 “현황”에 현행 값과 바꿀 값을 적는다
   A.valNote=`지시문대로 “${q.key}”${raJosa(q.key,['을','를'])} 바꿨습니다: ${notes.join(' / ')}. 맞는지 확인하세요(다른 곳은 바꾸지 않았습니다).`;
   const vs=q.unit==='원'?q.val.toLocaleString('en-US')+'원':q.val+q.unit, lc=vs.charCodeAt(vs.length-1)-0xAC00, jong=lc>=0&&lc<11172?lc%28:0;
   if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose))       // 일반 문구 대신 무엇을 얼마로 바꾸는지
@@ -2532,6 +2536,10 @@ async function raResearch(mode){
   const hit=t=>must.some(k=>String(t||'').includes(k));                 // “운영지침”처럼 흔한 말로만 걸린 내규는 뺀다 — 핵심 낱말이 실제로 있는 것만
   if(sm&&sm.success) R.own=raArr(sm.regs).filter(g=>(!isA||g.slug!==S.slug)&&(hit(g.title)||raArr(g.articles).some(a=>hit(a.title)||hit(a.body))))
     .slice(0,4).map(g=>({reg:g.title,slug:g.slug,arts:raArr(g.articles).filter(a=>hit(a.title)||hit(a.body)).concat(raArr(g.articles)).filter((a,i,ar)=>ar.findIndex(x=>x.no===a.no)===i).slice(0,2).map(a=>({no:a.no,title:a.title}))}));
+  if(isA&&S.title){                                                // 개정: 이름이 같은 계열인 내규(「여비규정」 → 「여비업무 처리지침」·「여비규정 시행세칙」)도 관련 내규로 — 매뉴얼형처럼 조문으로는 안 걸리는 것까지
+    const fam=raKeyWords(S.title)[0]; const cat=fam&&fam.length>=2?await raGet('/api/regagent/catalog').catch(()=>null):null;
+    raArr(cat&&cat.regs).filter(g=>g.slug!==S.slug&&String(g.title).replace(/\s/g,'').includes(fam)&&!R.own.some(x=>x.slug===g.slug)).slice(0,3).forEach(g=>R.own.push({reg:g.title,slug:g.slug,arts:[],fam:true}));
+    R.own=R.own.slice(0,5); }
   const texts=[];                                                  // 법령은 대상 내규(개정) 또는 관련 내규(제정)가 인용한 것
   if(isA&&_raArts) _raArts.articles.forEach(a=>texts.push(a.body||''));
   else for(const g of R.own.slice(0,3)){ const d=await raGet('/api/regagent/articles?slug='+encodeURIComponent(g.slug)).catch(()=>null); if(d&&d.success) d.articles.forEach(a=>texts.push(a.body||'')); }
@@ -2565,12 +2573,14 @@ function raReportBlocks(c, mode){
   if(req&&req!==c.purpose) A.push(`  ○ 요청 내용: ${req}`);
   A.push('','2. 현황 및 문제점');
   if(isA){ const ch=raEffChanges(), xs=raEffAppx();
-    ch.slice(0,4).forEach(x=>{ const o=raOld(x.no); if(!o){ A.push(`  ○ ${raLbl(x.no)} 신설 필요`); return; } const b=String(o.body||'').replace(/\s+/g,' '); A.push(`  ○ 현행 ${raLbl(x.no)}(${o.title}): ${b.slice(0,80)}${b.length>80?'…':''}`); });
+    const vq=(id,isX,body)=>raArr(S.vqLog).find(v=>v.id===id&&v.isX===isX&&String(body||'').replace(/\s/g,'').includes(String(v.neu).replace(/[^\d,.]/g,'')));   // 지금 수정안에 그 값이 그대로 있을 때만
+    const vqLine=v=>`${v.col?`“${v.col.replace(/\s+/g,'')}” `:`“${v.key}” `}${v.where?v.where+' ':''}${v.old} → ${v.neu}${raJosa(v.neu,['으로','로'])} 조정 필요`;
+    ch.slice(0,4).forEach(x=>{ const o=raOld(x.no); if(!o){ A.push(`  ○ ${raLbl(x.no)} 신설 필요`); return; } const v=vq(x.no,false,x.body); if(v){ A.push(`  ○ 현행 ${raLbl(x.no)}(${o.title}): ${vqLine(v)}`); return; } const b=String(o.body||'').replace(/\s+/g,' '); A.push(`  ○ 현행 ${raLbl(x.no)}(${o.title}): ${b.slice(0,80)}${b.length>80?'…':''}`); });
     if(ch.length>4) A.push(`  ○ 그 밖에 ${ch.length-4}개 조`);
-    xs.slice(0,3).forEach(x=>{ const o=raOldX(x.id); A.push(`  ○ 현행 ${x.id}${o?`(${raAppxTitle(o)})`:''}`); });
+    xs.slice(0,3).forEach(x=>{ const o=raOldX(x.id), v=vq(x.id,true,x.body); A.push(`  ○ 현행 ${x.id}${o?`(${raAppxTitle(o)})`:''}${v?': '+vqLine(v):''}`); });
     if(!ch.length&&!xs.length) A.push('  ○ ○○'); }
   else A.push(R.own.length?`  ○ ${c.title}에 해당하는 ${W}가 없고, 관련 사항이 ${R.own.slice(0,3).map(g=>`「${g.reg}」`).join('·')} 등에 흩어져 있어 기준이 분명하지 않음`:`  ○ ${c.title}에 관한 ${W}가 없어 업무 기준이 분명하지 않음`);
-  A.push('','3. 자료조사 결과',`  가. 우리 기관 관련 ${W}`,...(R.own.length?R.own.map(g=>`    - 「${g.reg}」 ${g.arts.map(a=>`${raLbl(a.no)}(${a.title})`).join(', ')}`):['    - 관련 '+W+' 없음']),
+  A.push('','3. 자료조사 결과',`  가. 우리 기관 관련 ${W}`,...(R.own.length?R.own.map(g=>`    - 「${g.reg}」 ${g.arts.length?g.arts.map(a=>`${raLbl(a.no)}(${a.title})`).join(', '):g.fam?'(같은 업무의 '+W+' — 함께 고칠 곳이 있는지 확인)':''}`.trimEnd()):['    - 관련 '+W+' 없음']),
     '  나. 관련 법령',...(R.laws.length?R.laws.map(l=>`    - 「${l.name}」(${isA?'현행 '+W:'관련 '+W}에서 ${l.n}회 인용)`):['    - 인용된 법령 없음(근거 법령 확인 필요)']),
     '  다. 다른 기관 사례',...(R.alio.length?R.alio.map(r=>`    - ${raAlioRefLine(r)}`):[`    - ${R.alioNote||'조회한 사례 없음'}`]));
   if(isA&&S.impact&&S.impact.summary){ const m=S.impact.summary; A.push('  라. 인용 영향',`    - 같은 ${W} 안 인용 ${m.inner}건, 다른 ${W}의 조문 인용 ${m.outer}건, ${W}명 인용 ${m.mention_regs}개`); }

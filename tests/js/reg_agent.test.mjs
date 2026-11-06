@@ -924,6 +924,12 @@ test('지시문 수치 반영: 표는 열을 맞춰서만, 조문은 낱말 바�
   assert.equal(v.n, 2); assert.ok(A.valNote.includes('별표 2') && A.valNote.includes('확인'));
   assert.equal(A.purpose, '일비를 30,000원으로 조정하려는 것임.');
   assert.equal(A.changes[0].body, '일비·숙박비 및 식비는 〔별표 2〕에 따라 지급한다.', '금액이 없는 조문은 그대로');
+  // 검토 보고서 “현황”에 쓸 기록 — 현행 값과 바꿀 값
+  assert.equal(A.vqLog.length, 1);
+  assert.deepEqual([A.vqLog[0].id, A.vqLog[0].isX, A.vqLog[0].old, A.vqLog[0].neu], ['별표 2', true, '25,000원', '30,000원']);
+  const B = { title: 'x', purpose: '', changes: [{ type: 'modify', no: '7', body: '일비는 1일당 25,000원으로 한다.' }], appx: [] };
+  c.raVqApply(B, '일비를 3만원으로');
+  assert.deepEqual([B.vqLog[0].id, B.vqLog[0].isX, B.vqLog[0].old, B.vqLog[0].neu], ['7', false, '25,000원', '30,000원']);
 });
 
 test('대상 고르기: 전부 선택(검색 중이면 찾은 것만, 삭제된 조 빼고)·선택 취소', () => {
