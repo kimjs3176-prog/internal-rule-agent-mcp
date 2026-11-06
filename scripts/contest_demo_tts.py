@@ -3,7 +3,7 @@
 #   pip install supertonic soundfile huggingface_hub
 #   hf download supertone-oss-archive/supertonic-3 --revision aafc6e32416a594460b32413efc49d7fe4ce6d46 --local-dir tts_assets
 #   (코드 MIT, 모델 OpenRAIL-M — docs/contest/시연영상.md)
-# 실행: python scripts/contest_demo_tts.py [목소리=F1] [속도=1.05]   (모델 폴더는 DEMO_TTS_MODEL, 기본 ./tts_assets)
+# 실행: python scripts/contest_demo_tts.py [목소리=F1] [속도=1.2]   (모델 폴더는 DEMO_TTS_MODEL, 기본 ./tts_assets)
 # POST /tts {"text": "..."} → {"file": ".../cache/<hash>.wav", "dur": 3.21}
 import hashlib, json, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -15,7 +15,7 @@ import os
 MODEL = Path(os.environ.get("DEMO_TTS_MODEL", "tts_assets")).resolve()
 CACHE = MODEL / "cache"; CACHE.mkdir(exist_ok=True)
 VOICE = sys.argv[1] if len(sys.argv) > 1 else "F1"
-SPEED = float(sys.argv[2]) if len(sys.argv) > 2 else 1.05
+SPEED = float(sys.argv[2]) if len(sys.argv) > 2 else 1.2
 tts = TTS(model="supertonic-3", model_dir=MODEL, auto_download=False)
 style = tts.get_voice_style(voice_name=VOICE)
 

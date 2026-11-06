@@ -23,10 +23,10 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
       @keyframes __r{to{transform:scale(4);opacity:0}}
       body.__carded #__cur{display:none}
       /* 자막: 앱의 남색 잉크(#0f172a)를 반투명 바탕으로, 숫자만 브랜드 파랑의 밝은 톤으로 */
-      #__cap{position:fixed;left:50%;bottom:46px;transform:translate(-50%,14px);width:max-content;max-width:1560px;z-index:2147483645;pointer-events:none;
-        padding:18px 34px 20px;border-radius:18px;background:rgba(15,23,42,.82);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+      #__cap{position:fixed;left:50%;bottom:40px;transform:translate(-50%,14px);width:max-content;max-width:1560px;z-index:2147483645;pointer-events:none;
+        padding:14px 28px 16px;border-radius:16px;background:rgba(15,23,42,.82);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
         border:1px solid rgba(255,255,255,.10);box-shadow:0 10px 30px rgba(15,23,42,.18);
-        font-family:Pretendard,'Malgun Gothic',sans-serif;font-size:40px;line-height:1.42;font-weight:600;letter-spacing:-.01em;color:#fff;text-align:center;
+        font-family:Pretendard,'Malgun Gothic',sans-serif;font-size:34px;line-height:1.45;font-weight:600;letter-spacing:-.01em;color:#fff;text-align:center;
         opacity:0;transition:opacity .35s cubic-bezier(.16,1,.3,1),transform .35s cubic-bezier(.16,1,.3,1);word-break:keep-all}
       #__cap.on{opacity:1;transform:translate(-50%,0)}#__cap span{display:block;white-space:nowrap}
       #__cap em{font-style:normal;color:#93c5fd;font-variant-numeric:tabular-nums}
