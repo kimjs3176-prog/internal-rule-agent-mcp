@@ -650,7 +650,7 @@ function raDelegView(){
       arts.map(a=>`<label class="ra-pick-i"><input type="checkbox" ${E.dels.some(d=>d.law===E.lawName&&raDelArt(d)===a.label)?'checked':''} onchange="raDelToggle('${_a(a.label)}',this.checked)"><span>${a.deleg?'<span class="ra-chip warn">위임</span> ':''}<b>${_e(a.label)}</b>${a.title?`(${_e(a.title)})`:''} <em>${_e(a.deleg?raDelegSnip(a.text):a.text.slice(0,140))}</em></span></label>`).join('')+
       `</div></div>`;
   }
-  return `<div class="ra-row"><input id="raLawName" class="ra-in" style="max-width:280px" list="raRegList" aria-label="법령명 또는 우리 기관 내규명" placeholder="법령명 또는 상위 내규명 (예: 농촌진흥법, 인사규정)" value="${_e(E.lawName||'')}" onkeydown="if(event.key==='Enter')raLawLoad()"><datalist id="raRegList"></datalist><button class="svc-btn" onclick="raLawLoad()">조문 불러오기</button>${raParentOf(E.title)&&E.lawName!==raParentOf(E.title)?`<button class="ra-chip btn" onclick="raOwnLoad('${_a(raParentOf(E.title))}').then(ok=>{ if(!ok) _toast('「${_a(raParentOf(E.title))}」${raEul(raParentOf(E.title))} 내규 목록에서 찾지 못했습니다.'); })">${raIc('regs')}「${_e(raParentOf(E.title))}」 위임 조항 불러오기</button>`:''}<button class="svc-btn ghost" onclick="raDelManual()">직접 입력</button></div>`+
+  return `<div class="ra-row"><input id="raLawName" class="ra-in" style="max-width:280px" list="raRegList" aria-label="법령명 또는 우리 기관 내규명" placeholder="법령명 또는 상위 내규명 (예: 농촌진흥법, 인사규정)" value="${_e(E.lawName||'')}" onkeydown="if(event.key==='Enter')raLawLoad()"><datalist id="raRegList"></datalist><button class="svc-btn" onclick="raLawLoad()">조문 불러오기</button>${raParentOf(E.title)&&E.lawName!==raParentOf(E.title)?`<button class="ra-chip btn" onclick="raOwnLoad('${_a(raParentOf(E.title))}').then(ok=>{ if(!ok) _toast('「${_a(raParentOf(E.title))}」${raEul(raParentOf(E.title))} 내규 목록에서 찾지 못했습니다.'); })">${raIc('regs')}「${_e(raParentOf(E.title))}」 위임 조항 불러오기</button>`:''}<button class="svc-btn ghost" onclick="raDelManual()" aria-expanded="${E.manOpen?'true':'false'}">직접 입력</button></div>${E.manOpen?raDelManualForm():''}`+
     `<div id="raPick">${pick}</div><div class="ra-dels">${list||`<div class="ra-empty sm">${raIc('upper')}선택한 위임 조항 없음 ${raTip('상위법 근거를 고르면 제1조(목적)에 반영됩니다.')}</div>`}</div>`;
 }
 function raDelegSnip(t){ const m=String(t).match(RA_DELEG_RE); if(!m) return String(t).slice(0,140); const k=Math.max(0,m.index-90); return (k?'…':'')+String(t).slice(k,m.index+m[0].length); }
@@ -708,10 +708,28 @@ function raDelToggle(label, on){
 }
 // 위임 조항 표시: 조 번호만(예전에 저장한 “제33조(기술지원)”도 제목을 뗀다)
 function raDelArt(d){ return String(d.art||'').replace(/\s*\([^)]*\)\s*$/,'').trim(); }
+// 위임 조항 직접 입력 — 법제처에 닿지 않는 업무망에서는 이 길이 주 경로다. 대화상자 세 번 대신 화면 입력칸(법령명·조항·내용)
 function raDelManual(){
-  const law=prompt('상위 법령명 (예: 농촌진흥법)'); if(!law) return;
-  const art=prompt('조항 (예: 제33조제2항)')||''; const text=prompt('조문 내용(요지)')||'';
-  RA.enact.dels.push({law:law.replace(/[「」]/g,'').trim(), art:art.trim(), text:text.trim()}); _raSave(); raRerender('enact');
+  const E=RA.enact, l=document.getElementById('raLawName'), typed=l?String(l.value||'').replace(/[「」]/g,'').trim():'';   // 다시 그리기 전에 읽는다(그리면 지워진다)
+  E.manOpen=!E.manOpen; _raSave(); raRerender('enact');
+  if(E.manOpen) setTimeout(()=>{ const n=document.getElementById('raManLaw'), l2=document.getElementById('raLawName');
+    if(l2&&typed&&!l2.value) l2.value=typed;
+    if(n){ if(!n.value&&typed) n.value=typed; (n.value?document.getElementById('raManArt'):n).focus(); } },30);   // 위에 적어 둔 법령명은 이어 쓴다
+}
+function raDelManualAdd(){
+  const g=id=>String((document.getElementById(id)||{}).value||'').trim();
+  const law=g('raManLaw').replace(/[「」]/g,'').trim(), art=g('raManArt'), text=g('raManText');
+  if(!law){ _toast('상위 법령명을 적으세요.'); const n=document.getElementById('raManLaw'); if(n) n.focus(); return; }
+  RA.enact.dels.push({law, art, text}); RA.enact.manOpen=false; raDirty('enact'); _raSave(); raRerender('enact');
+  _toast(`「${law}」${art?' '+art:''} 위임 조항을 담았습니다.`);
+}
+function raDelManualForm(){
+  const key="onkeydown=\"if(event.key==='Enter'&&!event.isComposing){event.preventDefault();raDelManualAdd();}\"";
+  return `<div class="ra-man" role="group" aria-label="위임 조항 직접 입력"><div class="ra-row">`+
+    `<input id="raManLaw" class="ra-in" style="max-width:260px" aria-label="상위 법령명" placeholder="상위 법령명 (예: 농촌진흥법)" ${key}>`+
+    `<input id="raManArt" class="ra-in" style="max-width:200px" aria-label="조항" placeholder="조항 (예: 제33조제2항)" ${key}></div>`+
+    `<textarea id="raManText" class="ra-in" rows="2" aria-label="조문 내용(요지)" placeholder="조문 내용(요지) — 비워도 됩니다"></textarea>`+
+    `<div class="ra-row"><button class="svc-btn yes" onclick="raDelManualAdd()">추가</button><button class="svc-btn ghost" onclick="raDelManual()">취소</button></div></div>`;
 }
 function raDelRemove(i){ RA.enact.dels.splice(i,1); raDirty('enact'); _raSave(); raRerender('enact'); }
 function raRerender(tab){ if(RA.tab!==tab) return; const y=window.scrollY; raRender(); window.scrollTo(0,y); }

@@ -58,9 +58,11 @@ const R = []; const rec = (id, ok, got) => { R.push({ id, ok, got }); console.lo
   await p.fill('input[oninput*="enact.title"]', '업무용 드론 운영지침');
   await p.locator('#raWiz button', { hasText: '참고 자료' }).first().click(); await p.waitForTimeout(500);
   const manual = p.locator('#raBody button', { hasText: '직접' }).first(); const manTxt = (await manual.count()) ? (await manual.textContent()).trim() : '';
-  if (manTxt) { prompts.push('드론 활용의 촉진 및 기반조성에 관한 법률', '제13조', '드론 사용사업의 안전관리에 필요한 사항은 대통령령으로 정한다.'); const d0 = dialogs.length; await manual.click(); await p.waitForTimeout(600);
+  if (manTxt) { const d0 = dialogs.length; await manual.click(); await p.waitForSelector('#raManLaw', { timeout: 5000 });
+    await p.fill('#raManLaw', '드론 활용의 촉진 및 기반조성에 관한 법률'); await p.fill('#raManArt', '제13조'); await p.fill('#raManText', '드론 사용사업의 안전관리에 필요한 사항은 대통령령으로 정한다.');
+    await p.locator('.ra-man button', { hasText: '추가' }).click(); await p.waitForTimeout(400);
     const dels = await p.evaluate(() => (RA.enact.dels || []).map(d => d.law + ' ' + (d.art || d.no || '')));
-    rec('(선택) 위임 조항 직접 추가', dels.some(x => /드론 활용/.test(x)), `단추 “${manTxt}” · 대화상자 ${dialogs.length - d0}번 · 담긴 위임 조항 ${JSON.stringify(dels)}`); }
+    rec('(선택) 위임 조항 직접 입력(화면 입력칸)', dels.some(x => /드론 활용/.test(x)) && dialogs.length === d0, `단추 “${manTxt}” · 입력칸 3개 · 대화상자 ${dialogs.length - d0}번 · 담긴 위임 조항 ${JSON.stringify(dels)}`); }
   else rec('(선택) 위임 조항 직접 추가', false, '“직접” 단추 없음');
   t = T(); await p.locator('#raWiz button', { hasText: '조문 초안' }).first().click(); await p.waitForFunction(() => RA.enact.draft && RA.enact.draft.text, null, { timeout: 30000 });
   const arts = await p.evaluate(() => raParse(RA.enact.draft.text).articles.length);
