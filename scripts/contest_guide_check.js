@@ -24,7 +24,7 @@ const R = []; const rec = (id, ok, got) => { R.push({ id, ok, got }); console.lo
   await p.click('.ra-ai-pill'); await p.waitForSelector('#aiModalBg.show', { timeout: 5000 });
   const tabs = await p.$$eval('.prov-tab', es => es.map(e => e.textContent.trim()));
   const hasKey = !!(await p.$('#aiKey')), hasModel = await p.evaluate(() => !!document.querySelector('#aiModalBg select, #aiModel'));
-  rec('제공자 Gemini·Claude·GPT, 키 입력칸, 모델 선택', tabs.join(',') === 'Gemini,Claude,GPT' && hasKey && hasModel, `탭 ${tabs.join('·')} · 키칸 ${hasKey} · 모델 선택 ${hasModel}`);
+  rec('제공자 Gemini·Claude·GPT·사내·공통기반, 키 입력칸, 모델 선택', tabs.join(',') === 'Gemini,Claude,GPT,사내·공통기반' && hasKey && hasModel, `탭 ${tabs.join('·')} · 키칸 ${hasKey} · 모델 선택 ${hasModel}`);
   await p.fill('#aiKey', 'TEST-KEY-123');
   const save = p.locator('#aiModalBg button', { hasText: /저장|적용|확인/ }).first(); const saveTxt = (await save.textContent()).trim(); await save.click(); await p.waitForTimeout(300);
   const st = await p.evaluate(() => ({ ss: sessionStorage.getItem('aiKeys') || '', ls: JSON.stringify(Object.assign({}, localStorage)) }));

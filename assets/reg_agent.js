@@ -91,7 +91,7 @@ const RA_PAGE={
 // 기관 프로필(org_config.json) — 기관명·기관장·내규관리 규칙·절차·심의기준. 서버 /api/regagent/config
 let RA_ORG=null;
 async function raLoadOrg(){
-  try{ const d=await raGet('/api/regagent/config'); if(d&&d.org){ RA_ORG=d.org; RA_ORG._count=d.reg_count; RA_ORG._ledger=!!d.ledger; RA_ORG._law=d.law!==false; } }catch(e){}
+  try{ const d=await raGet('/api/regagent/config'); if(d&&d.org){ RA_ORG=d.org; RA_ORG._count=d.reg_count; RA_ORG._ledger=!!d.ledger; RA_ORG._law=d.law!==false; RA_ORG._compat=!!(d.compat&&d.compat.ready); } }catch(e){}
   if(!RA_ORG) RA_ORG={org_name:'○○기관',org_short:'기관',head:'기관장',deputy:'부기관장',reg_word:'내규',rules_name:'내규관리규칙',email_domain:'example.or.kr',notice_days:20,staff_days:7,rules_summary:[],review_criteria:[],procedure:{questions:[],steps:[]}};
   const sub=document.getElementById('orgSub'); if(sub){ sub.textContent=RA_ORG.org_name; sub.title=`${RA_ORG.org_name} ${RA_ORG.reg_word} 제정·개정 실무 지원`; }
   document.title=`규정 제·개정 에이전트 · ${RA_ORG.org_short}`;
@@ -186,7 +186,7 @@ function raKind(title){ const t=String(title||'').trim().replace(/\s*\([^()]*\)$
 function raEffDefault(kind){ return ['조례','고시'].includes(kind)||RA_ORG.reg_word==='자치법규'?'공포한 날':'발령한 날'; }
 function raToday(add){ const d=new Date(); d.setDate(d.getDate()+(add||0)); return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}.`; }
 function raAi(){ const s=getAiSettings(); const p=s.provider||''; return p?{provider:p, api_key:s['key_'+p]||'', model:s['model_'+p]||''}:{}; }
-function raHasAi(){ const s=getAiSettings(); const p=s.provider||''; return !!(p&&(s['key_'+p]||p==='ollama')); }
+function raHasAi(){ const s=getAiSettings(); const p=s.provider||''; return !!(p&&(s['key_'+p]||p==='ollama'||(p==='compat'&&RA_ORG._compat!==false))); }   // 사내·공통기반 모델은 서버에 주소가 있으면 키 없이
 const RA_FETCH_MS=120000;          // AI 초안(최대 약 1분)보다 넉넉하게
 async function raPost(url, body){
   const s=getAiSettings(); const h={'Content-Type':'application/json'};

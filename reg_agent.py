@@ -1106,11 +1106,19 @@ def _norm_reason(r) -> dict:
 def _ai_conf(body: dict):
     provider = (body.get("provider") or os.environ.get("SCENARIO_AI_PROVIDER", "gemini")).lower()
     api_key = (body.get("api_key") or os.environ.get(f"{provider.upper()}_API_KEY", "")
-               or (os.environ.get("OPENAI_API_KEY", "") if provider in ("gpt", "openai") else "")).strip()
+               or (os.environ.get("OPENAI_API_KEY", "") if provider in ("gpt", "openai") else "")
+               or (os.environ.get("OPENAI_COMPAT_API_KEY", "") if provider == "compat" else "")).strip()
     model = (body.get("model") or os.environ.get("SCENARIO_AI_MODEL", "")).strip()
     if provider == "openai":
         provider = "gpt"
     return provider, api_key, model
+
+
+def _ai_on(provider: str, key: str) -> bool:
+    """AI 를 부를 수 있는가: 키가 있거나, 키 없이 쓰는 사내 모델(Ollama, 서버에 주소가 설정된 사내·공통기반 모델)."""
+    if key or provider == "ollama":
+        return True
+    return provider == "compat" and bool(_CTX.get("compat_ready") and _CTX["compat_ready"]())
 
 
 def _ref_block(refs: list, cap: int = 7000) -> str:
@@ -1343,7 +1351,7 @@ def _sources_of(arts: list) -> list:
 
 def ai_enact(b: dict):
     provider, key, model = _ai_conf(b)
-    if not key and provider != "ollama":
+    if not _ai_on(provider, key):
         return template_enact(b), "AI 키가 없어 표준 조문 골격으로 작성했습니다. [✦ AI 설정]에서 키를 넣으면 AI 초안을 만들 수 있습니다."
     mdl = model or _CTX["default_model_for"](provider, key)
     title = (b.get("title") or "").strip()
@@ -1412,7 +1420,7 @@ def ai_enact(b: dict):
 
 def ai_amend(b: dict):
     provider, key, model = _ai_conf(b)
-    if not key and provider != "ollama":
+    if not _ai_on(provider, key):
         return None, "AI 키가 없습니다. [✦ AI 설정]에서 키를 넣거나, 개정안을 직접 입력하세요."
     mdl = model or _CTX["default_model_for"](provider, key)
     reg = resolve_reg(b)
@@ -2200,7 +2208,9 @@ def ra_config():
     regs = all_regs()
     return jsonify({"success": True, "org": _deep_fmt(ORG), "reg_count": len(regs),
                     "semantic": bool(_CTX.get("vec_ready") and _CTX["vec_ready"]()), "ledger": ledger_enabled(),
-                    "law": law_ready()})
+                    "law": law_ready(),
+                    "compat": {"ready": bool(_CTX.get("compat_ready") and _CTX["compat_ready"]()),
+                               "label": _CTX["compat_label"]() if _CTX.get("compat_label") else "사내·공통기반 모델"}})
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2535,7 +2545,7 @@ def ra_review():
     notice = ""
     if b.get("ai"):
         provider, key, model = _ai_conf(b)
-        if key or provider == "ollama":
+        if _ai_on(provider, key):
             mdl = model or _CTX["default_model_for"](provider, key)
             crit = "\n".join(f"- {r['id']}: {r['t']} — {r['d']}" for r in res["rows"])
             system = f"""당신은 {ORG['org_name']} {ORG['reg_word']}심의위원회 간사입니다. 「{ORG['rules_name']}」의 심의기준으로 {ORG['reg_word']}안을 검토해 의견을 쓰세요.
@@ -3983,7 +3993,7 @@ def ra_plan():
     plan = heuristic_plan(req)
     provider, key, model = _ai_conf(b)
     plan["ai"] = False
-    if key or provider == "ollama":
+    if _ai_on(provider, key):
         mdl = model or _CTX["default_model_for"](provider, key)
         system = f"""당신은 {ORG['org_name']} {ORG['reg_word']} 제·개정 에이전트의 작업 계획 담당입니다.
 사용자의 한 문장 요청을 분석해 JSON만 반환하세요.
@@ -4361,7 +4371,7 @@ def _quote_ok(point: str, body: str) -> bool:
 def ai_advise(b: dict, S: dict):
     """AI 회신 → (dict, notice). 근거 번호는 실제 제시한 조문 안에서만 남긴다."""
     provider, key, model = _ai_conf(b)
-    if not key and provider != "ollama":
+    if not _ai_on(provider, key):
         return None, ""
     if not S["sources"]:
         return None, ""
@@ -4457,7 +4467,7 @@ def ra_advise():
     if not ans:
         ans = _adv_rule_answer(q, S)
         provider, key, _ = _ai_conf(b)
-        if not key and provider != "ollama":                      # 화면 안내(회신서에는 넣지 않는다)
+        if not _ai_on(provider, key):                      # 화면 안내(회신서에는 넣지 않는다)
             hint = "규칙 기반 안내입니다. AI 키를 넣으면 질의에 맞춘 회신(결론·조건·유의사항)을 받을 수 있습니다."
     return jsonify({"success": True, "question": q, "scope": slug, "ai": "model" in ans, "notice": notice or hint,
                     "semantic": S["semantic"], "tokens": S["tokens"], "unmatched": S.get("unmatched", []),
