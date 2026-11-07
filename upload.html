@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>내규 원문 등록 · 규정 제·개정 에이전트</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.min.css">
+<link rel="stylesheet" href="/assets/fonts/pretendard/pretendard.css"><!-- Pretendard(SIL OFL 1.1) — 저장소에 포함해 외부망 없이도 같은 화면 -->
 <link rel="stylesheet" href="/assets/tokens.css">
 <style>
 /* Hallmark · theme: almanac · redesign: full · scope: app · the upload screen shares /assets/tokens.css with the agent */
@@ -376,8 +376,8 @@ a:hover{text-decoration-color:var(--color-accent);}
 
       <div class="shared-fields">
         <div class="f">
-          <label for="bUploader">올린 사람 <span class="req">*</span></label>
-          <input id="bUploader" placeholder="예: 홍길동" autocomplete="name" maxlength="40">
+          <label for="bUploader">올린 부서 <span class="req">*</span></label>
+          <input id="bUploader" placeholder="예: 경영지원팀(개인 이름 대신 부서명)" autocomplete="organization" maxlength="40">
           <div class="hint">업로드 이력과 커밋 기록에 남습니다.</div>
         </div>
         <div class="f">
@@ -461,7 +461,7 @@ a:hover{text-decoration-color:var(--color-accent);}
               <th>구분</th>
               <th>규정명</th>
               <th>개정 구분</th>
-              <th>올린 사람</th>
+              <th>올린 부서</th>
               <th>업로드 일시</th>
               <th>작업</th>
             </tr>
@@ -817,7 +817,7 @@ async function doBatchUpload(){
   var pending=_queue.filter(function(q){return q.status==='pending';});
   if(!pending.length){alert('업로드할 파일이 없습니다.'); return;}
   var uploader=$('bUploader').value.trim();
-  if(!uploader){alert('올린 사람을 입력해주세요.'); return;}
+  if(!uploader){alert('올린 부서를 입력해주세요.'); return;}
   if(_status&&_status.token_required&&!$('bToken').value){
     alert('업로드 토큰을 입력해주세요.'); return;
   }
@@ -951,7 +951,7 @@ function renderManagement(){
       +((u.history&&u.history.length)?'<div style="font-size:12px;color:var(--ht);">이전 개정 '+u.history.length+'건</div>':'')
       +'</td>'
       +'<td data-label="개정 구분"><span class="mgmt-rev">'+esc(u.revision||'-')+'</span></td>'
-      +'<td data-label="올린 사람"><span class="mgmt-rev">'+esc(u.uploader||'-')+'</span></td>'
+      +'<td data-label="올린 부서"><span class="mgmt-rev">'+esc(u.uploader||'-')+'</span></td>'
       +'<td data-label="업로드 일시"><span class="mgmt-date">'+esc(u.uploaded_at||'-')+'</span></td>'
       +'<td data-label="작업"><div class="mgmt-acts">'
       +'<a href="'+esc(u.html||'#')+'" target="_blank">전문보기</a>'

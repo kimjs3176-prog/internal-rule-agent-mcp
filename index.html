@@ -6,8 +6,7 @@
 <title>규정 제·개정 에이전트</title>
 <meta name="description" content="기관 내규의 제정·개정 초안, 신구조문대비표, 건강검진, 자문 회신을 돕는 업무 도구">
 <meta name="theme-color" content="#eceef2" id="themeColor">
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.min.css">
+<link rel="stylesheet" href="/assets/fonts/pretendard/pretendard.css"><!-- Pretendard(SIL OFL 1.1) — 저장소에 포함해 외부망 없이도 같은 화면 -->
 <link rel="stylesheet" href="/assets/tokens.css">
 <style>
 /* Hallmark · shell: a slate side rail of destinations beside the work sheet · tokens in /assets/tokens.css */
@@ -127,14 +126,16 @@ svg.ic{width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalT">
     <h2 id="aiModalT">AI 설정</h2>
     <p>조문 초안·수정안 작성에 쓸 AI를 고르고 API 키를 넣으세요. 키는 이 탭을 닫으면 지워지며(sessionStorage), 요청할 때만 서버로 전달됩니다. Gemini 키가 있으면 유사 규정 의미 검색도 켜집니다.</p>
-    <p class="m-note">전송 범위: AI를 쓰면 개정 의도·질의와 대상 조문 본문이 고른 AI 제공자 서버로 갑니다. 등록된 현행 내규는 알리오 공시 대상인 공개 정보라 문제가 없지만, <b>공개 전 개정안</b>(심의·의결 전의 보수·인사·직제 개정안 등)을 다룰 때는 기관 보안지침에 따라 기관 LLM(Ollama, 관리자 설정)이나 행정안전부 AI 공통기반을 고르거나 AI 없이 규칙 기반으로 작업하세요.</p>
+    <p class="m-note">전송 범위: AI를 쓰면 개정 의도·질의와 대상 조문 본문이 고른 AI 제공자 서버로 갑니다. 등록된 현행 내규는 알리오 공시 대상인 공개 정보라 문제가 없지만, <b>공개 전 개정안</b>(심의·의결 전의 보수·인사·직제 개정안 등)을 다룰 때는 기관 보안지침에 따라 아래 <b>‘사내·공통기반’</b>(관리자가 서버에 설정한 기관 모델·행정안전부 AI 공통기반)을 고르거나 AI 없이 규칙 기반으로 작업하세요.</p>
     <div class="prov-tabs">
       <button type="button" class="prov-tab" data-p="gemini" onclick="setProv('gemini')">Gemini</button>
       <button type="button" class="prov-tab" data-p="claude" onclick="setProv('claude')">Claude</button>
       <button type="button" class="prov-tab" data-p="gpt" onclick="setProv('gpt')">GPT</button>
+      <button type="button" class="prov-tab" data-p="compat" onclick="setProv('compat')" title="vLLM·Ollama·행정안전부 AI 공통기반 등 OpenAI 호환 주소로 연결한 기관 모델(Gemma·GPT-OSS·EXAONE·Solar 등)">사내·공통기반</button>
     </div>
     <label class="mf">API 키 <input id="aiKey" type="password" autocomplete="off" placeholder="키를 붙여 넣으세요"></label>
-    <label class="mf">모델 <select id="aiModel"></select></label>
+    <label class="mf" id="aiModelSelWrap">모델 <select id="aiModel"></select></label>
+    <label class="mf" id="aiModelTxtWrap" style="display:none">모델 이름 <input id="aiModelTxt" list="aiModelList" autocomplete="off" placeholder="예: google/gemma-3-27b-it, gpt-oss-20b, exaone-3.5"><datalist id="aiModelList"></datalist></label>
     <div class="mf" id="aiKeyHelp"></div>
     <div class="m-acts">
       <button type="button" class="svc-btn ghost" onclick="clearAiSettings()">키 지우기</button>
@@ -175,6 +176,7 @@ const AI_MODELS={
   gemini:[['gemini-flash-latest','최신 Flash (자동 현행화·권장)'],['gemini-flash-lite-latest','최신 Flash-Lite (빠름·한도 넉넉)'],['gemini-pro-latest','최신 Pro (고성능)']],
   claude:[['claude-sonnet-4-5','Claude Sonnet 4.5 (권장)'],['claude-opus-4-5','Claude Opus 4.5 (최고 성능)'],['claude-haiku-4-5-20251001','Claude Haiku 4.5 (빠름)']],
   gpt:[['gpt-4.1','GPT-4.1 (권장)'],['gpt-4.1-mini','GPT-4.1 Mini (빠름)'],['gpt-4o','GPT-4o']],
+  compat:[],          // 사내·공통기반 모델: 서버(관리자 설정)가 알려 주는 모델 목록을 쓰고, 직접 적을 수도 있다
 };
 const AI_HELP={gemini:'https://aistudio.google.com/apikey', claude:'https://console.anthropic.com/settings/keys', gpt:'https://platform.openai.com/api-keys'};
 let currentProv='gemini';
@@ -188,11 +190,26 @@ function setProv(p){
   currentProv=p; const s=getAiSettings();
   document.querySelectorAll('.prov-tab').forEach(b=>b.classList.toggle('on', b.dataset.p===p));
   document.getElementById('aiKey').value=s['key_'+p]||'';
-  const sel=document.getElementById('aiModel');
+  const sel=document.getElementById('aiModel'), compat=p==='compat';
+  document.getElementById('aiModelSelWrap').style.display=compat?'none':''; document.getElementById('aiModelTxtWrap').style.display=compat?'':'none';   // .mf 의 display 가 hidden 속성을 덮으므로 직접 감춘다
+  document.getElementById('aiKey').placeholder=compat?'필요할 때만(서버에 설정돼 있으면 비워 둡니다)':'키를 붙여 넣으세요';
+  if(compat){ setCompat(s); return; }
   sel.innerHTML=AI_MODELS[p].map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
   if(s['model_'+p]) sel.value=s['model_'+p]; if(!sel.value) sel.selectedIndex=0;
   document.getElementById('aiKeyHelp').innerHTML=`<a class="svc-btn sm" href="${AI_HELP[p]}" target="_blank" rel="noopener">${p==='gpt'?'OpenAI':p==='claude'?'Anthropic':'Google AI Studio'}에서 키 발급</a>`+
     (p==='gemini'?`<ol class="key-steps"><li>위 링크에서 Google 계정으로 로그인</li><li>“API 키 만들기(Create API key)”를 눌러 키 복사</li><li>위 API 키 칸에 붙여 넣고 저장 — 무료 사용량 안에서 쓸 수 있습니다</li></ol>`:'');
+}
+// 사내·공통기반 모델: 주소는 관리자가 서버에 정하고(OPENAI_COMPAT_BASE_URL), 여기서는 모델 이름만 고른다
+async function setCompat(s){
+  const txt=document.getElementById('aiModelTxt'), help=document.getElementById('aiKeyHelp');
+  txt.value=s.model_compat||''; help.innerHTML='<span class="m-note">서버에 설정된 모델을 확인하는 중…</span>';
+  let d={}; try{ d=await (await fetch('/api/ai/models?provider=compat')).json(); }catch(e){}
+  if(currentProv!=='compat') return;
+  document.getElementById('aiModelList').innerHTML=(d.models||[]).map(m=>`<option value="${escAttr(m)}"></option>`).join('');
+  if(!txt.value&&d.model) txt.value=d.model;
+  help.innerHTML=d.ready
+    ?`<span class="m-note">${escHtml(d.label||'사내·공통기반 모델')}에 연결합니다(관리자가 서버에 설정한 주소). ${d.models&&d.models.length?`쓸 수 있는 모델: ${d.models.slice(0,6).map(escHtml).join(', ')}`:'모델 이름을 적으세요.'} 개정안이 기관 밖으로 나가지 않아 공개 전 개정안에 알맞습니다.</span>`
+    :`<span class="m-note">${escHtml(d.error||'관리자가 서버 환경변수 OPENAI_COMPAT_BASE_URL을 지정해야 쓸 수 있습니다.')}</span>`;
 }
 let _modalRet=null;
 function openAiModal(){ _modalRet=document.activeElement; const p=_readAiPrefs().provider; setProv(AI_MODELS[p]?p:'gemini'); document.getElementById('aiModalBg').classList.add('show'); setTimeout(()=>document.getElementById('aiKey').focus(),50); }
@@ -211,10 +228,10 @@ document.addEventListener('keydown',e=>{
 });
 function saveAiSettings(){
   const prefs=_readAiPrefs(), keys=_readAiKeys(), k=document.getElementById('aiKey').value.trim();
-  prefs.provider=currentProv; prefs['model_'+currentProv]=document.getElementById('aiModel').value;
+  prefs.provider=currentProv; prefs['model_'+currentProv]=currentProv==='compat'?document.getElementById('aiModelTxt').value.trim():document.getElementById('aiModel').value;
   if(k) keys['key_'+currentProv]=k; else delete keys['key_'+currentProv];
   try{ localStorage.setItem('aiSettings', JSON.stringify(prefs)); sessionStorage.setItem('aiKeys', JSON.stringify(keys)); }catch(e){}
-  closeAiModal(); _toast(k?'AI 설정을 저장했습니다.':'키가 없어 AI 초안 대신 템플릿·수동 작성으로 동작합니다.');
+  closeAiModal(); _toast(currentProv==='compat'?'사내·공통기반 모델로 저장했습니다.':k?'AI 설정을 저장했습니다.':'키가 없어 AI 초안 대신 템플릿·수동 작성으로 동작합니다.');
   if(typeof openRegAgent==='function') openRegAgent();
 }
 function clearAiSettings(){ try{ sessionStorage.removeItem('aiKeys'); }catch(e){} document.getElementById('aiKey').value=''; _toast('저장된 키를 지웠습니다.'); if(typeof openRegAgent==='function') openRegAgent(); }

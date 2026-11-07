@@ -904,6 +904,24 @@ def get_law_articles():
 
 # ── AI 모델 자동 현행화 ─────────────────────────────────────────────────────
 # Gemini는 모델명이 자주 갱신되므로 하드코딩하지 않고 ListModels로 최신을 고른다.
+def _compat_conf() -> dict:
+    """사내·공통기반 모델(OpenAI 호환 API — vLLM·Ollama·행안부 AI 공통기반 등). 주소는 관리자가 서버 환경변수로만 정한다(화면에서 바꿀 수 없음).
+    OPENAI_COMPAT_BASE_URL  예: http://llm.internal:8000/v1  (…/chat/completions 앞까지)
+    OPENAI_COMPAT_API_KEY   서버가 붙일 키(선택, 없으면 사용자가 넣은 키 또는 키 없이)
+    OPENAI_COMPAT_MODELS    화면에 보일 모델명(쉼표, 선택)   OPENAI_COMPAT_MODEL 기본 모델(선택)
+    OPENAI_COMPAT_LABEL     화면 이름(선택, 기본 “사내·공통기반 모델”)"""
+    base = (os.environ.get("OPENAI_COMPAT_BASE_URL") or "").strip().rstrip("/")
+    models = [m.strip() for m in (os.environ.get("OPENAI_COMPAT_MODELS") or "").split(",") if m.strip()]
+    return {"base": base, "models": models, "default": (os.environ.get("OPENAI_COMPAT_MODEL") or "").strip() or (models[0] if models else ""),
+            "label": (os.environ.get("OPENAI_COMPAT_LABEL") or "").strip() or "사내·공통기반 모델"}
+
+
+def _compat_ready() -> bool:
+    from urllib.parse import urlparse
+    u = urlparse(_compat_conf()["base"])
+    return u.scheme in ("http", "https") and bool(u.hostname)
+
+
 _AI_MODEL_FALLBACK = {"gemini": "gemini-flash-latest",
                       "claude": "claude-haiku-4-5-20251001",
                       "gpt": "gpt-4.1-mini", "openai": "gpt-4.1-mini"}
@@ -1051,6 +1069,8 @@ def _default_model_for(provider: str, api_key: str = "") -> str:
     """
     if provider == "gemini":
         return _GEMINI_MODEL_CACHE.get("model") or GEMINI_DEFAULT_MODEL
+    if provider == "compat":
+        return _compat_conf()["default"]
     return _AI_MODEL_FALLBACK.get(provider, _AI_MODEL_FALLBACK["gemini"])
 
 
@@ -1061,6 +1081,8 @@ def ai_models():
     이 엔드포인트는 명시 호출이므로 Gemini 는 실시간 ListModels 로 캐시를 채운다.
     """
     provider = (request.args.get("provider") or "gemini").lower()
+    if provider == "compat":
+        return jsonify({"success": True, "provider": "compat", **_compat_models()})
     key = (request.args.get("api_key") or
            os.environ.get(f"{provider.upper()}_API_KEY", "")).strip()
     if provider == "gemini":
@@ -1070,6 +1092,31 @@ def ai_models():
     return jsonify({"success": True, "provider": provider, "model": mdl,
                     "resolved": provider == "gemini" and bool(key),
                     "cached_at": _GEMINI_MODEL_CACHE["ts"] if provider == "gemini" else 0})
+
+
+_COMPAT_MODELS_CACHE: dict = {"ts": 0.0, "models": []}
+
+
+def _compat_models() -> dict:
+    """사내·공통기반 모델 서버가 알려 주는 모델 목록(OpenAI 호환 GET /models, 10분 기억) + 관리자가 적은 목록."""
+    import time as _t
+    c = _compat_conf()
+    if not _compat_ready():
+        return {"ready": False, "label": c["label"], "models": [], "model": "",
+                "error": "관리자가 서버 환경변수 OPENAI_COMPAT_BASE_URL(사내·공통기반 모델 주소)을 지정해야 쓸 수 있습니다."}
+    found = _COMPAT_MODELS_CACHE["models"] if _t.time() - _COMPAT_MODELS_CACHE["ts"] < 600 else None
+    if found is None:
+        found = []
+        try:
+            key = (os.environ.get("OPENAI_COMPAT_API_KEY") or "").strip()
+            r = req_lib.get(f"{c['base']}/models", timeout=(2, 4), headers={"Authorization": f"Bearer {key}"} if key else {})
+            if r.status_code == 200:
+                found = [str(m.get("id")) for m in (r.json().get("data") or []) if isinstance(m, dict) and m.get("id")][:50]
+        except Exception as e:
+            print(f"[compat] 모델 목록 조회 실패: {type(e).__name__}")
+        _COMPAT_MODELS_CACHE.update({"ts": _t.time(), "models": found})
+    models = list(dict.fromkeys(c["models"] + found))
+    return {"ready": True, "label": c["label"], "models": models, "model": c["default"] or (models[0] if models else "")}
 
 
 def _gemini_thinking_cfg(mdl: str):
@@ -1094,7 +1141,7 @@ def _ai_generate(provider: str, api_key: str, mdl: str, system: str, user: str,
                  json_mode: bool = False):
     """프로바이더 공통 텍스트 생성. 반환: (text, error_message). 실패 시 text=''."""
     # 모델명은 URL 경로·요청 본문에 그대로 들어가므로 형식을 확인한다(경로 조작 방지)
-    if mdl and not re.fullmatch(r"[\w.:\-]{1,80}", mdl):
+    if mdl and not re.fullmatch(r"[\w.:/\-]{1,120}" if provider == "compat" else r"[\w.:\-]{1,80}", mdl):
         return "", "모델 이름 형식이 올바르지 않습니다."
     import time as _t
     deadline = _t.time() + AI_BUDGET                 # 재시도·재호출을 모두 합친 상한(서버리스 함수 시간 제한 안에서 끝낸다)
@@ -1220,6 +1267,29 @@ def _ai_generate(provider: str, api_key: str, mdl: str, system: str, user: str,
             if c0.get("finish_reason") == "length" and json_mode:
                 return "", cut
             return c0["message"]["content"], ""
+        if provider == "compat":                  # 사내·공통기반 모델(OpenAI 호환) — 주소는 서버 환경변수로만
+            c = _compat_conf()
+            if not _compat_ready():
+                return "", "사내·공통기반 모델 주소가 설정되지 않았습니다. 관리자가 서버 환경변수 OPENAI_COMPAT_BASE_URL을 지정해야 합니다."
+            mdl = mdl or c["default"]
+            if not mdl:
+                return "", "사내·공통기반 모델의 모델 이름을 [AI 설정]에서 고르거나 적으세요."
+            key = (api_key or os.environ.get("OPENAI_COMPAT_API_KEY") or "").strip()
+            hdr = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
+            r = _ai_post_retry(lambda: req_lib.post(
+                f"{c['base']}/chat/completions", timeout=left(55), headers=hdr,
+                json={"model": mdl, "temperature": temperature, "max_tokens": max_tokens, "stream": False,
+                      "messages": [{"role": "system", "content": system},
+                                   {"role": "user", "content": user}]}), deadline=deadline)
+            if r.status_code != 200:
+                return "", f"{c['label']} 오류: " + _ai_error(r)[0]
+            c0 = (r.json().get("choices") or [{}])[0]
+            if c0.get("finish_reason") == "length" and json_mode:
+                return "", cut
+            txt = ((c0.get("message") or {}).get("content") or "")
+            if not txt.strip():
+                return "", f"{c['label']}이(가) 본문을 돌려주지 않았습니다. 다른 모델을 고르거나 최대 길이를 확인하세요."
+            return txt, ""
         if provider == "ollama":
             base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
             r = req_lib.post(f"{base}/api/chat", timeout=left(60),
@@ -1495,6 +1565,8 @@ _reg_agent.register(
     rule_info=_lookup_rule,
     law_xml=_law_get_xml,
     law_ready=lambda: bool(OC),
+    compat_ready=_compat_ready,
+    compat_label=lambda: _compat_conf()["label"],
 )
 
 
