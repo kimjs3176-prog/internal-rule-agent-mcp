@@ -1247,3 +1247,21 @@ test('건강검진: 오류 목록 탭을 처음 열면 전체 점검을 바로 �
   assert.match(h, /RA\.health\.v='errors';_raSave\(\);raRerender\('health'\);if\(!RA\.check\.res\)raCheckAll\(\)/);
   assert.ok(!/RA\.health\.v='one'[^"]*raCheckAll/.test(h), '다른 탭은 점검을 돌리지 않는다');
 });
+
+test('제정 위임 조항 직접 입력: 대화상자 대신 화면 입력칸(법령명·조항·내용), 법령명이 없으면 담지 않는다', () => {
+  const c = load();
+  const src = fs.readFileSync(path.join(root, 'assets/reg_agent.js'), 'utf8');
+  assert.ok(!/raDelManual\(\)\{[^}]*prompt\(/.test(src), '위임 조항 입력에 prompt 를 쓰지 않는다');
+  const form = c.raDelManualForm();
+  for (const id of ['raManLaw', 'raManArt', 'raManText']) assert.match(form, new RegExp(`id="${id}"`));
+  assert.match(form, /raDelManualAdd\(\)/);
+  const vals = { raManLaw: '「드론 활용의 촉진 및 기반조성에 관한 법률」', raManArt: '제13조', raManText: '안전관리에 필요한 사항은 대통령령으로 정한다.' };
+  c.document.getElementById = id => (id in vals ? { value: vals[id], focus() {} } : null);
+  vm.runInContext(`RA.enact.dels=[]; RA.enact.manOpen=true;`, c);
+  c.raDelManualAdd();
+  const E = c.__RA().enact;
+  assert.equal(JSON.stringify(E.dels), JSON.stringify([{ law: '드론 활용의 촉진 및 기반조성에 관한 법률', art: '제13조', text: '안전관리에 필요한 사항은 대통령령으로 정한다.' }]));
+  assert.equal(E.manOpen, false);                                   // 담으면 입력칸을 닫는다
+  vals.raManLaw = '  '; E.manOpen = true; c.raDelManualAdd();
+  assert.equal(E.dels.length, 1); assert.equal(E.manOpen, true);   // 법령명이 비면 담지 않고 그대로 둔다
+});

@@ -123,6 +123,9 @@ node --test tests/js/*.test.mjs
 ### MCP로 쓰기(AI 도우미의 도구로)
 `python mcp_server/server.py`를 Claude Desktop·Claude Code 등 MCP를 지원하는 AI 도우미에 등록하면, 그 AI가 대화 중에 에이전트 실행·개정문·신구조문대비표·개정문 검증·조문 점검·건강검진·인용 영향 등 11개 도구를 직접 씁니다. 웹 화면과 같은 엔진·데이터이고 추가 패키지는 필요 없습니다(개정문 도구는 Node.js 18+). 등록 방법은 `docs/MCP.md`.
 
+### 라이선스
+쓰는 패키지·글꼴의 판과 라이선스는 `THIRD_PARTY_LICENSES.md`에 있습니다(재배포 제한 없음).
+
 ### 구조
 ```
 index.html, assets/        화면(색·글꼴·간격은 assets/tokens.css 한 곳에서)
