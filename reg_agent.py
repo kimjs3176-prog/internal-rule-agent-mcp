@@ -568,6 +568,7 @@ def _snip(text: str, pos: int, span: int = 60) -> str:
     return ("…" if s else "") + text[s:e].replace("\n", " ") + ("…" if e < len(text) else "")
 
 
+_GOV_PREFIX = re.compile(r"(?:공기업|준정부기관|공공기관|기관|공무원|국가|정부|행정|지방|자치)\s*[·ㆍ]?\s*$")   # 정부 규범명 앞말
 _ENUM_FIRST = re.compile(r"\s*(?:\(\s*이하[^)]{0,30}\)\s*)?제\s*(\d+)\s*조(?:\s*의\s*(\d+))?")
 _ENUM_NEXT = re.compile(r"(?:\s*제\s*\d+\s*(?:항|호)(?:\s*[가-하]\s*목)?)*\s*(,|및|또는|ㆍ|·|와|과|부터)\s*제\s*(\d+)\s*조(?:\s*의\s*(\d+))?(\s*까지)?")
 
@@ -598,7 +599,7 @@ def external_reg_refs(text: str, title: str):
     “「직제규정」 제3조, 제4조, 제6조”처럼 나열·범위로 이어진 조도 함께 읽는다. 「인사규정 시행세칙」 안의 ‘인사규정’은 「인사규정」 인용이 아니다."""
     out = []
     t = re.escape(title).replace(r"\ ", r"\s*")
-    pat = re.compile(r"「\s*" + t + r"\s*」|(?<![가-힣「])" + t + r"(?![가-힣」])(?!\s*(?:시행세칙|시행규칙|운영세칙|세칙))")
+    pat = re.compile(r"「\s*" + t + r"\s*(?:\([^)]{0,40}\))?\s*」|(?<![가-힣])" + t + r"(?![가-힣」])(?!\s*(?:시행세칙|시행규칙|운영세칙|세칙))")
     for m in pat.finditer(text or ""):
         refs = _enum_refs(text, m.end())
         if not refs:
@@ -619,6 +620,8 @@ def _reg_aliases(title: str, bodies) -> dict:
         if k in names and k != _nk(title):
             out[m.group(2)] = names[k]
     for m in re.finditer(r"(?<![가-힣「])([가-힣·]{2,30}?(?:규정|규칙|지침))\s*\(\s*이하\s*[“\"‘']\s*([가-힣]{1,8})\s*[”\"’']", txt):
+        if _GOV_PREFIX.search(txt[max(0, m.start() - 14):m.start()]):
+            continue
         k = _nk(m.group(1))
         if k in names and k != _nk(title) and m.group(2) not in out:
             out[m.group(2)] = names[k]
@@ -2465,27 +2468,36 @@ def _bulk_sentence(pairs: list, old: str, new: str) -> str:
     return "하고, ".join(parts) + "한다."
 
 
-_BULK_SKIP_LINE = re.compile(r"부\s*칙|다른\s*내규의\s*개정|해당\s*조항\s*중|종전의|시행\s*당시")
+_BULK_SKIP_LINE = re.compile(r"다른\s*내규의\s*개정|해당\s*조항\s*중|종전의|시행\s*당시|일부를\s*다음과\s*같이\s*개정한다|"
+                             r"중\s*[“\"‘'][^”\"’']{1,60}[”\"’']\s*(?:을|를)\s*[“\"‘'][^”\"’']{0,60}[”\"’']\s*(?:으로|로)\s*한다|→|->")
+_BULK_SKIP_HEAD = re.compile(r"삭\s*제|생\s*략|(?:으로|로)\s*한다")
 
 
 def _bulk_appx(r: dict, old: str, new: str, whole: bool) -> list:
     """별표·서식에서도 명칭을 바꾼다(정원표·분장업무·회계책임자 표·결재란). 별표 자리에 섞인 부칙 줄과 “(구 ○○)” 표기는 그대로 둔다."""
     out = []
-    for x in split_appendix(r.get("appendix") or ""):
+    blocks = split_appendix(r.get("appendix") or "")
+    # 같은 이름의 블록 가운데 그 말이 든 것이 둘 이상이면 개정문(“별표 3 중 …”)이 어느 것을 가리키는지 알 수 없다 — 뺀다
+    dup = {b["id"] for b in blocks if sum(1 for c in blocks if c["id"] == b["id"] and (old in c["body"] or old in c["head"])) > 1}
+    for x in blocks:
         if old not in x["body"] and old not in x["head"]:
             continue
-        lines, n = [], 0
+        if x["id"] in dup or _BULK_SKIP_HEAD.search(x["head"]):
+            continue                           # 부칙이 별표로 잘못 나뉜 조각·삭제된 서식 — 개정문이 엉뚱한 별표를 가리키게 된다
+        pairs, n, in_addenda = [], 0, False
         for ln in x["body"].split("\n"):
-            if _BULK_SKIP_LINE.search(ln) or re.search(r"\(\s*구\s*[.．:]?\s*" + re.escape(old), ln):
-                lines.append(ln)
+            if re.match(r"\s*부\s*칙", ln):
+                in_addenda = True              # 별표 자리에 섞인 부칙 — 그 뒤 줄은 모두 옛 개정 지시문
+            if in_addenda or _BULK_SKIP_LINE.search(ln) or re.search(r"\(\s*구\s*[.．:]?\s*" + re.escape(old), ln):
                 continue
             nl, hits = replace_term(ln, old, new, whole)
-            lines.append(nl)
-            n += len(hits)
+            if hits:
+                pairs.append([ln, nl])
+                n += len(hits)
         nh, hh = replace_term(x["head"], old, new, whole)
         n += len(hh)
-        if n:
-            out.append({"id": x["id"], "head": x["head"], "new_head": nh, "old_body": x["body"], "new_body": "\n".join(lines), "count": n})
+        if n:                                  # 바뀐 줄만 보낸다(큰 서식 전체를 화면·대비표·저장본에 싣지 않게)
+            out.append({"id": x["id"], "head": x["head"], "new_head": nh, "lines": pairs, "count": n})
     return out
 
 
@@ -3629,6 +3641,8 @@ def citation_graph() -> dict:
                 b["count"] += 1
         # 낫표 없이 쓴 내규명 + 제N조(“감사규정 제23조”)와 하위 내규의 별칭 인용(“규정 제32조” = 「인사규정」) — 파급 범위에서 빠지지 않게
         for m in title_re.finditer(txt):
+            if _GOV_PREFIX.search(txt[max(0, m.start() - 14):m.start()]):
+                continue                       # 「공기업·준정부기관 계약사무규칙」 같은 정부 규범의 꼬리
             j = idx.get(_nk(m.group(0)))
             if j is not None and j != i:
                 edges[(i, j)] = edges.get((i, j), 0) + 1
@@ -4011,15 +4025,21 @@ _VERB_NOUN = {"막": "방지", "줄이": "감소", "낮추": "인하", "높이":
 
 
 _LAW_GENERIC = {"상위법", "법령", "법률", "관계법", "관련법", "관계 법령", "관련 법령", "해당 법", "같은 법", "동법", "이 법", "방법", "불법", "편법", "위법", "적법", "합법", "입법"}
-_LAW_ART_CHG = re.compile(r"((?:[가-힣·]+\s){0,6}?[가-힣·]*(?:법률|법)(?:\s*시행령|\s*시행규칙)?)\s*(?:「|」)?\s*(제\s*\d+\s*조(?:\s*의\s*\d+)?)"
+_LAW_ART_CHG = re.compile(r"((?:[가-힣·]{1,20}\s){0,6}?[가-힣·]{0,30}(?:법률|법)(?:\s*시행령|\s*시행규칙)?)\s*(?:「|」)?\s*(제\s*\d+\s*조(?:\s*의\s*\d+)?)"
                           r"(?:\s*제\s*\d+\s*항)?\s*(?:이|가|은|는|을|를|의)?\s*(?:개정|바뀌|변경|신설|삭제|시행)")
 
 
+_LAW_NOUN_TAIL = re.compile(r"(?:방법|기법|용법|화법|요법|문법|수법|어법|공법|비법|해법|작법|필법|타법|편법|불법|위법|적법|합법|입법|사법|가법|감법)$")
+
+
 def _law_art_change(t: str) -> str:
-    """요청문에서 “○○법 제N조 … 개정” 꼴의 법령명을 찾는다. 앞 낱말이 붙어 잡히면(“그런데 근로기준법”) 알려진 약칭·내규가 인용한 법령명이 될 때까지 앞에서부터 뗀다."""
-    m = _LAW_ART_CHG.search(t or "")
+    """요청문에서 “○○법 제N조 … 개정” 꼴의 법령명을 찾는다. 앞 낱말이 붙어 잡히면(“그런데 근로기준법”) 알려진 약칭·내규가 인용한 법령명이 될 때까지 앞에서부터 뗀다.
+    ‘지급방법’·‘평가기법’처럼 ‘-법’으로 끝나는 일반 명사는 법령명이 아니다. 찾은 법령의 조(제N조)는 _LAW_ART_LAST 에 남긴다."""
+    _LAW_ART_LAST["art"] = ""
+    m = _LAW_ART_CHG.search((t or "")[:400])
     if not m:
         return ""
+    _LAW_ART_LAST["art"] = re.sub(r"\s+", "", m.group(2))
     full = re.sub(r"\s+", " ", m.group(1)).strip()
     tm = re.match(r"^(.*?)\s*(시행령|시행규칙)$", full)
     base, tail = (tm.group(1), " " + tm.group(2)) if tm and tm.group(1) else (full, "")
@@ -4032,7 +4052,10 @@ def _law_art_change(t: str) -> str:
         if any(_nk(x) == _nk(nm) for grp in _LAW_ALIAS for x in grp) or _nk(nm) in cited or _nk(nm + tail) in cited:
             return nm + tail
     last = words[-1] if words else ""
-    return last + tail if len(last) >= 3 and last not in _LAW_GENERIC and re.search(r"(?:법|법률)$", last) else ""
+    return last + tail if len(last) >= 3 and last not in _LAW_GENERIC and re.search(r"(?:법|법률)$", last) and not _LAW_NOUN_TAIL.search(last) else ""
+
+
+_LAW_ART_LAST = {"art": ""}
 
 
 _CORPUS_LAWS_C = {"key": None, "set": frozenset()}
@@ -4116,15 +4139,19 @@ def heuristic_plan(req: str) -> dict:
         lm = short_law.group(1)
     # “청탁금지법 제10조가 개정됐어”·“근로기준법 제60조 개정에 따라 …” — 법령명 + 제N조 + 개정·바뀜. 등록 내규명을 함께 적지 않았으면 상위법 영향이다
     law_art = _law_art_change(t)
-    if law_art and not any(_nk(r["title"]) and _nk(r["title"]) in _nk(t) for r in all_regs()):
+    law_art_no = _LAW_ART_LAST["art"]
+    other_arts = [x for x in (re.sub(r"\s+", "", y) for y in re.findall(_REQ_ART, t)) if x != law_art_no]
+    edit_words = re.search(r"(고쳐|고치어|바꿔|바꾸어|수정해|수정하여|늘려|줄여|올려|내려|정비해|개정해\s*줘|개정하여\s*줘)", t) or \
+        re.search(r"\d\s*(?:만\s*원|천\s*원|원|일|개월|년|시간|%|회)\s*(?:에서|을|를|→)", t)
+    if law_art and not other_arts and not edit_words and not any(_nk(r["title"]) and _nk(r["title"]) in _nk(t) for r in all_regs()):
         lm, short_law = law_art, True
     if lm and lm in _LAW_GENERIC:
         lm = None
     own_edit = re.search(r"(내규|규정|규칙|지침)을\s*(?:고치|개정)", t) or \
-        re.search(r"(?:규정|규칙|지침|세칙|요령|기준|정관)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:을|를)?\s*(?:고치|고쳐|개정|수정|바꾸|바꿔)", t)   # “복무규정 제14조를 고쳐줘”
+        re.search(r"(?<!시행)(?:규정|규칙|지침|세칙|요령|기준|정관)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:을|를)?\s*(?:고치|고쳐|개정|수정|바꾸|바꿔)", t)   # “복무규정 제14조를 고쳐줘”(‘시행규칙 제N조’는 법령)
     if lm and (re.search(r"(상위법|법령|법률|시행령|시행규칙|「)", t) or short_law) and not own_edit:
         plan.update(mode="upper", law=re.sub(r"\s+", " ", lm),
-                    arts=[re.sub(r"\s+", "", x) for x in re.findall(_REQ_ART, t)])
+                    arts=[law_art_no] if (law_art and lm == law_art and law_art_no) else [re.sub(r"\s+", "", x) for x in re.findall(_REQ_ART, t)])
         plan["reasoning"].append(f"상위 법령 「{plan['law']}」 개정에 따른 영향 분석으로 판단")
         return plan
     if _ENACT_RE.search(t) and not re.search(r"개정", t):

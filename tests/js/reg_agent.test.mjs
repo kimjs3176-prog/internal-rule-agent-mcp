@@ -1438,11 +1438,15 @@ test('일괄 정비 문서: 별표·서식 바꿈도 정비 대상·대비표에
   const c = load();
   vm.runInContext(`RA.bulk.res={old:'기획조정실',new:'경영기획실',total:3,reg_count:1,regs:[{slug:'직제규정_시행세칙',reg:'직제규정 시행세칙',count:3,
       articles:[{no:'4',title:'분장',new_title:'분장',old_body:'1. 기획조정실',new_body:'1. 경영기획실',count:1,locs:['제4조']}],
-      appx:[{id:'별표 6',head:'[별표 6] 분장업무',new_head:'[별표 6] 분장업무',old_body:'기획조정실 | 예산\\n기획조정실 | 감사',new_body:'경영기획실 | 예산\\n경영기획실 | 감사',count:2}],
+      appx:[{id:'별표 6',head:'[별표 6] 분장업무',new_head:'[별표 6] 분장업무',lines:[['기획조정실 | 예산','경영기획실 | 예산'],['기획조정실 | 감사','경영기획실 | 감사']],count:2}],
       amend_text:'직제규정 시행세칙 일부를 다음과 같이 개정한다.\\n제4조제1호 중 “기획조정실”을 “경영기획실”로 한다.\\n별표 6 중 “기획조정실”을 각각 “경영기획실”로 한다.'}]};
     RA.bulk.sel={'직제규정_시행세칙':true};`, c);
   const D = c.raBulkDocs();
   assert.ok(D.reason.includes('제4조, 별표 6') && D.amend.includes('별표 6 중'), D.reason);
   assert.equal(D.cmp.length, 3);                          // 내규 머리 + 조문 1 + 별표 1
   assert.ok(D.cmp[2][3].includes('경영기획실') && D.cmp[2][2].includes('기획조정실'));
+  // 여러 내규를 “다른 내규의 개정” 부칙으로 묶으면 별표 문장도 그 항 안으로 들여 쓴다
+  vm.runInContext(`RA.bulk.res.regs.push({slug:'b',reg:'보수규정',count:1,articles:[{no:'2',title:'x',old_body:'기획조정실',new_body:'경영기획실',count:1,locs:['제2조']}],appx:[],amend_text:'보수규정 일부를 다음과 같이 개정한다.\\n제2조 중 “기획조정실”을 “경영기획실”로 한다.'}); RA.bulk.sel.b=true;`, c);
+  const D2 = c.raBulkDocs();
+  assert.ok(D2.addenda.includes('\n   별표 6 중'), D2.addenda);
 });

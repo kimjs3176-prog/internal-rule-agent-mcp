@@ -57,7 +57,7 @@ def test_bulk_includes_appendix(client):
     assert "별표 6 중 “기획조정실”을 각각 “경영기획실”로 한다." in g["amend_text"]
     assert any(x["reg"] == "재무회계규정 시행세칙" and not x["articles"] and x["appx"] for x in d["regs"])   # 별표에만 있는 내규도
     d = client.post("/api/regagent/bulk", json={"old": "기획운영본부", "new": "경영기획본부"}).get_json()
-    assert d["reg_count"] == 25 and d["total"] == 38
+    assert d["reg_count"] == 25 and d["total"] == 35
 
 
 def test_narrow_screen_menu_is_one_row():
@@ -65,3 +65,35 @@ def test_narrow_screen_menu_is_one_row():
     css = open(os.path.join(os.path.dirname(__file__), "..", "assets", "reg_agent.css"), encoding="utf-8").read()
     m = re.search(r"@media \(max-width:1023px\)\{\s*\.ra-nav \.ra-nav-g,\.ra-nav \.ra-nav-gb,\.ra-nav \.ra-nav-g\.fold \.ra-nav-gb\{display:contents;\}", css)
     assert m and ".ra-nav .ra-nav-gh,.ra-nav .ra-nav-sub{display:none;}" in css
+
+
+def test_review_regressions_round2(ra, client):
+    import time
+    # 시행규칙 제N조는 법령 — 내규 고치기로 보지 않는다
+    for q, law in (("근로기준법 시행규칙 제9조 개정", "근로기준법 시행규칙"), ("산업안전보건법 시행규칙 제5조 개정에 따라 고칠 내규 찾아줘", "산업안전보건법 시행규칙")):
+        p = ra.heuristic_plan(q)
+        assert p["mode"] == "upper" and p["law"] == law and p["arts"] == [re.search(r"제\d+조", q).group(0)], (q, p)
+    # ‘지급방법’·‘평가방법’은 법령명이 아니다
+    for q in ("출장비 지급방법 제3조를 개정해줘", "평가방법 제3조가 바뀌었어", "징계 처리방법 제5조 변경"):
+        assert ra.heuristic_plan(q)["mode"] == "amend", q
+    # 법령 조 개정 + 내규 조문 고치기·수치 변경이 함께 있으면 개정
+    for q in ("청탁금지법 제10조 개정에 따라 행동강령 제15조를 고쳐줘", "근로기준법 제60조 개정에 따라 연차휴가 일수를 15일에서 16일로 늘려줘"):
+        assert ra.heuristic_plan(q)["mode"] == "amend", q
+    # 긴 입력에서도 빠르게
+    t = time.time(); ra.heuristic_plan("가" * 40000 + " 개정"); assert time.time() - t < 2
+    # 「제목(주석)」·「제목(이하 …)」 꼴 인용
+    assert ra.external_reg_refs("「보안업무규칙(내규)」 제2조에 의거", "보안업무규칙")[0][0] == "2"
+    assert ra.external_reg_refs("「인사규정(이하 “규정”이라 한다)」제37조", "인사규정")[0][0] == "37"
+    # 정부 규범명 꼬리는 우리 내규 별칭·그래프 간선이 아니다
+    assert ra._reg_aliases("직원채용지침", ["공기업·준정부기관 계약사무규칙(이하 “규칙”이라 한다)에 따른다."]) == {}
+    g = ra.citation_graph(); t_ = {n["title"]: i for i, n in enumerate(g["nodes"])}
+    assert (t_["직원채용지침"], t_["계약사무규칙"]) not in {(e["s"], e["t"]) for e in g["edges"]}
+    # 일괄 정비 별표: 별표 자리의 부칙 지시문·부칙 조각 블록·삭제된 서식은 고치지 않는다. 바뀐 줄만 보낸다
+    d = client.post("/api/regagent/bulk", json={"old": "기획운영본부", "new": "경영기획본부"}).get_json()
+    ax = {(g["reg"], x["id"]) for g in d["regs"] for x in g["appx"]}
+    assert ("직제규정 시행세칙", "별지 3") not in ax and ("인사규정 시행세칙", "별표 3") not in ax
+    assert ("직제규정 시행세칙", "별표 3") in ax and ("직제규정 시행세칙", "별표 4") in ax
+    x = next(x for g in d["regs"] for x in g["appx"] if x["id"] == "별표 4" and g["reg"] == "직제규정 시행세칙")
+    assert x["lines"] and all("경영기획본부" in b and "기획운영본부" in a for a, b in x["lines"]) and "old_body" not in x
+    d = client.post("/api/regagent/bulk", json={"old": "농업기술실용화재단", "new": "한국농업기술진흥원"}).get_json()
+    assert not any(g["reg"] == "내규관리규칙" and any(x["id"] == "별지 제10호 서식" for x in g["appx"]) for g in d["regs"])
