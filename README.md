@@ -136,7 +136,7 @@ node --test tests/js/*.test.mjs
 전체 목록은 `.env.example`을 보세요.
 
 ### 내규 원문 등록
-- 웹: 상단 **📤 내규 등록**(`/upload`)에서 HWPX·DOCX·HWP·PDF 등을 올립니다. 이름이 비슷한 기존 내규가 있으면 개정판인지 묻습니다.
+- 웹: 왼쪽 메뉴 맨 아래 **내규 등록** 단추(`/upload`, 좁은 화면에서는 오른쪽 위 첫 아이콘)에서 HWPX·DOCX·HWP·PDF 등을 올립니다. 이름이 비슷한 기존 내규가 있으면 개정판인지 묻습니다.
 - 일괄: `python scripts/import_regulations.py <폴더>` (`--reset`으로 새로 구성)
 
 ### 지자체·중앙부처에서 쓰기(자치법규·행정규칙)

@@ -1565,7 +1565,7 @@ def ai_amend(b: dict):
                    "old_title": (old or {}).get("title", ""), "old_body": (old or {}).get("body", "")})
         idx[no] = len(ch) - 1
     if not ch:
-        return None, "AI가 수정안을 만들지 못했습니다. 개정 의도를 구체적으로 적어 다시 시도해 주세요."
+        return None, "AI 응답에 조문 수정안이 없습니다. 다른 모델로 바꾸거나 다시 시도하세요 — 지시문의 수치·낱말·조 삭제는 규칙으로 계속 반영합니다."
     d["changes"] = ch
     d["addenda"] = _clean_addenda(d.get("addenda"))
     d["reason"] = _norm_reason(d.get("reason"))
@@ -3796,8 +3796,8 @@ def ra_history():
 def _alio_err(e):
     kind = getattr(e, "kind", "")
     hint = {"SCHEMA": " 알리오 사이트가 바뀌었을 수 있습니다.", "NETWORK": " 잠시 뒤 다시 시도하세요."}.get(kind, "")
-    if hint.strip() and hint.strip() in str(e):
-        hint = ""                                  # 알리오 오류 문구에 이미 있으면 되풀이하지 않는다
+    if hint.strip() and (hint.strip() in str(e) or "다시 시도" in str(e)):
+        hint = ""                                  # 알리오 오류 문구에 이미 다시 시도 안내가 있으면 되풀이하지 않는다
     return jsonify({"success": False, "error": f"{e}{hint}", "kind": kind}), 502 if kind in ("NETWORK", "SCHEMA", "HTTP") else 400
 
 
@@ -4879,6 +4879,8 @@ def ra_expc():
     if len(re.sub(r"\s+", "", q)) < 4 or len(q) > 1000:
         return jsonify({"success": False, "error": "질의 내용을 확인하세요."}), 400
     laws = b.get("laws") if isinstance(b.get("laws"), list) else []
+    if not law_ready():                                          # 법제처 아이디가 없으면 부르지 않고 이유를 알린다(‘잠시 뒤 다시’가 아니다)
+        return jsonify({"success": True, "items": [], "error": LAW_OC_MISSING, "law_oc_missing": True})
     try:
         v = expc_search(q, laws)
     except Exception as e:                                       # 해석례는 참고 자료 — 실패해도 자문 회신은 그대로 쓴다

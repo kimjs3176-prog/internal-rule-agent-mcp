@@ -387,7 +387,7 @@ function openRegAgent(tab){
   if(nav){ nav.innerHTML=tabs; raNavShowOn(nav); }
   let [pt,pf]=RA_PAGE[RA.tab]||['',[]]; if(RA.tab==='enact'||RA.tab==='amend') pf=[];
   const ph=(RA_TABS.find(x=>x[0]===RA.tab)||[])[2]||'';
-  const ai=raHasAi()?`<span class="ra-pill ok ra-ai-pill">${raIc('spark')}AI 연결됨</span>`:`<button class="ra-pill ra-ai-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button>`;   // 키 발급 링크는 AI 설정 창 안에
+  const ai=raHasAi()?`<button class="ra-pill ok ra-ai-pill" onclick="openAiModal()" title="AI 모델·키를 바꾸려면 누르세요">${raIc('spark')}AI 연결됨</button>`:`<button class="ra-pill ra-ai-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button>`;   // 키 발급 링크는 AI 설정 창 안에
   p.innerHTML=(nav?'':`<nav class="ra-tabs" aria-label="에이전트 기능">${tabs}</nav>`)+
     `<header class="ra-page"><div class="ra-page-t"><h1 title="${_e(ph)}">${_e(pt)}</h1></div><div class="ra-page-a"><button class="ra-pill ra-help-btn" onclick="raHelpOpen()" aria-haspopup="dialog">${raIc('info')}도움말</button>${ai}</div></header>`+
     `<div id="raBody" class="ra-body"></div>`;
@@ -650,6 +650,7 @@ function raDelegView(){
   const list=(E.dels||[]).map((d,i)=>`<div class="ra-del"><div class="ra-del-h"><b>「${_e(d.law)}」 ${_e(raDelArt(d))}</b>${d.title?`<span class="ra-sub">${_e(d.title)}</span>`:''}<button class="ra-x" title="빼기" onclick="raDelRemove(${i})" aria-label="빼기">${raIc('x')}</button></div><div class="ra-del-t">${_e(d.text).slice(0,600)}</div></div>`).join('');
   let pick='';
   if(_raBusy.law) pick=raSpin('법령 조문 불러오는 중…');
+  else if(E.lawErr&&!E.lawArts&&!E.manOpen) pick=`<div class="ra-chip warn" style="margin-top:6px" title="${_e(E.lawErr)}">${raIc('alert')}「${_e(E.lawName||'')}」 조문을 불러오지 못했습니다${RA_ORG._law===false?'(법제처 아이디 미설정)':''}. 법령명을 고쳐 다시 불러오거나, <button class="ra-link" onclick="raDelManual()">직접 입력</button>으로 위임 조항을 적어 넣으세요.</div>`;
   else if(E.lawArts){
     const q=(E.lawQ||'').replace(/\s+/g,'');
     const arts=E.lawArts.filter(a=>!q||(a.label+a.title+a.text).replace(/\s+/g,'').includes(q)).slice(0,80);
@@ -675,7 +676,7 @@ function raParentOf(title){ const t=String(title||'').trim(); const m=t.match(/^
   const hit=(_raCatalog||[]).find(r=>[p,p+'규정',p+'규칙'].some(x=>k(x)===k(r.title))); return hit?hit.title:p; }
 async function raOwnLoad(title){
   const regs=await raCatalog(); const r=regs.find(x=>x.title.replace(/\s+/g,'')===String(title).replace(/\s+/g,'')); if(!r) return false;
-  const E=RA.enact; _raBusy.law=true; E.lawName=r.title; raRerender('enact');
+  const E=RA.enact; E.lawErr=''; _raBusy.law=true; E.lawName=r.title; raRerender('enact');
   const d=await raGet('/api/regagent/articles?slug='+encodeURIComponent(r.slug));
   _raBusy.law=false;
   if(!d.success){ E.lawArts=null; _toast(d.error||'조문을 불러오지 못했습니다.'); raRerender('enact'); return true; }
@@ -688,16 +689,16 @@ async function raOwnLoad(title){
 async function raLawLoad(){
   const nm=(document.getElementById('raLawName')||{}).value||''; if(!nm.trim()){ _toast('법령명을 입력하세요.'); return; }
   if(await raOwnLoad(nm.trim())) return;                         // 우리 기관 내규명이면 법제처 대신 그 내규에서
-  const E=RA.enact; E.lawOwn=false; _raBusy.law=true; E.lawName=nm.trim(); raRerender('enact');
+  const E=RA.enact; E.lawOwn=false; E.lawErr=''; _raBusy.law=true; E.lawName=nm.trim(); raRerender('enact');
   try{
     const d=await raGet('/api/law/articles?name='+encodeURIComponent(nm.trim()));
-    if(d.error||!d.articles||!d.articles.length){ E.lawArts=null; _toast(d.error||d.message||'조문을 불러오지 못했습니다.'); }
+    if(d.error||!d.articles||!d.articles.length){ E.lawArts=null; E.lawErr=d.error||d.message||'조문을 불러오지 못했습니다.'; _toast(E.lawErr); }
     else{ E.lawName=d.law_name||nm.trim();
       // 장·절 머리(type:header)는 조문이 아니고, “삭제” 조문은 위임 근거가 될 수 없으므로 고를 수 없게 뺀다
       E.lawArts=d.articles.filter(a=>a.type!=='header'&&(a['조문번호']||a['조문표시번호'])).map(a=>({label:a['조문표시번호']||('제'+a['조문번호']+'조'), title:a['조문제목']||'', text:String(a['조문내용']||'').trim()}))
         .filter(a=>!/^(?:제\s*\d+\s*조(?:의\s*\d+)?\s*)?삭제\s*(?:[<＜(（][^>＞)）]*[>＞)）])?\s*$/.test(a.text));
       if(nm.trim().replace(/\s+/g,'')!==E.lawName.replace(/\s+/g,'')) _toast(`「${nm.trim()}」${raEul(nm.trim())} 찾지 못해 이름이 가장 가까운 「${E.lawName}」${raEul(E.lawName)} 불러왔습니다.`,5000); }
-  }catch(e){ E.lawArts=null; _toast('법제처 연결에 실패했습니다.'); }
+  }catch(e){ E.lawArts=null; E.lawErr='법제처 연결에 실패했습니다.'; _toast(E.lawErr); }
   _raBusy.law=false; E.lawQ=''; raRerender('enact');
 }
 function raDelAll(on){
@@ -3467,6 +3468,7 @@ async function raWatchAuto(){
 }
 setTimeout(()=>{ raWatchAuto(); },6000);
 function raWatchView(d){
+  if(RA_ORG&&RA_ORG._law===false) return `<div class="ra-hint">${raIc('info')}법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 이 기능은 꺼져 있습니다. 관리자가 서버 환경변수 LAW_OC를 넣으면 켜집니다.</div>`;
   const H=RA.health, W=H.watch, nw=raWatchNew(), auto=H.watchAuto!==false;
   const tog=`<label class="ra-chk ra-watch-auto"><input type="checkbox" ${auto?'checked':''} onchange="RA.health.watchAuto=this.checked;_raSave()"> 화면을 열 때 하루 한 번 자동 확인</label>`;
   if(!W) return `<div class="ra-hint">${raIc('info')}“상위법·행정규칙 최신성 확인”을 한 번 하면 그 결과를 기준으로 저장하고, 이후 확인 때마다 <b>새로 공포·시행된 개정</b>을 찾아 여기와 메뉴에 알립니다.</div>${tog}`;
@@ -3511,7 +3513,7 @@ function raHealthView(){
     (f.g?`<button class="ra-chip btn" onclick="raHealthF('g','')">${f.g}등급만 보는 중 ${raIc('x')}<span class="ra-sr">거르기 풀기</span></button>`:'')+`<span class="ra-hint" id="raHealthN" aria-live="polite">${rows.length}건</span></div>`+
     `<div class="ra-tbl-w"><table class="ra-tbl"><thead><tr><th>${_e(RA_ORG.reg_word)}</th><th>등급</th><th>점수</th><th>최종 개정</th><th>진단</th></tr></thead><tbody id="raHealthTb">${raHealthTbody(rows)}</tbody></table></div>`;
   const rule=d.rules?`<details class="ra-det"><summary>점수 기준</summary><div class="ra-hint">100점에서 감점: 없는 조문 인용 건당 -10(최대 -30) · 다른 내규의 없는·삭제된 조문 인용 -8 · 조 번호 중복·순서 오류 -8 · 현행 목록에 없는 내규명 인용 -6 · 옛 기관명·직위 -5 · 중복 등록 의심 -10 · 개정 경과 ${_e(d.rules.age)} · ${_e(d.rules.law)}<br>등급: A 95점 이상(양호) · B 85(관심) · C 75(주의) · D 60(경고) · E 60점 미만(위험)</div></details>`:'';
-  const lawSec=`<div class="ra-row"><button class="svc-btn" onclick="raHealthLaws()">${raIc('upper')}상위법·행정규칙 최신성 확인</button>${raTip(`${_e(RA_ORG.reg_word)}가 인용한 법령 ${d.laws.length}개와 정부 규정·훈령·고시·지침 등 ${nr}개의 현행 시행일을 법제처(법령·행정규칙)에서 조회해, ${_e(RA_ORG.reg_word)} 개정일보다 나중에 시행된 것을 찾습니다. 법제처에 없는 이름(기관 자체 기준 등)은 건너뜁니다.${lawN?` (확인 ${lawN}개)`:''}`)}</div>${RA_ORG._law===false?`<div class="ra-note">${raIc('info')}<span>법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 상위법·행정규칙 조회를 쓸 수 없습니다. 관리자가 서버 환경변수 <code>LAW_OC</code>를 지정하면 됩니다. 나머지 진단은 그대로 됩니다.</span></div>`:''}<div id="raLawProg"></div>`+
+  const lawSec=`<div class="ra-row"><button class="svc-btn" onclick="raHealthLaws()" ${RA_ORG._law===false?`disabled title="법제처 아이디(LAW_OC)가 설정되지 않았습니다"`:''}>${raIc('upper')}상위법·행정규칙 최신성 확인</button>${raTip(`${_e(RA_ORG.reg_word)}가 인용한 법령 ${d.laws.length}개와 정부 규정·훈령·고시·지침 등 ${nr}개의 현행 시행일을 법제처(법령·행정규칙)에서 조회해, ${_e(RA_ORG.reg_word)} 개정일보다 나중에 시행된 것을 찾습니다. 법제처에 없는 이름(기관 자체 기준 등)은 건너뜁니다.${lawN?` (확인 ${lawN}개)`:''}`)}</div>${RA_ORG._law===false?`<div class="ra-note">${raIc('info')}<span>법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 상위법·행정규칙 조회를 쓸 수 없습니다. 관리자가 서버 환경변수 <code>LAW_OC</code>를 지정하면 됩니다. 나머지 진단은 그대로 됩니다.</span></div>`:''}<div id="raLawProg"></div>`+
     raStats([{v:d.laws.length,l:'인용 법령',ic:'upper',tone:'acc'},{v:nr,l:'인용 행정규칙 등',ic:'doc',tone:'acc'},{v:lawN,l:'시행일 확인',ic:'check',tone:lawN?'ok':'n'},{v:lawN?d.stale_regs:'—',l:'미반영 의심 내규',ic:'alert',tone:lawN&&d.stale_regs?'warn':'n'}])+
     raMeter(lawN/nTot,'acc')+`<div class="ra-meta" style="margin-top:6px">법제처 확인 ${Math.round(lawN/nTot*100)}%</div>`+
     (H.lawErr&&RA_ORG._law===false?'':H.lawErr?`<div class="ra-chip warn" style="margin-top:6px">${raIc('alert')}법제처에 연결하지 못한 법령·규칙 ${H.lawErr.n}건${H.lawErr.msg?` — ${_e(H.lawErr.msg)}`:''} · 이 법령들의 최신성은 확인하지 못했습니다(망 차단이면 관리자가 law.go.kr 허용). <button class="ra-link" onclick="raHealthLaws()">다시 확인</button></div>`:'')+
@@ -3781,6 +3783,7 @@ function raHealthCheckOne(title){ RA.check.reg=title; _raSave(); raTab('check');
 function raYmdDot(s){ s=String(s||''); return s.length===8?`${s.slice(0,4)}. ${+s.slice(4,6)}. ${+s.slice(6)}.`:''; }
 function raDday(s, today){ const d=x=>Date.UTC(+x.slice(0,4),+x.slice(4,6)-1,+x.slice(6,8)); return Math.round((d(String(s))-d(String(today)))/864e5); }
 function raUpcomingView(d, lawN){
+  if(RA_ORG&&RA_ORG._law===false) return `<div class="ra-hint">법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 이 기능은 꺼져 있습니다. 관리자가 서버 환경변수 LAW_OC를 넣으면 켜집니다.</div>`;
   const U=raArr(d.upcoming);
   if(!lawN) return `<div class="ra-hint">아직 법제처에서 확인하지 않았습니다. 위 “상위법·행정규칙 최신성 확인”을 누르면 공포됐지만 시행 전인 법령도 함께 찾습니다.</div>`;
   const ats=Object.values(RA.health.law||{}).map(x=>x&&x.at).filter(Boolean), age=ats.length?Math.floor((Date.now()-Math.min(...ats))/864e5):0;
@@ -3966,11 +3969,12 @@ function raAdvResView(d){
 // 법제처 법령해석례(참고) — 회신과 따로 불러온다(늦거나 실패해도 회신은 그대로)
 let _raExpcBusy=null;
 async function raAdvExpc(d){
+  if(RA_ORG&&RA_ORG._law===false){ if(d){ d.expc={items:[], error:'법제처 Open API 아이디(LAW_OC)가 서버에 설정되지 않아 이 기능은 꺼져 있습니다. 관리자가 서버 환경변수 LAW_OC를 넣으면 켜집니다.', off:1}; raAdvExpcRedraw(d); } return; }
   if(!d||_raExpcBusy===d) return; _raExpcBusy=d;
   d.expc={loading:1}; raAdvExpcRedraw(d);
   try{
     const r=await raPost('/api/regagent/expc',{question:d.question, laws:raArr(d.laws).map(l=>l.name)});
-    d.expc=r.success?{items:raArr(r.items), core:raArr(r.core), error:r.error||''}:{items:[], error:r.error||'법령해석례 조회 실패'};
+    d.expc=r.success?{items:raArr(r.items), core:raArr(r.core), error:r.error||'', off:r.law_oc_missing?1:0}:{items:[], error:r.error||'법령해석례 조회 실패'};
   } finally{ if(_raExpcBusy===d) _raExpcBusy=null; }
   if(d.expc.loading) d.expc={items:[], error:'법령해석례 조회 실패'};
   _raSave(); raAdvExpcRedraw(d);
@@ -3984,7 +3988,7 @@ function raAdvExpcView(d){
   const tip=raTip('법제처가 정부 부처·민원인의 질의에 회신한 법령 해석입니다. 같은 쟁점을 정한 상위 법령의 해석이라 판단에 참고가 되지만, 우리 '+RA_ORG.reg_word+'의 해석은 아닙니다. 회신서에 넣을 것만 고르세요.');
   let body;
   if(E.loading) body=`<div class="ra-hint">${raIc('search')}법제처 법령해석례를 찾는 중…</div>`;
-  else if(!raArr(E.items).length) body=`<div class="ra-hint">${E.error?_e(E.error):'질의와 겹치는 법령해석례를 찾지 못했습니다.'} <button class="ra-link" onclick="raAdvExpc(RA.advise.res)">다시 찾기</button></div>`;
+  else if(!raArr(E.items).length) body=`<div class="ra-hint">${E.error?_e(E.error):'질의와 겹치는 법령해석례를 찾지 못했습니다.'}${E.off?'':` <button class="ra-link" onclick="raAdvExpc(RA.advise.res)">다시 찾기</button>`}</div>`;
   else body=(E.items.length>1?`<div class="ra-row" id="raExpcAll">${raAllNone('raAdvExpcAll(true)','raAdvExpcAll(false)',E.items.filter(x=>x.pick).length)}</div>`:'')+`<ul class="ra-expc">${E.items.map((x,i)=>`<li><div><a class="ra-link" href="${_e(x.url)}" target="_blank" rel="noopener">${_e(x.title)}</a></div>`+
       `<div class="ra-sub">${_e(x.by||'법제처')} ${_e(x.date||'')} 회신${x.org?`${RA_VR}질의 ${_e(x.org)}`:''}${x.no?`${RA_VR}안건번호 ${_e(x.no)}`:''}${raArr(x.match).length?`${RA_VR}겹친 낱말 ${x.match.map(w=>`<span class="ra-chip">${_e(w)}</span>`).join('')}`:x.body?''+RA_VR+'본문에 질의 낱말이 모두 나옴':''}</div>`+
       (x.question||x.answer?`<details class="ra-det"><summary>질의요지·회답 보기</summary>${x.question?`<div class="ra-adv-b"><b>질의요지</b> ${_e(x.question)}</div>`:''}${x.answer?`<div class="ra-adv-b"><b>회답</b> ${_e(x.answer)}</div>`:''}</details>`:'')+
@@ -5141,7 +5145,7 @@ async function raBenchRun(){
 function raBenchView(){
   const B=RA.health.bench;
   const btn=`<button class="svc-btn" onclick="raBenchRun()">${raIc('search')}${B?'다시 비교':'유관 기관과 비교'}</button>`;
-  const err=RA.health.benchErr&&!B?`<div class="ra-chip warn" style="margin-top:6px">${raIc('alert')}알리오에 연결하지 못해 비교하지 못했습니다(${_e(RA.health.benchErr.msg||'')}). 망 차단이면 관리자가 alio.go.kr 허용 후 다시 시도하세요.</div>`:'';
+  const err=RA.health.benchErr&&!B?`<div class="ra-chip warn" style="margin-top:6px" title="${_e(RA.health.benchErr.msg||'')}">${raIc('alert')}알리오에 연결하지 못해 비교하지 못했습니다(망 차단 또는 사이트 점검). 관리자가 alio.go.kr을 허용한 뒤 다시 시도하세요.</div>`:'';
   if(!B) return `<div class="ra-row">${btn}${raTip('알리오에서 유관 기관의 규정 목록을 받아 견줍니다(1~2분).')}</div>`+err;
   const min=Math.max(2,Math.ceil(B.ok*0.3));
   const gap=B.rows.filter(r=>!r.mine&&r.n>=min).slice(0,15), common=B.rows.filter(r=>r.mine&&r.n>=min);

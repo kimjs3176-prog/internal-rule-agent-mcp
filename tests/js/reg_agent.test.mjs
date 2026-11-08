@@ -1450,3 +1450,25 @@ test('일괄 정비 문서: 별표·서식 바꿈도 정비 대상·대비표에
   const D2 = c.raBulkDocs();
   assert.ok(D2.addenda.includes('\n   별표 6 중'), D2.addenda);
 });
+
+test('법제처 아이디가 없으면 알림·곧 시행·해석례는 한 줄 안내만, 다시 찾기·자동 확인 없음(HLT-10·LKP-8)', () => {
+  const c = load();
+  vm.runInContext(`RA_ORG._law=false;`, c);
+  const w = c.raWatchView({});
+  assert.ok(w.includes('LAW_OC') && !w.includes('자동') , w);
+  assert.ok(c.raUpcomingView({upcoming: []}, 0).includes('LAW_OC'));
+  const d = { expc: { items: [], error: 'LAW_OC 미설정', off: 1 } };
+  const v = c.raAdvExpcView(d);
+  assert.ok(v.includes('LAW_OC 미설정') && !v.includes('다시 찾기'), v);
+  // 연결 실패(아이디는 있음)는 다시 찾기를 그대로 둔다
+  assert.ok(c.raAdvExpcView({ expc: { items: [], error: '법제처 응답이 늦습니다.' } }).includes('다시 찾기'));
+});
+
+test('위임 조항 불러오기 실패는 화면에 남고 직접 입력으로 이어 준다(ENA-14)', () => {
+  const c = load();
+  vm.runInContext(`RA.enact.lawName='없는법'; RA.enact.lawArts=null; RA.enact.lawErr='법령을 찾지 못했습니다.'; RA.enact.manOpen=false;`, c);
+  const h = c.raDelegView();
+  assert.ok(h.includes('「없는법」 조문을 불러오지 못했습니다') && h.includes('onclick="raDelManual()">직접 입력</button>으로'), h);
+  vm.runInContext(`RA.enact.manOpen=true;`, c);
+  assert.ok(!c.raDelegView().includes('조문을 불러오지 못했습니다'));   // 직접 입력 칸을 열면 안내는 거둔다
+});
