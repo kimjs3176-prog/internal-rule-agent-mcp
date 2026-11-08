@@ -78,7 +78,7 @@ def test_read_tools(mcp):
     r, d = mcp.call("citation_impact", {"regulation": "여비규정", "articles": ["제20조"]})
     assert any(h["article"] == "제24조" for h in d["same_regulation"])
     r, d = mcp.call("bulk_rename", {"old": "기획운영본부", "new": "경영기획본부"})
-    assert d["regulations"] == 24 and d["places"] == 29 and d["amendments"][0]["regulation"]
+    assert d["regulations"] == 25 and d["places"] == 35 and d["amendments"][0]["regulation"]
     r, d = mcp.call("health_check", {"top": 2})
     assert d["regulations"] >= 100 and len(d["lowest"]) == 2
     r, d = mcp.call("없는_도구", {})
