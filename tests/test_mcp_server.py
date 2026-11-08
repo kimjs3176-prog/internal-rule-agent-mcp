@@ -1,11 +1,11 @@
 """MCP 서버(mcp_server/server.py): 표준 입출력 JSON-RPC 로 도구 목록·호출이 되는지, 화면 엔진 도구가 개정문·대비표·검증을 내는지."""
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 import pytest
+from conftest import needs_engine
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVER = os.path.join(ROOT, "mcp_server", "server.py")
@@ -49,10 +49,12 @@ def test_initialize_and_list(mcp):
     tools = mcp.rpc("tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
     for n in ["run_agent", "amend_regulation", "search_regulations", "get_regulation", "check_regulation", "health_check",
-              "citation_impact", "upper_law_impact", "bulk_rename", "advise", "list_regulations"]:
+              "citation_impact", "upper_law_impact", "bulk_rename", "advise", "list_regulations", "search", "fetch"]:
         assert n in names
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object"
+    ra = next(t for t in tools if t["name"] == "run_agent")                        # 내 컴퓨터 연결은 파일로 저장(output_dir), 링크 없음
+    assert "output_dir" in ra["inputSchema"]["properties"] and "documents" not in ra["inputSchema"]["properties"]
     assert mcp.rpc("ping")["result"] == {}
     assert mcp.rpc("없는/메서드")["error"]["code"] == -32601
 
@@ -85,7 +87,7 @@ def test_read_tools(mcp):
     assert r["isError"]
 
 
-@pytest.mark.skipif(not shutil.which("node"), reason="화면 엔진 도구는 Node.js 가 필요하다")
+@needs_engine
 def test_engine_tools(mcp, tmp_path):
     r, d = mcp.call("amend_regulation", {"regulation": "여비규정", "changes": [{"article": "제20조", "type": "delete"}], "output_dir": str(tmp_path)})
     assert not r["isError"], d

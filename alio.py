@@ -344,9 +344,10 @@ def file_text(name: str, raw: bytes, depth: int = 0) -> str:
     raise AlioError("PARSE", f"읽을 수 없는 형식입니다: {k or '알 수 없음'}")
 
 
-def rule_text(rule: dict) -> dict:
-    """규정 현행본 파일을 받아 본문을 돌려준다 → {text, file, files}. 본문은 fileNo 로 캐시한다."""
-    deadline = time.time() + RULE_BUDGET
+def rule_text(rule: dict, budget: float | None = None) -> dict:
+    """규정 현행본 파일을 받아 본문을 돌려준다 → {text, file, files}. 본문은 fileNo 로 캐시한다.
+    budget: 이번 호출에 쓸 최대 시간(초, RULE_BUDGET 이하) — 부르는 쪽 전체 제한 안에 끝내려고 줄여 줄 때."""
+    deadline = time.time() + (min(RULE_BUDGET, max(0.5, float(budget))) if budget else RULE_BUDGET)
     files = rule_files(rule, deadline)
     pick = pick_latest(files)
     if not pick:

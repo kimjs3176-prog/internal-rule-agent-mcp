@@ -22,3 +22,16 @@ def ra():
     import api_server  # noqa: F401 — 블루프린트 등록(HWPX 기본 서식 등 컨텍스트)
     import reg_agent
     return reg_agent
+
+
+def engine_ok():
+    """MCP 화면 엔진 도구를 돌릴 수 있는가: quickjs 패키지나 Node.js."""
+    try:
+        import quickjs  # noqa: F401
+        return True
+    except ImportError:
+        import shutil
+        return bool(shutil.which("node"))
+
+
+needs_engine = pytest.mark.skipif(not engine_ok(), reason="MCP 엔진 도구는 quickjs 패키지나 Node.js 가 필요하다")

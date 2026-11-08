@@ -1569,6 +1569,9 @@ _reg_agent.register(
     compat_label=lambda: _compat_conf()["label"],
 )
 
+from mcp_server import remote as _mcp_remote  # noqa: E402
+app.register_blueprint(_mcp_remote.bp)  # 원격 MCP(/mcp) — claude.ai·ChatGPT 커넥터 등에 주소만 넣어 도구로 쓴다(docs/MCP.md)
+
 
 # ── 실행 ─────────────────────────────────────────────────────────────────────
 PORT = int(os.environ.get("PORT", 5100))

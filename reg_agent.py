@@ -3841,7 +3841,7 @@ def ra_alio_search():
 _RANK_STOP = {"정하기", "위함", "위하여", "필요한", "사항", "관한", "대한", "지급", "기준", "규정", "운영", "관리", "업무", "경우", "따른"}
 
 
-def _alio_rank(arts: list, q: str, kw: str = "") -> list:
+def _alio_rank(arts: list, q: str, kw: str = "", cap: int = 1500) -> list:
     """조문을 검색어 일치도로 정렬. 핵심 검색어(kw)는 3배, 이 규정 안에서 드문 낱말일수록 높게(idf),
     조 제목 일치에 가중. 점수가 맨 위의 40% 이상이면 rel(관련)로 표시한다."""
     import math
@@ -3857,7 +3857,7 @@ def _alio_rank(arts: list, q: str, kw: str = "") -> list:
             hit = 3 * a["title"].count(t) + min(a["body"].count(t), 4)
             if hit:
                 sc += hit * max(idf[t], 0.1) * (3 if t in kws else 1)
-        out.append({"no": a["no"], "title": a["title"], "body": a["body"][:1500], "score": round(sc, 2)})
+        out.append({"no": a["no"], "title": a["title"], "body": a["body"][:cap], "score": round(sc, 2)})
     top = max((x["score"] for x in out), default=0)
     for x in out:
         x["rel"] = bool(top) and x["score"] >= max(0.5, top * 0.4)
@@ -3933,7 +3933,7 @@ def ra_bench_rule():
 
 @bp.route("/api/regagent/alio/rule", methods=["POST"])
 def ra_alio_rule():
-    """알리오 규정 현행본 → 조문. body: {orgId, idx, category, table, idxName, mod, q}"""
+    """알리오 규정 현행본 → 조문. body: {orgId, idx, category, table, idxName, mod, q, kw, nos?:[조 번호 — 그 조만 전문], limit?:관련 순 조문 수(기본 12, 최대 80)}"""
     b = _body()
     rule = {"orgId": str(b.get("orgId") or ""), "idx": str(b.get("idx") or ""), "category": str(b.get("category") or ""),
             "table": str(b.get("table") or "COMM_RULE"), "idxName": str(b.get("idxName") or "RULE_NO"), "mod": str(b.get("mod") or "")}
@@ -3946,11 +3946,16 @@ def ra_alio_rule():
     except alio.AlioError as e:
         return _alio_err(e)
     p = parse_text(r["text"], clean=True)
-    ranked = _alio_rank(p["articles"], b.get("q") or "", str(b.get("kw") or "")[:40])
+    want = [n for n in (str(x).replace("제", "").replace("조", "", 1).replace(" ", "") for x in (b.get("nos") or [])[:40]) if _ART_NO.fullmatch(n)]
+    ranked = _alio_rank(p["articles"], b.get("q") or "", str(b.get("kw") or "")[:40], cap=8000 if want else 1500)
+    if want:                                                  # 고른 조만, 본문 전체로(조 번호 순)
+        ranked = sorted([a for a in ranked if a["no"] in set(want)], key=lambda a: art_key(a["no"]))
+    lim = max(_clamp_int(b.get("limit"), 1, 80, 12), len(want))   # 고른 조는 limit 와 상관없이 모두
     warn = "" if p["articles"] else "“제N조” 형식의 조문을 찾지 못했습니다. 원문 링크로 확인하세요."
     return jsonify({"success": True, "file": r["file"], "versions": len(r["files"]), "count": len(p["articles"]),
                     "toc": [f"{art_label(a['no'])}({a['title']})" for a in p["articles"] if not a["deleted"]][:80],
-                    "articles": ranked[:12], "url": alio.BASE + alio.detail_url(rule), "warning": warn,
+                    "articles": ranked[:lim], "url": alio.BASE + alio.detail_url(rule), "warning": warn,
+                    "missing": [n for n in want if n not in {a["no"] for a in ranked}],
                     "excerpt": "" if p["articles"] else r["text"][:3000]})
 
 

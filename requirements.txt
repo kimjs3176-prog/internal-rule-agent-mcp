@@ -6,3 +6,5 @@ numpy>=1.26
 defusedxml>=0.7
 olefile>=0.47
 pypdf>=4.0
+# MCP 도구의 화면 엔진(파이썬 안에서 JS 실행). 3.13 이상은 미리 빌드된 판이 없어 Node.js 로 대신한다(docs/MCP.md)
+quickjs>=1.19,<2; python_version < "3.13"
