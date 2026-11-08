@@ -1258,3 +1258,12 @@ mark.ra-cite{background:var(--color-warn-wash);color:var(--color-warn);font-weig
 .ra-watch li{border:var(--rule-hair) solid var(--color-rule-2);border-left:3px solid var(--color-warn);border-radius:var(--radius-sm,6px);padding:var(--space-xs) var(--space-sm);}
 .ra-watch-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2xs) var(--space-xs);}
 .ra-watch-auto{margin-left:auto;}
+
+/* 좁은 화면(휴대폰·태블릿·PC 확대): 메뉴 묶음을 풀어 모든 메뉴를 가로 한 줄로 넘긴다 — 세로로 쌓여 본문을 가리지 않게(UX-1).
+   묶음 머리(더 보기)·소제목은 숨기고, 접힌 묶음도 펼쳐 보인다(가로로 넘기면 모두 닿는다) */
+@media (max-width:1023px){
+  .ra-nav .ra-nav-g,.ra-nav .ra-nav-gb,.ra-nav .ra-nav-g.fold .ra-nav-gb{display:contents;}
+  .ra-nav .ra-nav-gh,.ra-nav .ra-nav-sub{display:none;}
+  .ra-nav{flex-wrap:nowrap;align-items:stretch;}
+  .ra-nav .ra-tab{flex:0 0 auto;width:auto;}
+}

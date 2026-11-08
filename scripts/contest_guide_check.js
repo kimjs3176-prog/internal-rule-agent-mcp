@@ -82,7 +82,7 @@ const R = []; const rec = (id, ok, got) => { R.push({ id, ok, got }); console.lo
   await p.click('.ra-tab[data-k="agent"]'); await p.fill('#raAgIn', '모든 내규에서 기획운영본부를 경영기획본부로 바꿔줘'); await btn('에이전트 실행').click();
   await p.waitForFunction(() => RA.agent && !RA.agent.running && RA.agent.done, null, { timeout: 60000 });
   const bk = await p.evaluate(() => ({ sub: RA.agent.done.title + ' / ' + RA.agent.done.sub, steps: RA.agent.steps.map(s => s.t).join(' · ') }));
-  rec('일괄 정비 24개 내규 29곳, 개정문·부칙·통합 대비표', /24개 내규, 29곳/.test(bk.sub), bk.sub + ' | ' + bk.steps);
+  rec('일괄 정비 25개 내규 38곳(별표·서식 포함), 개정문·부칙·통합 대비표', /25개 내규, 38곳/.test(bk.sub), bk.sub + ' | ' + bk.steps);
   const d1 = dialogs.length; await p.fill('#raAgIn', '여비규정 제20조를 삭제해줘'); await btn('에이전트 실행').click();
   await p.waitForFunction(() => RA.agent && !RA.agent.running && RA.agent.done, null, { timeout: 60000 });
   const dl2 = await p.evaluate(() => RA.agent.steps.filter(s => /삭제/.test(s.t)).map(s => String(s.d || '').replace(/<[^>]+>/g, '')).join(' '));

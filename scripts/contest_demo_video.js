@@ -153,7 +153,7 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   // ── ④ 일괄 정비
   await scene('모든 내규 일괄 정비', '4');
   await click('.ra-tab[data-k="agent"]'); await p.waitForSelector('#raAgIn');
-  await say('부서 이름이 바뀌면 사람은 내규 126건을 하나씩 열어\n찾아야 합니다. 저희 산정으로 8.8시간 일입니다.', { wait: false, v: '부서 이름이 바뀌면, 사람은 내규 백이십육 건을 하나씩 열어 찾아야 합니다. 저희 산정으로 8.8 시간 일입니다.' });
+  await say('부서 이름이 바뀌면 사람은 내규 126건을 하나씩 열어\n찾아야 합니다. 저희 산정으로 약 10시간 일입니다.', { wait: false, v: '부서 이름이 바뀌면, 사람은 내규 백이십육 건을 하나씩 열어 찾아야 합니다. 저희 산정으로 약 열 시간 일입니다.' });
   timing.bulk = await agentRun('모든 내규에서 기획운영본부를 경영기획본부로 바꿔줘');
   const bsub = await p.evaluate(() => RA.agent.done.title + ' / ' + (RA.agent.done.sub || '')); timing.bulkSub = bsub;
   await shot('bulk-done');

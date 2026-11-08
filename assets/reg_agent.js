@@ -3139,11 +3139,12 @@ function raTourShow(){
   while(_raTourI<RA_TOUR.length){ const el=document.querySelector(RA_TOUR[_raTourI][0]); if(el&&el.getClientRects().length) break; _raTourI++; }
   if(_raTourI>=RA_TOUR.length){ raTourEnd(); return; }
   const n=RA_TOUR.length, [sel,t0,d]=RA_TOUR[_raTourI], el=document.querySelector(sel);
-  const t=sel==='#raNav'&&innerWidth<1024?'위쪽 메뉴':t0;                 // 좁은 화면에서는 메뉴가 위에 있다
+  const narrow=sel==='#raNav'&&innerWidth<1024, t=narrow?'위쪽 메뉴':t0;                 // 좁은 화면에서는 메뉴가 위에 한 줄로 있다
+  const dd=narrow?'메뉴 13개가 위에 한 줄로 있습니다. 왼쪽 넷(에이전트·건강검진·개정·제정)이 자주 쓰는 작업이고, 옆으로 밀면 내규 목록·자문·일괄 정비 같은 나머지가 나옵니다.':d;
   el.scrollIntoView({block:'center',inline:'nearest'});
   let r=el.getBoundingClientRect(); const pad=6;
   ov.innerHTML=`<div class="ra-tour-hole" style="left:${r.left-pad}px;top:${r.top-pad}px;width:${r.width+pad*2}px;height:${r.height+pad*2}px"></div>`+
-    `<div class="ra-tour-pop" id="raTourPop"><div class="ra-tour-k">${_raTourI+1} / ${n}</div><h3 id="raTourT">${_e(t)}</h3><p>${_e(d)}</p><div class="ra-row">`+
+    `<div class="ra-tour-pop" id="raTourPop"><div class="ra-tour-k">${_raTourI+1} / ${n}</div><h3 id="raTourT">${_e(t)}</h3><p>${_e(dd)}</p><div class="ra-row">`+
     (_raTourI>0?`<button class="svc-btn sm ghost" onclick="raTourGo(-1)">이전</button>`:'')+`<button class="svc-btn sm yes" onclick="raTourGo(1)">${_raTourI<n-1?'다음':'끝'}</button><button class="ra-link" onclick="raTourEnd()">그만 보기</button></div></div>`;
   const pop=document.getElementById('raTourPop'), pw=Math.min(340,innerWidth-24); pop.style.width=pw+'px'; const ph=pop.offsetHeight;
   let left=Math.min(Math.max(12,r.left),innerWidth-pw-12), top=r.bottom+12;
@@ -3842,7 +3843,8 @@ function raBulkOpen(el, slug){
   const b=el.querySelector('.ra-bulk-b'); if(!el.open||!b||b.childElementCount) return;
   const g=((RA.bulk.res||{}).regs||[]).find(x=>x.slug===slug); if(!g) return;
   b.innerHTML=`<div class="ra-note mono">${_e(g.amend_text).replace(/\n/g,'<br>')}</div>`+
-    g.articles.map(a=>{ const [o,n]=raWordDiff(a.old_body,a.new_body); return `<div class="ra-fixrow"><b>${_e(raLbl(a.no))}(${_e(a.title)})</b> <span class="ra-sub">${_e(a.locs.join(', '))}</span><div class="ra-fixd"><div>${o.replace(/\n/g,'<br>')}</div><div>${n.replace(/\n/g,'<br>')}</div></div></div>`; }).join('');
+    g.articles.map(a=>{ const [o,n]=raWordDiff(a.old_body,a.new_body); return `<div class="ra-fixrow"><b>${_e(raLbl(a.no))}(${_e(a.title)})</b> <span class="ra-sub">${_e(a.locs.join(', '))}</span><div class="ra-fixd"><div>${o.replace(/\n/g,'<br>')}</div><div>${n.replace(/\n/g,'<br>')}</div></div></div>`; }).join('')+
+    raArr(g.appx).map(x=>{ const [o,n]=raWordDiff(raXText({head:x.head,body:x.old_body}),raXText({head:x.new_head,body:x.new_body})); return `<div class="ra-fixrow"><b>${_e(x.id)}</b> <span class="ra-sub">별표·서식 ${x.count}곳</span><div class="ra-fixd"><div>${o.replace(/\n/g,'<br>')}</div><div>${n.replace(/\n/g,'<br>')}</div></div></div>`; }).join('');
 }
 const RA_BULK_DOCS=[['amend','내규별 개정문'],['addenda','“다른 내규의 개정” 부칙'],['cmp','통합 신구조문대비표'],['reason','정비 이유서']];
 function raBulkDocs(){
@@ -3851,10 +3853,11 @@ function raBulkDocs(){
   const amend=regs.map(g=>{ const k=raKind(g.reg).replace('시행세칙','세칙'); return `${g.reg} 일부개정(안)\n\n${g.amend_text}\n\n부    칙\n이 ${k}${raJosa(k)} 발령한 날부터 시행한다.`; }).join('\n\n\n');
   const addenda=`제○조(다른 ${RA_ORG.reg_word}의 개정) `+(regs.length===1?regs[0].amend_text:regs.map((g,i)=>`${RA_HANG[i]||(i+1)+'.'} ${g.amend_text.replace('\n','\n   ')}`).join('\n'));
   const reason=[`${RA_ORG.reg_word} 일괄 정비 이유서`,'','1. 정비 이유',`  ${U.reason||`“${R.old}”${raJosa(R.old,['이','가'])} “${R.new}”${raRo(R.new)} 바뀜에 따라 이를 인용하는 ${RA_ORG.reg_word}를 일괄 정비하려는 것임.`}`,'',
-    '2. 정비 대상',...regs.map((g,i)=>`  ${RA_GANA(i)}. 「${g.reg}」 ${g.articles.map(a=>raLbl(a.no)).join(', ')} (${g.count}곳)`),'',
+    '2. 정비 대상',...regs.map((g,i)=>`  ${RA_GANA(i)}. 「${g.reg}」 ${[...g.articles.map(a=>raLbl(a.no)),...raArr(g.appx).map(x=>x.id)].join(', ')} (${g.count}곳)`),'',
     '3. 정비 방식',`  각 ${RA_ORG.reg_word}의 해당 조문 중 “${R.old}”${raEul(R.old)} “${R.new}”${raRo(R.new)} 고침(조사 포함). 근거 ${RA_ORG.reg_word} 개정 시 부칙 “다른 ${RA_ORG.reg_word}의 개정”으로 함께 개정하거나 각 ${RA_ORG.reg_word}별로 개정함.`,'',
     ...(raRef('minor_skip')?[`4. 관련: 「${raRules()}」 ${raRef('minor_skip').replace(/\s*단서$/,'')}(법령·상위 ${RA_ORG.reg_word} 변경에 따른 개폐는 심의 생략 가능)`]:[])].join('\n');
-  const cmp=[]; regs.forEach(g=>{ cmp.push({reg:g.reg}); g.articles.forEach(a=>{ const o={no:a.no,title:a.title,body:a.old_body}, n={no:a.no,title:a.new_title||a.title,body:a.new_body}; cmp.push(raCmpCell(o,n,true)); }); });
+  const cmp=[]; regs.forEach(g=>{ cmp.push({reg:g.reg}); g.articles.forEach(a=>{ const o={no:a.no,title:a.title,body:a.old_body}, n={no:a.no,title:a.new_title||a.title,body:a.new_body}; cmp.push(raCmpCell(o,n,true)); });
+    raArr(g.appx).forEach(x=>cmp.push(raCmpCellX({id:x.id,head:x.head,body:x.old_body},{type:'modify',id:x.id,head:x.new_head,body:x.new_body},true))); });   // 별표·서식도 대비표에
   return {regs, amend, addenda, reason, cmp};
 }
 function raBulkDocsView(){
