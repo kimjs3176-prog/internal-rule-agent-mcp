@@ -1265,3 +1265,72 @@ test('제정 위임 조항 직접 입력: 대화상자 대신 화면 입력칸(�
   vals.raManLaw = '  '; E.manOpen = true; c.raDelManualAdd();
   assert.equal(E.dels.length, 1); assert.equal(E.manOpen, true);   // 법령명이 비면 담지 않고 그대로 둔다
 });
+
+test('수치 지시: 현행 값을 적으면 그 값만 바꾼다(“2만원을 3만원으로”·“14일에서 30일로”·화살표)', () => {
+  const c = load();
+  const b17 = '① 근무지내 국내출장의 경우에는 출장여행시간이 4시간 이상인 자에 대하여는 2만원을, 4시간 미만인 자에 대하여는 1만원을 지급한다. 다만, 농진원 차량을 이용하는 경우 등에 대하여는 1만원을 감하여 지급한다.';
+  const q = c.raVqReq('여비규정 제17조의 근무지내 출장 여비 2만원을 3만원으로 올려줘');
+  assert.equal(q.old, 20000); assert.equal(q.val, 30000); assert.equal(q.unit, '원'); assert.equal(q.key, '여비');
+  const r = c.raVqInText(b17, q);
+  assert.equal(r.n, 1);
+  assert.ok(r.body.includes('4시간 이상인 자에 대하여는 3만원을') && r.body.includes('4시간 미만인 자에 대하여는 1만원을') && r.body.includes('1만원을 감하여'), r.body);
+  // 현행 값이 없으면 아무것도 바꾸지 않는다
+  assert.equal(c.raVqInText(b17, c.raVqReq('여비 5만원을 6만원으로')).n, 0);
+  // “14일에서 30일로”·“N일을 M일로” — 단위 낱말(일에서·원에서)을 찾을 말로 잡지 않는다
+  const q2 = c.raVqReq('여비규정 제8조의 정산 기한을 14일에서 30일로 늘려줘');
+  assert.equal(q2.old, 14); assert.equal(q2.val, 30); assert.equal(q2.unit, '일');
+  assert.equal(c.raVqInText('다음날부터 기산하여 14일 이내 에 정산을 신청하여야 한다. 1일 이상 출장', q2).body, '다음날부터 기산하여 30일 이내 에 정산을 신청하여야 한다. 1일 이상 출장');
+  assert.equal(c.raVqReq('연차휴가 15일을 20일로').old, 15);
+  // 화살표·“만·천” 섞인 금액·쉼표 숫자
+  const q3 = c.raVqReq('일비 2만5천원 → 3만원');
+  assert.equal(q3.old, 25000); assert.equal(q3.val, 30000); assert.equal(q3.key, '일비');
+  const q4 = c.raVqReq('여비규정의 일비 25,000원→30,000원');
+  assert.equal(q4.old, 25000); assert.equal(q4.val, 30000);
+  assert.equal(c.raVqInText('일비는 25,000원, 비망가액 1,000원으로 한다.', q4).body, '일비는 30,000원, 비망가액 1,000원으로 한다.');
+  // 표: 현행 값을 적었으면 열이 맞고 값도 같은 칸만
+  const tbl = ['구 분', '일 비', '식 비', '제1호', '25,000', '25,000', '제2호', '20,000', '25,000', '(단위 : 원)'].join('\n');
+  const t = c.raVqInTable(tbl, c.raVqReq('일비 25,000원을 30,000원으로'));
+  assert.equal(t.n, 1); assert.equal(t.body.split('\n').slice(3, 9).join(','), '제1호,30,000,25,000,제2호,20,000,25,000');
+  // 기존 꼴(현행 값 없이)은 그대로 동작
+  assert.equal(c.raVqReq('여비규정 제15조의 일비를 3만원으로 올려줘').old, undefined);
+});
+
+test('수치 지시: 같은 현행 값이 여러 조에 있고 무엇인지 적지 않으면 추측하지 않는다', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[
+      {no:'17',title:'근무지내 국내출장시의 여비',body:'4시간 이상인 자에 대하여는 2만원을 지급한다.'},
+      {no:'30',title:'벌칙',body:'위반하면 2만원을 감한다.'}],appendix:[]};
+    RA.amend.title='여비규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.valNote=''; RA.amend.purpose='';`, c);
+  const A = vm.runInContext('RA.amend', c);
+  const r = c.raRuleApply(A, '2만원을 3만원으로 바꿔');
+  assert.equal(r.n, 0); assert.ok(r.ambiguous && A.valNote.includes('여러 곳')); assert.equal(A.changes.length, 0);
+  // 무엇인지(여비) 적으면 그 말이 든 조만 바꾼다
+  const r2 = c.raRuleApply(A, '출장 여비 2만원을 3만원으로 올려줘');
+  assert.equal(r2.n, 1); assert.equal(A.changes.map(x => x.no).join(','), '17');
+  assert.ok(A.changes[0].body.includes('3만원을') && A.purpose.includes('2만원을') && A.valNote.includes('현행 2만원'));
+});
+
+test('인용 자동 정정: 다른 법률 조에 “및·또는”으로 이어진 조는 건드리지 않는다(AMD-1)', () => {
+  const c = load();
+  const b32 = '11. 「감염병의 예방 및 관리에 관한 법률」 에 따른 제1급감염병에 대하여 같은 법 제 24조 또는 제25조에 따라 필수예방접종을 할 때';
+  const b34 = '병원 진료(「국민건강보험법」 제52조에 따른 건강검진 또는 「감염병의 예방 및 관리에 관한 법률」 제24조 및 제25조에 따른 예방접종을 받는 경우';
+  const map = { '25': '26', '26': '25' };
+  assert.equal(c.raRetargetRefs(b32, map), b32);
+  assert.equal(c.raRetargetRefs(b34, map), b34);
+  assert.equal(c.raCiteHits(b32, '25').length, 0); assert.equal(c.raCiteHits(b34, '25').length, 0);
+  // 같은 내규 인용은 그대로 정정한다 — 외부 인용 뒤라도 사이에 다른 말이 끼면 내부 인용
+  const own = '「국민건강보험법」 제52조에 따른 검진을 받은 사람은 제25조에 따라 신고한다. 제25조 및 제26조를 따른다.';
+  assert.equal(c.raRetargetRefs(own, map), '「국민건강보험법」 제52조에 따른 검진을 받은 사람은 제26조에 따라 신고한다. 제26조 및 제25조를 따른다.');
+  assert.equal(c.raCiteHits(own, '25').length, 2);
+});
+
+test('다른 내규로 바꾸면 앞 내규의 개정 의도·시행일·참고 자료가 남지 않는다(AMD-2)', () => {
+  const c = load();
+  vm.runInContext(`Object.assign(RA.amend,{slug:'여비규정',title:'여비규정',intent:'제7조 삭제',effective:'2027-01-01',refText:'참고',abbr:false,lawStyle:'plain',rt:{ok:1},cf:{x:1},alioRefs:{a:1},model:'m',vqLog:[1],valNote:'x',changes:[{type:'delete',no:'7'}]});`, c);
+  c.raAmendFresh({ slug: '복무규정', title: '복무규정', src: 'reg' });
+  const A = vm.runInContext('RA.amend', c);
+  assert.equal(A.slug, '복무규정'); assert.equal(A.intent, ''); assert.equal(A.effective, ''); assert.equal(A.refText, '');
+  assert.equal(A.changes.length, 0); assert.equal(A.rt, undefined); assert.equal(A.vqLog, undefined); assert.equal(A.valNote, undefined);
+  assert.equal(JSON.stringify(A.alioRefs), undefined);
+  assert.equal(A.abbr, false); assert.equal(A.lawStyle, 'plain');            // 보기 설정은 유지
+});

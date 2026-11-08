@@ -534,7 +534,7 @@ def retarget_refs(text: str, moves: dict):
     prev_ext_end = -1
     for m in _REF.finditer(text):
         ext = _ref_is_external(text, m.start())
-        if not ext and prev_ext_end >= 0 and re.fullmatch(r"(?:\s*[(（][^)）]{0,24}[)）])?[\s,및또는ㆍ·와과]*", text[prev_ext_end:m.start()]):
+        if not ext and prev_ext_end >= 0 and re.fullmatch(r"(?:\s*[(（][^)）]{0,24}[)）])?(?:의\s*[가-힣]{1,12})?[\s,및또는ㆍ·와과]*", text[prev_ext_end:m.start()]):
             ext = True
         if ext:
             prev_ext_end = m.end()
@@ -931,6 +931,9 @@ _SYN_BASE = {
     "기간제": ["계약직원"], "비정규직": ["계약직원"], "퇴직금": ["퇴직급여"], "겸업": ["겸직"], "부업": ["겸직"],
     "외부강연": ["외부강의"], "강의료": ["외부강의"], "복지포인트": ["선택적복지"], "인사이동": ["전보"], "육휴": ["육아휴직"],
     "경조사비": ["경조금", "경조사"], "축의금": ["경조금", "경조사"], "조의금": ["경조금", "경조사"], "재택": ["재택근무"],
+    # 구어 동사·명사 → 내규 표기(“계산해” → 산정, “70만원 넘는” → 초과, “보관 기간” → 보유)
+    "계산": ["산정"], "넘는": ["초과"], "넘으면": ["초과"], "구입": ["구매"], "보관": ["보유", "보존"], "이의신청": ["재심의", "재심"],
+    "이월": ["저축"], "해외": ["국외"], "선물": ["금품등", "금품"], "영상": ["영상정보", "화상정보"],
 }
 _SYN = dict(_SYN_BASE)
 _SYN.update({str(k): [str(x) for x in v if str(x).strip()] for k, v in
@@ -3821,7 +3824,10 @@ def ra_graph():
 # ══════════════════════════════════════════════════════════════════════════
 _ENACT_RE = re.compile(r"(제정|새로\s*만들|새\s*(?:내규|규정|규칙|지침)|만들어\s*(?:줘|주세요|야)|만들고\s*싶|신규\s*(?:내규|규정|지침))")
 _BULK_RE = re.compile(r"[“\"'「]?([가-힣A-Za-z0-9·()\s]{2,24}?)[”\"'」]?\s*(?:을|를|에서)\s*[“\"'「]?([가-힣A-Za-z0-9·()\s]{2,24}?)[”\"'」]?\s*(?:으로|로)\s*[가-힣\s]{0,14}?(?:바꾸|바꿔|바뀌|변경|정비|교체|고치|고쳐)")
-_ARROW_RE = re.compile(r"[“\"'「]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?\s*(?:→|->|=>)\s*[“\"'「]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?")
+# 앞이 숫자·쉼표면 잡지 않는다(“25,000원→30,000원”의 “000원”을 낱말로 읽지 않게)
+_ARROW_RE = re.compile(r"(?<![\d,.])[“\"'「]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?\s*(?:→|->|=>)\s*[“\"'「]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?")
+# 요청문 속 조 번호 — “제8조의 14일”·“제17조의 2만원”·“제8조의 2항”의 ‘의’는 소유격이지 가지번호가 아니다
+_REQ_ART = r"제\s*\d+\s*조(?:\s*의\s*\d+(?![\d,.]|\s*(?:만\s*원|천\s*원|원|일|개월|년|시간|%|퍼센트|회|항|호|배|명|분|세)))?"
 _LAW_IN_RE = re.compile(r"「([^」]{2,40}(?:법|법률|시행령|시행규칙))」|([가-힣·\s]{2,30}?(?:법|법률)(?:\s*시행령|\s*시행규칙)?)(?=\s|이|가|의|을|를|에|$)")
 
 
@@ -3898,8 +3904,14 @@ def heuristic_plan(req: str) -> dict:
             bulk_kw = mb
     # “모든 내규에서 A를 B로” — 범위를 말하는 머리말이 바뀌기 전 용어로 잡히지 않게 떼고 찾는다
     tb = re.sub(r"(?:모든|전체|전|일체의?)\s*(?:내규|규정|규칙|" + re.escape(ORG["reg_word"]) + r")\s*(?:에서|의|에|를|을)?\s*", "", t)
-    m = _ARROW_RE.search(t) or (_BULK_RE.search(tb) if bulk_kw else None)
-    if m and (bulk_kw or "→" in t or "->" in t):
+    am = _ARROW_RE.search(t)
+    m = am or (_BULK_RE.search(tb) if bulk_kw else None)
+    # 화살표만으로는 일괄 정비로 보지 않는다 — 내규명·조 번호를 적었거나 숫자를 바꾸는 요청(“14일 → 30일”)은 그 내규의 개정이다
+    _arrow_bulk = bool(am) and not bulk_kw and not re.search(r"\d", am.group(1) + am.group(2)) \
+        and not re.search(r"(규정|규칙|지침|세칙|요령|정관|기준|매뉴얼|제\s*\d+\s*조)", t)
+    if am and not bulk_kw and not _arrow_bulk and not re.search(r"\d", am.group(1) + am.group(2)):
+        plan["intent"] = t[:am.start()] + f"“{am.group(1)}”을 “{am.group(2)}”로 바꿔" + t[am.end():]   # 규칙 반영(낱말 바꾸기)이 알아듣는 꼴로
+    if m and (bulk_kw or _arrow_bulk):
         _clean = lambda w: re.sub(r"\s*(?:명칭|이름|용어|표현|표기|단어|문구)$", "", w.strip()).strip()
         plan.update(mode="bulk", old=_clean(m.group(1)), new=_clean(m.group(2)))
         plan["reasoning"].append(f"“{plan['old']}” → “{plan['new']}” 용어 변경이므로 모든 내규 일괄 정비로 판단")
@@ -3916,7 +3928,7 @@ def heuristic_plan(req: str) -> dict:
         lm = short_law.group(1)
     if lm and (re.search(r"(상위법|법령|법률|시행령|시행규칙|「)", t) or short_law) and not re.search(r"(내규|규정|규칙|지침)을\s*(?:고치|개정)", t):
         plan.update(mode="upper", law=re.sub(r"\s+", " ", lm),
-                    arts=[re.sub(r"\s+", "", x) for x in re.findall(r"제\s*\d+\s*조(?:\s*의\s*\d+)?", t)])
+                    arts=[re.sub(r"\s+", "", x) for x in re.findall(_REQ_ART, t)])
         plan["reasoning"].append(f"상위 법령 「{plan['law']}」 개정에 따른 영향 분석으로 판단")
         return plan
     if _ENACT_RE.search(t) and not re.search(r"개정", t):
@@ -3960,7 +3972,7 @@ def _resolve_targets(plan: dict, req: str):
     if not reg:
         return
     plan["reg"] = {"slug": reg["slug"], "title": reg["title"], "category": reg["category"]}
-    nos = [re.sub(r"\s+", "", x).replace("제", "").replace("조", "") for x in re.findall(r"제\s*\d+\s*조(?:\s*의\s*\d+)?", req)]
+    nos = [re.sub(r"\s+", "", x).replace("제", "").replace("조", "") for x in re.findall(_REQ_ART, req)]
     asked = nos
     nos = [n for n in nos if any(a["no"] == n and not a["deleted"] for a in reg["articles"])]
     missing = [n for n in asked if n not in nos]
@@ -4073,9 +4085,13 @@ def _key_sents(body: str, toks: list, n: int = 2) -> list:
 _ADV_QSTOP = {"얼마", "어떻게", "누가", "누구", "언제", "어디", "무엇", "무슨", "며칠", "몇", "어느", "어떤", "왜", "하나요", "되나요",
               "있나요", "없나요", "받을", "받나요", "받아야", "하면", "되면", "되는", "하는", "다른", "해야", "해도", "되어", "인가요",
               "알려", "알려줘", "알려주세요", "궁금", "궁금합니다", "나오", "나와", "주나", "줘야", "되요", "돼요", "경우에", "때", "가능", "가능한가요", "필요", "필요한가요", "내규",
-              "규정상", "규정에", "따르면", "기준", "연간", "서면", "이야", "뭐야", "뭔가요", "있어", "돼", "되나"}
+              "규정상", "규정에", "따르면", "기준", "연간", "서면", "이야", "뭐야", "뭔가요", "있어", "돼", "되나",
+              "그럼", "그러면", "그리고", "그런데", "그래서", "그건", "쓰면", "써도", "쓸", "되는지", "하는지"}
 _ADV_TAIL = re.compile(r"(?:인가요|이에요|예요|인지요|인지|나요|ㄴ가요|습니까|ㅂ니까|까요|으려면|려면|으면|면서|해야|이야|야|이죠|죠|은지|는지)$")
 _ADV_HA = re.compile(r"(?:하려면|하면|했는데|하는데|해서)$")          # “야근하면” → 야근(“겸하려면”은 두 글자가 안 남아 위 규칙으로)
+# 구어 용언 어미 — “가능해·계산해·포함되·결재하·임신한” → 가능·계산·포함·결재·임신(어간이 원문에 있을 때만 뗀다)
+_ADV_VERB = re.compile(r"(?:되는지|하는지|해야|하여|하고|하는|되는|하나|되나|해요|돼요|되요|된다|한다|해|한|할|되|된|될|돼|하)$")
+_ADV_AMT = re.compile(r"\d[\d,]*(?:\.\d+)?(?:만|천)?(?:원|일|개월|년|시간|회|명|퍼센트)?")
 _CORPUS = {"key": None, "txt": ""}
 
 
@@ -4104,6 +4120,12 @@ def _adv_query(q: str, user_syn=None):
         w2 = _ADV_HA.sub("", w) if len(w) > 3 and len(_ADV_HA.sub("", w)) >= 2 else w
         w2 = _ADV_TAIL.sub("", w2) if len(w2) > 2 else w2
         w2 = _strip_josa(w2) if len(w2) > 2 else w2
+        if len(w2) >= 3:
+            st = _ADV_VERB.sub("", w2)
+            if len(st) >= 2 and st != w2 and st in corpus:
+                w2 = st
+        if _ADV_AMT.fullmatch(w2):
+            continue                                          # “70만원”·“3일” — 금액·일수는 원문 표기가 달라(700,000원) 낱말로 찾지 않는다
         if not w2 or w2 in _ADV_QSTOP or w in _ADV_QSTOP or w2 in _STOP or len(w2) < 2:
             continue
         if w2 not in words:

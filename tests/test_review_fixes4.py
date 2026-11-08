@@ -24,10 +24,13 @@ def test_synonyms_expand_search():
 
 
 def test_advise_gap_when_no_article_covers_all_words(client):
-    d = client.post("/api/regagent/advise", json={"question": "연차휴가 이월이 가능한가요?"}).get_json()
-    assert d["conclusion"] == "확인 필요" and d["gap"] == ["이월"]
-    assert d["sources"][0]["reg"] == "복무규정"                 # 예산 이월 조문이 앞에 오지 않는다
+    d = client.post("/api/regagent/advise", json={"question": "연차휴가 양도가 가능한가요?"}).get_json()
+    assert d["conclusion"] == "확인 필요" and d["gap"] == ["양도"]
+    assert d["sources"][0]["reg"] == "복무규정"
     assert "함께 다룬 조문은 찾지 못했습니다" in d["answer"]
+    # “이월”은 내규 표기(연차의 저축, 미사용연차 다음 회계연도 사용)로 찾는다 — 예산 이월 조문이 앞에 오지 않는다
+    d = client.post("/api/regagent/advise", json={"question": "연차휴가 이월이 가능한가요?"}).get_json()
+    assert d["conclusion"] == "해당 규정" and d["sources"][0]["reg"] == "복무규정"
     d = client.post("/api/regagent/advise", json={"question": "야근하면 수당 나오나요?"}).get_json()
     assert d["mapped"] == {"야근": ["시간외근무"]} and not d["unmatched"] and "시간외근무수당" in d["sources"][0]["title"]
 
@@ -45,9 +48,9 @@ def test_advise_ai_gets_gap_caveat(client, monkeypatch):
         seen["user"] = user
         return json.dumps({"conclusion": "가능", "answer": "가능합니다 [1].", "basis": [{"src": 1, "point": "연차유급휴가"}]}), ""
     monkeypatch.setitem(ra._CTX, "ai_generate", gen)
-    d = client.post("/api/regagent/advise", json={"question": "연차휴가 이월이 가능한가요?", "provider": "gemini", "api_key": "k"}).get_json()
-    assert "“이월”을 직접 다룬 조문은 찾지 못했습니다" in seen["user"]
-    assert any("이월" in c for c in d["caveats"]) and d["conclusion"] == "확인 필요"
+    d = client.post("/api/regagent/advise", json={"question": "연차휴가 양도가 가능한가요?", "provider": "gemini", "api_key": "k"}).get_json()
+    assert "“양도”를 직접 다룬 조문은 찾지 못했습니다" in seen["user"]
+    assert any("양도" in c for c in d["caveats"]) and d["conclusion"] == "확인 필요"
 
 
 def test_dup_regs_and_health():
