@@ -91,7 +91,7 @@ git push -u origin main
 
 ## 5. 라이선스
 
-- 제3자 구성요소 목록은 `THIRD_PARTY_LICENSES.md`에 있다. Python 패키지 17종과 Pretendard 글꼴(OFL)이고, 재배포가 제한되는 것은 없다.
+- 제3자 구성요소 목록은 `THIRD_PARTY_LICENSES.md`에 있다. Python 패키지 18종과 Pretendard 글꼴(OFL)이고, 재배포가 제한되는 것은 없다.
 - **사용자 확인:** 이 저장소 자체 코드의 라이선스(기관 소유·공공누리 등)는 기관이 정한다. 정해지면 `LICENSE` 파일을 더한다.
 
 ## 6. 등록 뒤 할 일

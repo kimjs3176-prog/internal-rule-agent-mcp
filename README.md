@@ -159,7 +159,11 @@ node --test tests/js/*.test.mjs
 3. (선택) `python scripts/build_embeddings.py`로 의미 검색 색인을 만듭니다.
 
 ### MCP로 쓰기(AI 도우미의 도구로)
-`python mcp_server/server.py`를 Claude Desktop·Claude Code 등 MCP를 지원하는 AI 도우미에 등록하면, 그 AI가 대화 중에 에이전트 실행·개정문·신구조문대비표·개정문 검증·조문 점검·건강검진·인용 영향 등 11개 도구를 직접 씁니다. 웹 화면과 같은 엔진·데이터이고 추가 패키지는 필요 없습니다(개정문 도구는 Node.js 18+). 등록 방법은 `docs/MCP.md`.
+MCP를 지원하는 AI 도우미가 대화 중에 이 에이전트를 도구 17개로 씁니다. 도구는 에이전트 실행, 개정문·신구조문대비표·개정문 검증, 제정안 점검, 조문 점검, 건강검진, 인용 영향, **다른 기관 사규(알리오) 찾기·읽기·수치 비교** 등입니다.
+- **원격(URL):** 배포한 주소의 `https://<배포 주소>/mcp`를 claude.ai·ChatGPT 커넥터, Claude Code(`--transport http`), VS Code·Cursor에 넣으면 됩니다. 설치는 필요 없고, 문서 세트는 내려받기 링크로 받습니다.
+- **내 컴퓨터:** `python mcp_server/server.py`를 Claude Desktop·Claude Code에 등록합니다.
+- 웹 화면과 같은 엔진·데이터입니다. 엔진은 파이썬 안에서 돌고(QuickJS), Python 3.13 이상이면 Node.js 18+를 씁니다.
+- 등록 방법과 환경변수는 `docs/MCP.md`에 있습니다.
 
 ### 라이선스
 쓰는 패키지·글꼴의 판과 라이선스는 `THIRD_PARTY_LICENSES.md`에 있습니다(재배포 제한 없음).
@@ -172,6 +176,6 @@ api_server.py              Flask 서버(법령 조회·AI)
 reg_upload.py, upload.html 내규 등록
 org_config.json            기관 프로필
 regulations/               내규 원문
-mcp_server/                MCP 서버(server.py)와 화면 엔진 실행기(engine.mjs)
+mcp_server/                MCP 서버: 도구(core.py), 내 컴퓨터 연결(server.py), 원격 /mcp(remote.py), 화면 엔진 실행기(engine.py·engine.mjs)
 scripts/, tests/           등록·색인 스크립트, 테스트
 ```
