@@ -119,7 +119,7 @@ def reachable(force: bool = False) -> bool:
 
 def ensure_reachable():
     if not reachable():
-        raise AlioError("NETWORK", "알리오에 연결하지 못했습니다(네트워크 차단 또는 사이트 점검). 연결되는 곳에서 다시 시도하세요.")
+        raise AlioError("NETWORK", "알리오에 연결하지 못했습니다(네트워크 차단 또는 사이트 점검). 다른 기관 사례만 빠지고, 우리 기관 내규 작업은 그대로 할 수 있습니다.")
 
 
 def _json(method: str, path: str, body=None, deadline=None):

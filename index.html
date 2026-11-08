@@ -78,7 +78,7 @@ svg.ic{width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke
 /* AI 설정 */
 .modal-bg{position:fixed;inset:0;background:var(--color-scrim);display:none;align-items:center;justify-content:center;z-index:var(--z-modal);padding:var(--space-md);}
 .modal-bg.show{display:flex;}
-.modal{background:var(--color-sheet);border-radius:var(--radius-card);width:min(480px,100%);padding:var(--space-lg);box-shadow:var(--shadow-pop);border-top:var(--rule-bar) solid var(--color-ink);}
+.modal{background:var(--color-sheet);border-radius:var(--radius-card);width:min(480px,100%);padding:var(--space-lg);box-shadow:var(--shadow-pop);border-top:var(--rule-bar) solid var(--color-ink);max-height:calc(100vh - 2 * var(--space-md));max-height:calc(100dvh - 2 * var(--space-md));overflow-y:auto;overscroll-behavior:contain;}
 .modal h2{font-size:var(--text-title);margin-bottom:var(--space-xs);display:flex;align-items:center;gap:var(--space-xs);}
 .modal p{font-size:var(--text-sm);color:var(--color-muted);line-height:1.65;margin-bottom:var(--space-md);}
 .modal p.m-note{font-size:var(--text-xs);border-left:var(--rule-bar) solid var(--color-accent);padding-left:var(--space-xs);}
@@ -92,7 +92,7 @@ svg.ic{width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke
 .mf input,.mf select{font:var(--text-md) var(--font-body);color:var(--color-ink);background:var(--color-sheet);border:var(--rule-hair) solid var(--color-muted);border-radius:var(--radius-ctl);padding:0 var(--space-sm);height:var(--ctl-h);}
 .mf input:focus-visible,.mf select:focus-visible{outline:2px solid var(--color-focus);outline-offset:-1px;}
 .mf a{font-weight:500;color:var(--color-ink);}
-.m-acts{display:flex;gap:var(--space-xs);justify-content:flex-end;margin-top:var(--space-xs);}
+.m-acts{display:flex;gap:var(--space-xs);justify-content:flex-end;margin-top:var(--space-xs);position:sticky;bottom:calc(-1 * var(--space-lg));background:var(--color-sheet);padding:var(--space-xs) 0 var(--space-lg);margin-bottom:calc(-1 * var(--space-lg));}   /* 낮은 화면에서도 저장 단추가 보이게 */
 </style>
 <link rel="stylesheet" href="/assets/reg_agent.css">
 </head>
@@ -200,11 +200,13 @@ function setProv(p){
     (p==='gemini'?`<ol class="key-steps"><li>위 링크에서 Google 계정으로 로그인</li><li>“API 키 만들기(Create API key)”를 눌러 키 복사</li><li>위 API 키 칸에 붙여 넣고 저장 — 무료 사용량 안에서 쓸 수 있습니다</li></ol>`:'');
 }
 // 사내·공통기반 모델: 주소는 관리자가 서버에 정하고(OPENAI_COMPAT_BASE_URL), 여기서는 모델 이름만 고른다
+let _compatOk=null;
 async function setCompat(s){
   const txt=document.getElementById('aiModelTxt'), help=document.getElementById('aiKeyHelp');
   txt.value=s.model_compat||''; help.innerHTML='<span class="m-note">서버에 설정된 모델을 확인하는 중…</span>';
-  let d={}; try{ d=await (await fetch('/api/ai/models?provider=compat')).json(); }catch(e){}
+  _compatOk=null; let d={}; try{ d=await (await fetch('/api/ai/models?provider=compat')).json(); }catch(e){}
   if(currentProv!=='compat') return;
+  _compatOk=('ready' in d)?!!d.ready:null;   // 서버에 주소가 없다고 확인된 때만 저장을 막는다(조회 실패는 막지 않음)
   document.getElementById('aiModelList').innerHTML=(d.models||[]).map(m=>`<option value="${escAttr(m)}"></option>`).join('');
   if(!txt.value&&d.model) txt.value=d.model;
   help.innerHTML=d.ready
@@ -227,6 +229,7 @@ document.addEventListener('keydown',e=>{
   else if(!e.shiftKey&&document.activeElement===last){ e.preventDefault(); first.focus(); }
 });
 function saveAiSettings(){
+  if(currentProv==='compat'&&_compatOk===false){ _toast('사내·공통기반 모델 주소가 서버에 설정되지 않아 저장하지 않았습니다. 관리자에게 OPENAI_COMPAT_BASE_URL 설정을 요청하거나 다른 AI를 고르세요.',6000); return; }
   const prefs=_readAiPrefs(), keys=_readAiKeys(), k=document.getElementById('aiKey').value.trim();
   prefs.provider=currentProv; prefs['model_'+currentProv]=currentProv==='compat'?document.getElementById('aiModelTxt').value.trim():document.getElementById('aiModel').value;
   if(k) keys['key_'+currentProv]=k; else delete keys['key_'+currentProv];
