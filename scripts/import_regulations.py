@@ -46,7 +46,9 @@ def main(argv=None):
         print("등록할 파일이 없습니다(지원 형식: " + ", ".join(sorted(ri.ALLOWED_EXT)) + ")")
         return 1
     if a.reset and not a.dry_run:
-        same = os.path.abspath(ri.REG_DIR) == os.path.abspath(os.path.join(ri.BASE_DIR, "regulations"))
+        norm = lambda x: os.path.normcase(os.path.realpath(os.path.normpath(os.path.abspath(x))))
+        reg_dir = os.path.normpath(os.path.abspath(ri.REG_DIR))      # 끝 “/”(Windows의 대체 구분자 포함)를 없앤다 — 백업 경로가 폴더 안쪽이 되지 않게
+        same = norm(reg_dir) == norm(os.path.join(ri.BASE_DIR, "regulations"))
         if same and not a.force:
             n = len(ri.load_manifest())
             print(f"멈춤: 저장소의 기본 내규 데이터({n}건, {ri.REG_DIR})를 비우려 합니다.\n"
@@ -55,11 +57,15 @@ def main(argv=None):
                   "  정말 기본 데이터를 바꾸려면 --force 를 함께 주세요(기존 데이터는 백업 폴더로 옮깁니다).")
             return 3
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        while os.path.exists(f"{ri.REG_DIR.rstrip(os.sep)}.backup-{stamp}"):
+        while os.path.exists(f"{reg_dir}.backup-{stamp}"):
             stamp += "x"
-        if os.path.isdir(ri.REG_DIR) and os.listdir(ri.REG_DIR):
-            bak = f"{ri.REG_DIR.rstrip(os.sep)}.backup-{stamp}"
-            shutil.move(ri.REG_DIR, bak)
+        if os.path.isdir(reg_dir) and os.listdir(reg_dir):
+            bak = f"{reg_dir}.backup-{stamp}"
+            try:
+                shutil.move(reg_dir, bak)
+            except OSError as e:
+                print(f"멈춤: 기존 내규 폴더를 백업으로 옮기지 못했습니다({e}). 데이터는 그대로입니다.")
+                return 3
             print(f"기존 내규 폴더를 옮겨 두었습니다: {bak}")
         if os.path.isfile(ri.REG_MANIFEST_PATH):
             shutil.copy2(ri.REG_MANIFEST_PATH, f"{ri.REG_MANIFEST_PATH}.backup-{stamp}")

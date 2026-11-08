@@ -1334,3 +1334,55 @@ test('다른 내규로 바꾸면 앞 내규의 개정 의도·시행일·참고 
   assert.equal(JSON.stringify(A.alioRefs), undefined);
   assert.equal(A.abbr, false); assert.equal(A.lawStyle, 'plain');            // 보기 설정은 유지
 });
+
+test('독립 검토 회귀: 현행 값 모드는 적은 말·앞 구절로 가리고, 못 가리면 바꾸지 않는다', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'s',title:'여비규정',articles:[
+      {no:'8',title:'여비의 결제와 정산 등',body:'② 여행을 마친 날부터 14일 이내에 정산을 신청하여야 한다.'},
+      {no:'15',title:'일비·숙박비·식비의 지급',body:'② 국외여행자는 귀국 후 14일 이내에 추가지급을 신청한다.'},
+      {no:'17',title:'근무지내 국내출장시의 여비',body:'① 4시간 이상인 자에 대하여는 2만원을, 4시간 미만인 자에 대하여는 1만원을 지급한다. 다만, 농진원 차량을 이용하는 경우 등에 대하여는 1만원을 감하여 지급한다.'},
+      {no:'34',title:'출산휴가',body:'① 출산전후휴가는 90일로 한다. ② 임신기간이 28주 이상인 경우 유산·사산휴가는 90일까지로 한다.'}],appendix:[]};
+    RA.amend.title='여비규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.valNote=''; RA.amend.purpose='';`, c);
+  const A = vm.runInContext('RA.amend', c);
+  // 일비는 2만원인 곳이 없다 — 2만원이 있는 제17조(여비)를 바꾸지 않는다
+  let r = c.raRuleApply(A, '일비를 2만원에서 3만원으로 올려줘');
+  assert.equal(r.n, 0); assert.ok(r.keyMiss && A.valNote.includes('함께 있는'), A.valNote); assert.equal(A.changes.length, 0);
+  // “기한”이 어느 조에도 없으면 14일이 있는 두 조를 모두 바꾸지 않는다
+  r = c.raRuleApply(A, '정산 기한 14일을 30일로'); assert.equal(r.n, 0); assert.equal(A.changes.length, 0);
+  // 같은 조 안의 1만원 두 곳 — “4시간 미만”으로 가린다
+  r = c.raRuleApply(A, '근무지내 출장 4시간 미만 여비 1만원을 2만원으로');
+  assert.equal(r.n, 1, A.valNote);
+  const b = A.changes.find(x => x.no === '17').body;
+  assert.ok(b.includes('미만인 자에 대하여는 2만원을') && b.includes('1만원을 감하여'), b);
+  // 가릴 말이 없으면(출산휴가 90일 두 곳) 바꾸지 않는다
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  r = c.raRuleApply(A, '제34조의 90일을 120일로');
+  assert.equal(r.n, 0); assert.ok(r.ambiguous && A.valNote.includes('2곳'), A.valNote);
+  // 열쇠말 조사: 연차휴가·병가는 그대로, 일반어(시간)는 앞 낱말로
+  assert.equal(c.raVqKeyWord('연차휴가'), '연차휴가'); assert.equal(c.raVqKeyWord('병가'), '병가'); assert.equal(c.raVqKeyWord('일비를'), '일비');
+  assert.equal(c.raVqReq('복무규정 제14조의 근무 시간을 35시간으로 줄여줘').key, '근무');
+  // “2만5천원” 꼴 안내 표기
+  const B = { title: 'x', purpose: '', changes: [{ type: 'modify', no: '5', body: '일비는 2만5천원으로 한다.' }], appx: [] };
+  c.raVqApply(B, '일비 2만5천원을 3만원으로');
+  assert.equal(B.changes[0].body, '일비는 3만원으로 한다.'); assert.ok(B.valNote.includes('→ 3만원') && !B.valNote.includes('만천원'), B.valNote);
+});
+
+test('독립 검토 회귀: 요청문 가지조 뒤 단위 글자로 시작하는 낱말, 외부 인용 뒤 “의 ○○는”, “이 지침 제N조”', () => {
+  const c = load();
+  const re = new RegExp(c.RA_REQ_ART ?? vm.runInContext('RA_REQ_ART', c), 'g');
+  const nos = t => [...t.matchAll(re)].map(m => m[2] ? `${m[1]}의${m[2]}` : m[1]).join(',');
+  assert.equal(nos('사택관리규칙 제6조의3 일반사택 확보 조항 삭제'), '6의3');
+  assert.equal(nos('제4조의2 시간외근무 수당'), '4의2');
+  assert.equal(nos('제8조의 14일을 30일로'), '8');
+  assert.equal(nos('제17조의 2만원을'), '17');
+  // 감사규정 시행세칙 제31조② — 앞의 “규정 제25조”(감사규정)는 외부, “제30조제3항”은 같은 세칙
+  const t31 = '② 규정 제25조의 이행관리책임자는 제30조제3항에 따라 단기, 중기, 장기로 분류된 사항을 관리한다.';
+  assert.equal(c.raCiteHits(t31, '30').length, 1);
+  assert.equal(c.raRetargetRefs(t31, { '30': '31' }), t31.replace('제30조제3항', '제31조제3항'));
+  // 외부 조 + “의 ○○ 또는” + 조 → 외부
+  const t7 = '「근로자참여 및 협력증진에 관한 법률」 제6조제2항의 근로자위원 또는 제26조에 따른 위원';
+  assert.equal(c.raCiteHits(t7, '26').length, 0);
+  // “이 지침 제6조 … 및 제12조” → 같은 내규
+  const t3 = '이 지침 제6조제4호 각목 및 제12조제4항에 따른 조치';
+  assert.equal(c.raCiteHits(t3, '12').length, 1);
+});

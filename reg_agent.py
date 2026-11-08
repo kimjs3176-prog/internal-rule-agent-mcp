@@ -534,7 +534,7 @@ def retarget_refs(text: str, moves: dict):
     prev_ext_end = -1
     for m in _REF.finditer(text):
         ext = _ref_is_external(text, m.start())
-        if not ext and prev_ext_end >= 0 and re.fullmatch(r"(?:\s*[(（][^)）]{0,24}[)）])?(?:의\s*[가-힣]{1,12})?[\s,및또는ㆍ·와과]*", text[prev_ext_end:m.start()]):
+        if not ext and prev_ext_end >= 0 and re.fullmatch(r"(?:\s*[(（][^)）]{0,24}[)）])?(?:\s*의\s*[가-힣]{1,12}?\s*(?:,|및|또는|ㆍ|·|와|과))?[\s,및또는ㆍ·와과]*", text[prev_ext_end:m.start()]):
             ext = True
         if ext:
             prev_ext_end = m.end()
@@ -931,10 +931,10 @@ _SYN_BASE = {
     "기간제": ["계약직원"], "비정규직": ["계약직원"], "퇴직금": ["퇴직급여"], "겸업": ["겸직"], "부업": ["겸직"],
     "외부강연": ["외부강의"], "강의료": ["외부강의"], "복지포인트": ["선택적복지"], "인사이동": ["전보"], "육휴": ["육아휴직"],
     "경조사비": ["경조금", "경조사"], "축의금": ["경조금", "경조사"], "조의금": ["경조금", "경조사"], "재택": ["재택근무"],
-    # 구어 동사·명사 → 내규 표기(“계산해” → 산정, “70만원 넘는” → 초과, “보관 기간” → 보유)
-    "계산": ["산정"], "넘는": ["초과"], "넘으면": ["초과"], "구입": ["구매"], "보관": ["보유", "보존"], "이의신청": ["재심의", "재심"],
-    "이월": ["저축"], "해외": ["국외"], "선물": ["금품등", "금품"], "영상": ["영상정보", "화상정보"],
 }
+# 자문 질의에만 쓰는 구어 → 내규 표기(“계산해” → 산정, “70만원 넘는” → 초과, “보관 기간” → 보유). 개정 대상 고르기(유사 검색)에는 넣지 않는다
+_ADV_SYN = {"계산": ["산정"], "넘는": ["초과"], "넘으면": ["초과"], "보관": ["보유", "보존"], "이의신청": ["재심의", "재심"],
+            "이월": ["저축"], "선물": ["금품등", "금품"], "영상": ["영상정보", "화상정보"]}
 _SYN = dict(_SYN_BASE)
 _SYN.update({str(k): [str(x) for x in v if str(x).strip()] for k, v in
              (ORG["synonyms"].items() if isinstance(ORG.get("synonyms"), dict) else []) if isinstance(v, list)})
@@ -3825,9 +3825,10 @@ def ra_graph():
 _ENACT_RE = re.compile(r"(제정|새로\s*만들|새\s*(?:내규|규정|규칙|지침)|만들어\s*(?:줘|주세요|야)|만들고\s*싶|신규\s*(?:내규|규정|지침))")
 _BULK_RE = re.compile(r"[“\"'「]?([가-힣A-Za-z0-9·()\s]{2,24}?)[”\"'」]?\s*(?:을|를|에서)\s*[“\"'「]?([가-힣A-Za-z0-9·()\s]{2,24}?)[”\"'」]?\s*(?:으로|로)\s*[가-힣\s]{0,14}?(?:바꾸|바꿔|바뀌|변경|정비|교체|고치|고쳐)")
 # 앞이 숫자·쉼표면 잡지 않는다(“25,000원→30,000원”의 “000원”을 낱말로 읽지 않게)
-_ARROW_RE = re.compile(r"(?<![\d,.])[“\"'「]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?\s*(?:→|->|=>)\s*[“\"'「]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?")
+_ARROW_RE = re.compile(r"(?:(?<![\d,.가-힣A-Za-z0-9·()])|(?<=[.])(?!\d))[“\"'「‘]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」’]?\s*(?:→|->|=>)\s*[“\"'「‘]?([가-힣A-Za-z0-9·()]{2,24})[”\"'」]?")
 # 요청문 속 조 번호 — “제8조의 14일”·“제17조의 2만원”·“제8조의 2항”의 ‘의’는 소유격이지 가지번호가 아니다
-_REQ_ART = r"제\s*\d+\s*조(?:\s*의\s*\d+(?![\d,.]|\s*(?:만\s*원|천\s*원|원|일|개월|년|시간|%|퍼센트|회|항|호|배|명|분|세)))?"
+_REQ_ART = (r"제\s*\d+\s*조(?:\s*의\s*\d+(?![\d,.]|\s*(?:만\s*원|천\s*원|원|일|개월|년|시간|%|퍼센트|회|항|호|배|명|분|세)"
+            r"(?:을|를|은|는|이|가|에|에서|으로|로|까지|부터|도|만|과|와|씩|간|이내|이상|이하|미만|초과)?(?![가-힣])))?")
 _LAW_IN_RE = re.compile(r"「([^」]{2,40}(?:법|법률|시행령|시행규칙))」|([가-힣·\s]{2,30}?(?:법|법률)(?:\s*시행령|\s*시행규칙)?)(?=\s|이|가|의|을|를|에|$)")
 
 
@@ -3897,7 +3898,7 @@ def heuristic_plan(req: str) -> dict:
             plan.update(mode="compare", keyword=kw)
             plan["reasoning"].append(f"다른 공공기관 사례를 묻는 요청으로 판단 — 알리오에서 “{kw}” 규정 조회")
             return plan
-    bulk_kw = re.search(r"(모든|전체|일괄|모두|전\s*내규|명칭|부서명|직위|기관명|이름이\s*바뀌)", t)
+    bulk_kw = re.search(r"(모든|전체|일괄|모두|전\s*내규|(?:전|각)\s*(?:규정|규칙|내규)|(?:규정|내규)\s*전반|명칭|부서명|직위|기관명|이름이\s*바뀌)", t)
     if not bulk_kw and not re.search(r"(규정|규칙|지침|세칙|요령|정관|기준|매뉴얼|제\s*\d+\s*조)", t):
         mb = _BULK_RE.search(t)                # “경영지원팀을 경영관리팀으로 바꿔줘” — 특정 내규 없이 조직·직위명만 바꾸면 일괄 정비
         if mb and re.search(r"(팀|부|실|처|본부|단|센터|과|원장|사장|이사|위원회|위원장|관|국)$", mb.group(1).strip()):
@@ -3907,10 +3908,11 @@ def heuristic_plan(req: str) -> dict:
     am = _ARROW_RE.search(t)
     m = am or (_BULK_RE.search(tb) if bulk_kw else None)
     # 화살표만으로는 일괄 정비로 보지 않는다 — 내규명·조 번호를 적었거나 숫자를 바꾸는 요청(“14일 → 30일”)은 그 내규의 개정이다
-    _arrow_bulk = bool(am) and not bulk_kw and not re.search(r"\d", am.group(1) + am.group(2)) \
-        and not re.search(r"(규정|규칙|지침|세칙|요령|정관|기준|매뉴얼|제\s*\d+\s*조)", t)
+    _named_reg = bool(re.search(r"제\s*\d+\s*조", t)) or any(_nk(r["title"]) and _nk(r["title"]) in _nk(t) for r in all_regs())
+    _arrow_bulk = bool(am) and not bulk_kw and not re.search(r"\d", am.group(1) + am.group(2)) and not _named_reg
     if am and not bulk_kw and not _arrow_bulk and not re.search(r"\d", am.group(1) + am.group(2)):
-        plan["intent"] = t[:am.start()] + f"“{am.group(1)}”을 “{am.group(2)}”로 바꿔" + t[am.end():]   # 규칙 반영(낱말 바꾸기)이 알아듣는 꼴로
+        pre = t[:am.start()].rstrip(" “\"'「‘").rstrip()
+        plan["intent"] = (pre + " " if pre else "") + f"“{am.group(1)}”을 “{am.group(2)}”로 바꿔"   # 규칙 반영(낱말 바꾸기)이 알아듣는 꼴로
     if m and (bulk_kw or _arrow_bulk):
         _clean = lambda w: re.sub(r"\s*(?:명칭|이름|용어|표현|표기|단어|문구)$", "", w.strip()).strip()
         plan.update(mode="bulk", old=_clean(m.group(1)), new=_clean(m.group(2)))
@@ -4091,6 +4093,20 @@ _ADV_TAIL = re.compile(r"(?:인가요|이에요|예요|인지요|인지|나요|�
 _ADV_HA = re.compile(r"(?:하려면|하면|했는데|하는데|해서)$")          # “야근하면” → 야근(“겸하려면”은 두 글자가 안 남아 위 규칙으로)
 # 구어 용언 어미 — “가능해·계산해·포함되·결재하·임신한” → 가능·계산·포함·결재·임신(어간이 원문에 있을 때만 뗀다)
 _ADV_VERB = re.compile(r"(?:되는지|하는지|해야|하여|하고|하는|되는|하나|되나|해요|돼요|되요|된다|한다|해|한|할|되|된|될|돼|하)$")
+_EOJ = {"key": None, "set": frozenset()}
+
+
+def _verbal_stem(st: str) -> bool:
+    """“포함”·“계산”·“결재”처럼 원문에 “포함하/포함되…”로 시작하는 낱말이 있는 어간인지(권·기·제한 같은 명사 조각은 아니다)."""
+    regs = all_regs()
+    if _EOJ["key"] != id(regs):
+        ws = set()
+        for r in regs:
+            for a in r["articles"]:
+                if not a["deleted"]:
+                    ws.update(re.findall(r"[가-힣]{2,}", a["title"] + " " + a["body"]))
+        _EOJ.update(key=id(regs), set=frozenset(ws))
+    return any(w.startswith((st + "하", st + "되")) for w in _EOJ["set"])
 _ADV_AMT = re.compile(r"\d[\d,]*(?:\.\d+)?(?:만|천)?(?:원|일|개월|년|시간|회|명|퍼센트)?")
 _CORPUS = {"key": None, "txt": ""}
 
@@ -4106,7 +4122,8 @@ def _corpus_text() -> str:
 # 질의에 흔히 붙는 말 — 이 말이 들어간 조문이 없다고 “함께 다룬 조문 없음”으로 보지는 않는다
 _ADV_GENERIC = {"기간", "절차", "방법", "대상", "지급", "사용", "신청", "범위", "요건", "금액", "한도", "상한", "상한액", "시간",
                 "횟수", "일수", "서류", "내용", "처리", "적용", "제출", "승인", "허가", "직원", "임직원", "근무", "조건", "기한",
-                "얼마나", "며칠", "가능", "여부", "규정", "경우", "최대", "최소", "이상", "이하", "이내", "수준"}
+                "얼마나", "며칠", "가능", "여부", "규정", "경우", "최대", "최소", "이상", "이하", "이내", "수준",
+                "포함", "해당", "인정"}
 
 
 def _adv_query(q: str, user_syn=None):
@@ -4122,7 +4139,9 @@ def _adv_query(q: str, user_syn=None):
         w2 = _strip_josa(w2) if len(w2) > 2 else w2
         if len(w2) >= 3:
             st = _ADV_VERB.sub("", w2)
-            if len(st) >= 2 and st != w2 and st in corpus:
+            # 두 글자 이상 어미(되나·하는지)와 “하·되” 어미는 어간이 원문에 있으면 뗀다. “한·해·할·된·될”은 명사 끝(권한·기한·재해)과 헷갈려
+            # “어간+하/되”로 시작하는 낱말이 원문에 있을 때만 뗀다
+            if len(st) >= 2 and st != w2 and st in corpus and (len(w2) - len(st) >= 2 or w2[len(st):] in ("하", "되", "돼") or _verbal_stem(st)):
                 w2 = st
         if _ADV_AMT.fullmatch(w2):
             continue                                          # “70만원”·“3일” — 금액·일수는 원문 표기가 달라(700,000원) 낱말로 찾지 않는다
@@ -4134,7 +4153,7 @@ def _adv_query(q: str, user_syn=None):
     for w in words:
         parts = [w[i:i + 2] for i in range(0, len(w) - 1, 2)] if re.fullmatch(r"[가-힣]{4,}", w) else []
         parts = [p for p in parts if p in corpus and p not in _ADV_QSTOP]
-        syn = _syn(w) + [x for x in usyn.get(w, []) if re.sub(r"\s+", "", x) in corpus and x not in _syn(w)]   # 화면에서 더한 동의어
+        syn = _syn(w) + [x for x in usyn.get(w, []) + _ADV_SYN.get(w, []) if re.sub(r"\s+", "", x) in corpus and x not in _syn(w)]   # 화면에서 더한 동의어·자문용 구어
         if w not in corpus and not syn:
             miss.append(w)                                    # 원문에 그대로는 없는 말(“가족수당”) — 쪼갠 말로 찾아도 단정하지 않는다
         use = parts if parts and (w not in corpus or len(w) >= 4) else []

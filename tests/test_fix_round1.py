@@ -84,3 +84,28 @@ def test_import_reset_refuses_default_data_without_force(tmp_path, monkeypatch, 
     assert len(baks) == 1 and (base / baks[0] / "여비규정" / "text.txt").exists()   # 지우지 않고 옮겨 둠
     assert any(p.startswith("regulations_manifest.json.backup-") for p in os.listdir(base))
     assert len(json.loads((base / "regulations_manifest.json").read_text(encoding="utf-8"))) == 7
+
+
+def test_review_regressions_server(ra):
+    import re
+    f = lambda t: [re.sub(r"\s+", "", x) for x in re.findall(ra._REQ_ART, t)]
+    assert f("사택관리규칙 제6조의3 일반사택 확보 조항 삭제") == ["제6조의3"]
+    assert f("복무규정 시행세칙 제4조의2 시간외근무 수당") == ["제4조의2"]
+    # 범위어·조직명 속 ‘정관·기준’은 내규명이 아니다 — 일괄 정비
+    for q in ("전 규정에서 기획운영본부 → 경영기획본부", "각 규정의 기획운영본부 → 경영기획본부", "재정관리팀 → 경영관리팀"):
+        p = ra.heuristic_plan(q)
+        assert p["mode"] == "bulk", (q, p)
+    p = ra.heuristic_plan("1.기획운영본부 → 경영기획본부")
+    assert p["mode"] == "bulk" and p["old"] == "기획운영본부"
+    # intent 고쳐 쓰기에 따옴표가 겹치지 않는다
+    p = ra.heuristic_plan("여비규정의 ‘여비’→‘출장비’로 바꿔")
+    assert p["mode"] == "amend" and "“여비”을 “출장비”로 바꿔" in p["intent"] and "““" not in p["intent"] and "‘“" not in p["intent"]
+    # 서버 인용 정정 — “규정 제25조의 이행관리책임자는 제30조제3항”의 제30조는 같은 내규
+    t = "② 규정 제25조의 이행관리책임자는 제30조제3항에 따라 분류된 사항을 관리한다."
+    out, n = ra.retarget_refs(t, {"30": "31"})
+    assert n == 1 and "제31조제3항" in out
+    # 자문 어간 떼기는 명사(결재권한·신청기한·출입제한)를 자르지 않는다
+    for q, keep in (("결재권한은 누구에게?", "결재권한"), ("출장 신청기한은?", "신청기한"), ("출입제한 구역은?", "출입제한")):
+        assert keep in ra._adv_query(q)[1], q
+    # 자문용 구어 동의어는 개정 대상 고르기(유사 검색)에 섞이지 않는다
+    assert "보관" not in ra._SYN and "보유" in ra._ADV_SYN["보관"]
