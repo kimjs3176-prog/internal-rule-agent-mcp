@@ -6,7 +6,7 @@
 무엇을 보나
     1. 기관명·약칭·기관장 등 기본 항목이 비었거나 기본값(○○기관)인지
     2. 근거 규칙(rules_name, 예: 「내규관리규칙」)이 들여온 내규에 실제로 있는지
-    3. 점검·심의·절차의 근거 조항(lint_refs·review_criteria.ref·procedure 의 ref)이 그 규칙에 실제로 있는지
+    3. 점검·심의·절차·문서의 근거 조항(lint_refs·doc_refs·review_criteria.ref·procedure 의 ref)이 그 규칙에 실제로 있는지
        — 다른 기관 프로필을 베껴 쓰면 조 번호가 남의 규칙을 가리키기 쉽다. 없는 조항은 고치거나 빈칸("")으로 둔다(빈칸이면 화면에 근거를 적지 않는다)
     4. 기관명·약칭이 들여온 내규 글에 나오는지(프로필을 다른 기관 것으로 둔 채 쓰는 실수)
     5. 옛 명칭(stale_terms)이 아직 몇 곳에 남았는지(건강검진에서 짚을 곳)
@@ -30,6 +30,8 @@ def _refs(org: dict) -> list:
     out = []
     lr = org.get("lint_refs") if isinstance(org.get("lint_refs"), dict) else {}
     out += [(f"lint_refs.{k}", v) for k, v in lr.items() if v]
+    dr = org.get("doc_refs") if isinstance(org.get("doc_refs"), dict) else {}
+    out += [(f"doc_refs.{k}", v) for k, v in dr.items() if v]          # 문서 문장의 근거 조항(입안·심의·사전예고·의견수렴 …)
     out += [(f"review_criteria[{c.get('id')}]", c.get("ref")) for c in org.get("review_criteria") or [] if c.get("ref")]
     pr = org.get("procedure") or {}
     out += [(f"procedure.questions[{q.get('k')}]", q.get("ref")) for q in pr.get("questions") or [] if q.get("ref")]

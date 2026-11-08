@@ -111,6 +111,7 @@ _ORG_DEFAULT = {
     "notice_days": 20, "staff_days": 7, "stale_terms": [], "stale_words": [],
     "drafting_rules": [], "rules_summary": [], "review_criteria": [],
     "procedure": {"questions": [], "steps": []},
+    "doc_refs": {},                     # 문서 문장에 붙이는 근거 조항(입안·심의·사전예고·의견수렴 등) — 비면 근거 문구를 뺀다
 }
 
 
@@ -151,6 +152,10 @@ def _check_org(org: dict) -> dict:
         if not isinstance(org.get(k), list):
             org[k] = []
     org["rules_summary"] = [x for x in org["rules_summary"] if isinstance(x, (list, tuple)) and len(x) == 2]
+    dr = org.get("doc_refs") if isinstance(org.get("doc_refs"), dict) else {}
+    org["doc_refs"] = {str(k): v.strip() for k, v in dr.items() if isinstance(v, str) and v.strip()}
+    if len(org["doc_refs"]) != len(dr):
+        warn("doc_refs 에서 문자열이 아닌 값을 뺐습니다.")
     rc = org.get("review_criteria") if isinstance(org.get("review_criteria"), list) else []
     org["review_criteria"] = [c for c in rc if isinstance(c, dict) and c.get("id") and c.get("t")]
     if len(org["review_criteria"]) != len(rc):

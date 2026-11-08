@@ -1413,3 +1413,23 @@ test('현행 값 모드 재검토: 열쇠말 느슨한 일치·내규명 열쇠�
   r = c.raRuleApply(A, '감사결과 통보 60일을 30일로');
   assert.equal(r.n, 1, A.valNote); assert.equal(A.changes.map(x => x.no).join(','), '24');
 });
+
+test('문서 근거 조항은 기관 프로필(doc_refs)에서만 — 다른 기관 문서에 농진원 조 번호가 박히지 않는다(ROB-1)', () => {
+  const c = load();
+  const build = () => { vm.runInContext(`_raArts={slug:'여비규정',title:'여비규정',articles:[{no:'1',title:'목적',body:'이 규정은 여비를 정한다.'},{no:'7',title:'일비',body:'일비는 25,000원으로 한다.'}],appendix:[]};
+    Object.assign(RA.amend,{slug:'여비규정',title:'여비규정',sel:{'7':true},changes:[{type:'modify',no:'7',title:'일비',body:'일비는 30,000원으로 한다.',why:''}],appx:[],purpose:'일비 조정',addenda:'이 규정은 발령한 날부터 시행한다.'});`, c);
+    return JSON.stringify(c.raDocsBuild('amend')); };
+  // 농진원 프로필: 지금까지와 같은 근거(제14조·제16조·제15조의3·제15조의4)
+  const koat = build();
+  assert.ok(/「내규관리규칙」 제14조\(입안\)·제16조\(내규심의\)/.test(koat) && koat.includes('제15조의4'), koat.slice(0, 300));
+  // 가상 기관 프로필: 자기 규칙에 있는 조(제5조·제7조·제6조)만, 없는 조는 근거 문구째 빠진다
+  const po = JSON.parse(fs.readFileSync(path.join(root, 'samples/public_org/org_config.json'), 'utf8'));
+  c.__setOrg(Object.assign({}, po, { head: po.head, reg_word: po.reg_word || '내규' }));
+  const t = build();
+  assert.ok(!/제1[4-7]조|제3조의2|제15조의/.test(t), (t.match(/.{30}제1[4-7]조.{20}/) || [''])[0]);
+  assert.ok(t.includes('「내규관리규칙」 제5조(제정·개정의 요청)·제7조(심의)'));
+  // 근거 조항이 하나도 없는 기관: 근거 문구를 통째로 뺀다
+  c.__setOrg(Object.assign({}, po, { doc_refs: {} }));
+  assert.equal(c.raRefP('notice'), ''); assert.equal(c.raRefBy('staff'), '');
+  assert.ok(!/「내규관리규칙」 제/.test(build()));
+});
