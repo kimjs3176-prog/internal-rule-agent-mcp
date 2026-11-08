@@ -7,6 +7,8 @@
       regulations/<규정명>/index.html·text.txt 와 regulations_manifest.json 을 만든다.
     · 파일명이 규정명이 된다. "인사규정(2025년도 1월 일부개정).hwpx" 처럼 괄호 안은 개정 정보로 쓴다.
     · --reset 을 주면 기존 regulations/ 와 매니페스트를 비우고 새로 만든다(다른 기관 최초 설정).
+      지우는 대신 옆에 “.backup-날짜시각” 폴더로 옮겨 둔다. 저장소 기본 데이터(REG_DIR 미지정)를 비우려면 --force 가 더 필요하다
+      — Windows에서 export 줄이 실패한 채 붙여 넣어도 기본 내규 126건이 지워지지 않게.
     · 등록 후 의미 검색을 쓰려면 scripts/build_embeddings.py 로 색인을 다시 만든다(선택).
 """
 from __future__ import annotations
@@ -16,6 +18,7 @@ import os
 import re
 import shutil
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import reg_import as ri  # noqa: E402
@@ -33,6 +36,7 @@ def main(argv=None):
     ap.add_argument("folder", help="내규 파일이 있는 폴더")
     ap.add_argument("--reset", action="store_true", help="기존 내규 데이터를 지우고 새로 만든다")
     ap.add_argument("--dry-run", action="store_true", help="변환만 시험하고 저장하지 않는다")
+    ap.add_argument("--force", action="store_true", help="REG_DIR 없이(저장소 기본 데이터에) --reset 할 때 필요")
     a = ap.parse_args(argv)
     if not os.path.isdir(a.folder):
         ap.error(f"폴더가 없습니다: {a.folder}")
@@ -42,7 +46,29 @@ def main(argv=None):
         print("등록할 파일이 없습니다(지원 형식: " + ", ".join(sorted(ri.ALLOWED_EXT)) + ")")
         return 1
     if a.reset and not a.dry_run:
-        shutil.rmtree(ri.REG_DIR, ignore_errors=True)
+        norm = lambda x: os.path.normcase(os.path.realpath(os.path.normpath(os.path.abspath(x))))
+        reg_dir = os.path.normpath(os.path.abspath(ri.REG_DIR))      # 끝 “/”(Windows의 대체 구분자 포함)를 없앤다 — 백업 경로가 폴더 안쪽이 되지 않게
+        same = norm(reg_dir) == norm(os.path.join(ri.BASE_DIR, "regulations"))
+        if same and not a.force:
+            n = len(ri.load_manifest())
+            print(f"멈춤: 저장소의 기본 내규 데이터({n}건, {ri.REG_DIR})를 비우려 합니다.\n"
+                  "  다른 기관 시험이면 REG_DIR·REG_MANIFEST 환경변수로 별도 폴더를 지정하세요(구동안내서 ‘모의데이터 안내’).\n"
+                  "  Windows PowerShell: $env:REG_DIR=\"po\\regulations\"; $env:REG_MANIFEST=\"po\\manifest.json\"\n"
+                  "  정말 기본 데이터를 바꾸려면 --force 를 함께 주세요(기존 데이터는 백업 폴더로 옮깁니다).")
+            return 3
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        while os.path.exists(f"{reg_dir}.backup-{stamp}"):
+            stamp += "x"
+        if os.path.isdir(reg_dir) and os.listdir(reg_dir):
+            bak = f"{reg_dir}.backup-{stamp}"
+            try:
+                shutil.move(reg_dir, bak)
+            except OSError as e:
+                print(f"멈춤: 기존 내규 폴더를 백업으로 옮기지 못했습니다({e}). 데이터는 그대로입니다.")
+                return 3
+            print(f"기존 내규 폴더를 옮겨 두었습니다: {bak}")
+        if os.path.isfile(ri.REG_MANIFEST_PATH):
+            shutil.copy2(ri.REG_MANIFEST_PATH, f"{ri.REG_MANIFEST_PATH}.backup-{stamp}")
         os.makedirs(ri.REG_DIR, exist_ok=True)
         man = []
     else:

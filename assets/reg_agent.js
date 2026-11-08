@@ -453,6 +453,7 @@ async function raWizAuto(mode){
   const i=raWizStep(mode);
   if(mode==='enact'){ const E=RA.enact;
     if(i===2&&!E.draft&&String(E.title||E.purpose||'').trim()&&raWizAutoOnce('enDraft|'+raBasis('enact'))){
+      if(!E.alioPre) raEnactAlioPre();                                  // 단계 막대로 바로 왔으면 여기서 찾기 시작(아래에서 끝나기를 기다린다)
       if(E.alioPre&&E.alioPre.st==='run') await new Promise(r=>{ const t=setInterval(()=>{ if(!E.alioPre||E.alioPre.st!=='run'){ clearInterval(t); r(); } },300); setTimeout(()=>{ clearInterval(t); r(); },20000); });
       await raEnactDraft(); }
     else if(i===3&&E.draft&&!(E.lint&&E.review)&&raWizAutoOnce('enChk|'+String(E.draft.text||'').length+'|'+String(E.draft.text||'').slice(0,80))) raRunChecks('enact');
@@ -485,7 +486,7 @@ function raEnactView(){
   const E=RA.enact;
   const cats=['규정','규칙','시행세칙','지침','요령','기준','예규'];
   const s1=`<div class="ra-grid">`+
-    `<label class="ra-f"><span>내규명</span>${raIn('enact.title',E.title,'예) 업무용 드론 운영지침','onchange="raEnactAlioPre()"')}</label>`+
+    `<label class="ra-f"><span>내규명</span>${raIn('enact.title',E.title,'예) 업무용 드론 운영지침')}</label>`+
     `<label class="ra-f"><span>종류</span><select class="ra-in" onchange="raSet('enact.category',this.value)">${cats.map(c=>`<option${E.category===c?' selected':''}>${c}</option>`).join('')}</select></label>`+
     `<label class="ra-f"><span>소관부서</span>${raIn('enact.dept',E.dept,'예) 경영지원팀')}</label>`+
     `<label class="ra-f"><span>시행일</span>${raIn('enact.effective',E.effective,'비우면 “발령한 날”')}</label></div>`+
@@ -975,7 +976,9 @@ function raTransAdd(){
   A.addenda=cur+`\n제${n}조${tr}`; raDirty('amend'); _raSave(); raRerender('amend');
   _toast('부칙에 경과조치를 넣었습니다. 문구를 사안에 맞게 다듬으세요.',4500);
 }
-function raAmendSrc(v){ const A=RA.amend; if(A.src===v) return; const m=raAmendWorkMsg(); if(m&&!confirm(m)){ raRerender('amend'); return; } raGenBump('amend'); A.src=v; if(v==='reg'){ A.pasted=false; } else { A.slug=''; } _raArts=null; Object.assign(A,{title:'',sel:{},selx:{},changes:[],appx:[],mv:{},impact:null,lint:null,review:null,nota:null,moves:'',ab:null}); _raSave(); raRerender('amend'); }
+function raAmendSrc(v){ const A=RA.amend; if(A.src===v) return; const m=raAmendWorkMsg(); if(m&&!confirm(m)){ raRerender('amend'); return; } raGenBump('amend'); raAmendFresh({src:v, pasteText:A.pasteText}); _raArts=null; _raSave(); raRerender('amend'); }
+// 다른 내규·원문으로 바꿀 때 개정 작업을 통째로 새로 만든다 — 앞 내규의 개정 의도·시행일·참고 자료·점검 결과가 새 내규에 남아 저절로 적용되지 않게
+function raAmendFresh(extra){ const A=RA.amend; RA.amend=Object.assign(_raBlank().amend, {abbr:A.abbr, lawStyle:A.lawStyle}, extra||{}); return RA.amend; }
 async function raPasteLoad(restore){
   const A=RA.amend; const t=restore?A.pasteText:((document.getElementById('raPasteText')||{}).value||A.pasteText);
   if(!t.trim()){ _toast('원문을 붙여 넣으세요.'); return; }
@@ -991,7 +994,8 @@ async function raPasteLoad(restore){
   const ttl=((document.getElementById('raPasteTitle')||{}).value||'').trim();
   if(!same) A.title=ttl&&ttl!==A.title?ttl:((d.preamble||'').split('\n')[0].trim().slice(0,40)||ttl||'붙여넣은 규정');
   _raArts={title:A.title, revision:'붙여넣은 원문', articles:d.articles, pasted:true};
-  if(!same){ raGenBump('amend'); Object.assign(A,{pasted:true,slug:'',sel:{},selx:{},changes:[],appx:[],mv:{},impact:null,lint:null,review:null,nota:null,moves:'',purpose:'',main:[],addenda:'',notes:[],ab:null}); }
+  if(!same){ raGenBump('amend'); raAmendFresh(Object.assign({src:'paste', pasted:true, slug:'', title:A.title, pasteText:t, pasteLoaded:t},
+    A.pasted?{intent:A.intent||'', effective:A.effective||'', refText:A.refText||''}:{})); }   // 같은 붙여넣기 작업의 원문 고침이면 적어 둔 의도·시행일·참고 자료는 그대로
   _raSave(); raRerender('amend');
 }
 function raRegPayload(){ const A=RA.amend; return A.pasted?{text:A.pasteLoaded||A.pasteText, reg:A.title}:{slug:A.slug, reg:A.title}; }
@@ -1000,7 +1004,7 @@ async function raPickReg(){
   const regs=await raCatalog(); const nk=s=>s.replace(/[\s·_]/g,'');
   const r=regs.find(x=>nk(x.title)===nk(v))||regs.find(x=>nk(x.title).includes(nk(v)));
   if(!r){ _toast('내규를 찾지 못했습니다. 목록에서 골라 주세요.'); return; }
-  if(RA.amend.slug!==r.slug){ const m=raAmendWorkMsg(); if(m&&!confirm(m)) return; raGenBump('amend'); Object.assign(RA.amend,{step:0,basis:'',src:'reg',pasted:false,slug:r.slug,title:r.title,sel:{},selx:{},changes:[],appx:[],mv:{},impact:null,lint:null,review:null,nota:null,moves:'',ab:null,purpose:'',main:[],addenda:'',notes:[],valNote:''}); }
+  if(RA.amend.slug!==r.slug){ const m=raAmendWorkMsg(); if(m&&!confirm(m)) return; raGenBump('amend'); raAmendFresh({step:0, src:'reg', pasted:false, slug:r.slug, title:r.title}); }
   _raArts=null; _raSave(); raLoadArts(r.slug);
 }
 async function raLoadArts(slug, quiet){
@@ -1161,12 +1165,42 @@ function raSenPreviewX(x){ return raXChanged(x)?`<div class="ra-sen">${raIc('doc
 //    조문은 그 낱말 바로 뒤(30자 안)의 같은 단위 숫자만 바꾼다. 확정할 수 없으면 손대지 않는다(사용자가 확인·수정). ──
 const RA_VQ_UNIT='만\\s*원|천\\s*원|원|일|개월|년|시간|퍼센트|%|회';
 // “일수·금액·기간·한도”처럼 그 자체로는 무엇인지 모르는 말은 앞 낱말(“연차휴가 일수” → 연차휴가)을 열쇠로 쓴다
-const RA_VQ_GENERIC=/^(?:일수|금액|기간|한도|횟수|시간|비율|요율|액수|상한액?|하한액?|기준액?|단가|수당액|지급액|지급률|일|액|수)$/;
+const RA_VQ_GENERIC=/^(?:일수|금액|기간|한도|횟수|시간|비율|요율|액수|상한액?|하한액?|기준액?|단가|수당액|지급액|지급률|일|액|수|이상|이하|미만|초과|이내|매월|매년|연간|현행)$/;
+// 금액·기간 한 덩어리 — “2만5천원”·“25,000원”·“3만 원”·“14일”. 앞이 숫자·쉼표면(“25,000”의 “000”) 잡지 않는다
+const RA_VQ_AMT=`(?<![\\d,.])(?:\\d[\\d,]*(?:\\.\\d+)?\\s*만\\s*\\d[\\d,]*\\s*천\\s*원|\\d[\\d,]*(?:\\.\\d+)?\\s*(?:${RA_VQ_UNIT}))`;
+function raVqAmt(s){ const t=String(s||'').replace(/\s/g,'');
+  const m=t.match(/^(\d[\d,]*(?:\.\d+)?)만(\d[\d,]*)천원$/); if(m) return parseFloat(m[1].replace(/,/g,''))*10000+parseFloat(m[2].replace(/,/g,''))*1000;
+  const k=t.match(/^(\d[\d,]*(?:\.\d+)?)(.*)$/); return k?raVqNum(k[1],k[2]):NaN; }
+function raVqUnitOf(s){ const u=String(s||'').replace(/[\d,.\s]/g,''); return /원$/.test(u)?'원':u==='퍼센트'?'%':u; }
+function raVqFmtAmt(v, src){                      // 원래 덩어리(“2만5천원”·“25,000원”)의 표기를 따라 새 값을 쓴다
+  const s=String(src||'').replace(/\s/g,'');
+  if(/만\d[\d,]*천원$/.test(s)) return v%10000===0?`${v/10000}만원`:v%1000===0&&v>10000?`${Math.floor(v/10000)}만${(v%10000)/1000}천원`:v.toLocaleString('en-US')+'원';
+  const k=String(src).match(/^(\d[\d,]*(?:\.\d+)?)\s*(.*)$/); return k?raVqFmt(v,k[1],k[2]):String(v);
+}
+// 열쇠말 끝 조사 떼기 — 을·를·은·는·의는 떼고, 이·가는 원문에 그대로 있으면 둔다(“연차휴가”·“병가”가 “연차휴”·“병”이 되지 않게)
+function raVqKeyWord(w){ w=String(w||''); if(/(?:을|를|은|는|의)$/.test(w)) return w.slice(0,-1);
+  if(/(?:이|가)$/.test(w)&&w.length>2){ const all=_raArts?raArr(_raArts.articles).map(a=>String(a.title||'')+String(a.body||'')).join('').replace(/\s+/g,''):'';
+    if(all&&!all.includes(w)&&all.includes(w.slice(0,-1))) return w.slice(0,-1); }
+  return w; }
+// 요청문의 다른 낱말(“4시간 미만”·“출산”) — 한 조 안에 같은 현행 값이 여럿일 때 어느 것인지 가리는 데 쓴다
+function raVqCtxWords(t, a, b){
+  return String(t||'').replace(a,' ').replace(b,' ').replace(/제\s*\d+\s*조(?:\s*의\s*\d+)?/g,' ')
+    .split(/[^가-힣A-Za-z0-9]+/).map(w=>w.replace(/(?:에서|으로|을|를|은|는|이|가|의|에|로|도)$/,''))
+    .filter(w=>w.length>=2&&!/(?:규정|규칙|지침|세칙|요령|기준)$/.test(w)&&!RA_VQ_GENERIC.test(w)&&!/(?:줘|해|요|자|고|게|서)$/.test(w)&&!/^(?:올려|내려|바꿔|늘려|줄여|변경|조정|인상|인하|현행|현재|지금)/.test(w)); }
 function raVqReq(t){
-  const m=String(t||'').match(new RegExp(`(?:([가-힣A-Za-z·]{2,14})\\s+)?([가-힣A-Za-z·]{1,14})\\s*(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${RA_VQ_UNIT})\\s*(?:으로|로)`));
+  t=String(t||'');
+  // ① 현행 값을 함께 적은 꼴 — “여비 2만원을 3만원으로”·“14일에서 30일로”·“2만5천원 → 3만원”: 그 값과 같은 곳만 바꾼다(다른 숫자를 건드리지 않게)
+  const mo=t.match(new RegExp(`(?:([가-힣A-Za-z·]{2,14})\\s*(?:을|를|은|는|이|가|의)?\\s+)?(?:현행\\s*)?(${RA_VQ_AMT})\\s*(?:이내)?\\s*(?:(?:에서|을|를|이던\\s*것을|인\\s*것을)\\s*(${RA_VQ_AMT})\\s*(?:으로|로)|(?:→|->|⇒|➔)\\s*(${RA_VQ_AMT}))`));
+  if(mo){ const nw=mo[3]||mo[4], ou=raVqUnitOf(mo[2]), nu=raVqUnitOf(nw), old=raVqAmt(mo[2]), val=raVqAmt(nw);
+    if(ou===nu&&isFinite(old)&&isFinite(val)&&old!==val){
+      let key=raVqKeyWord(mo[1]);
+      if(key.length<2||RA_VQ_GENERIC.test(key)||/^(?:제\d+조|조문|내규|규정|현행|지급액|금액)$/.test(key)) key='';
+      return {key:key||mo[2].replace(/\s/g,''), val, unit:nu, old, oldStr:mo[2].replace(/\s+/g,''), keyless:!key, ctx:raVqCtxWords(t, mo[2], nw)}; } }
+  const m=t.match(new RegExp(`(?:([가-힣A-Za-z·]{2,14})\\s+)?([가-힣A-Za-z·]{1,14})\\s*(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${RA_VQ_UNIT})\\s*(?:으로|로)`));
   if(!m) return null;
   const strip=w=>String(w||'').replace(/(을|를|은|는|이|가|의)$/,'');
   let key=strip(m[2]);
+  if(new RegExp(`^(?:${RA_VQ_UNIT})(?:에서|이내|을|를)$`).test(key.replace(/\s/g,''))) return null;   // “일에서”·“원에서” — 단위 낱말은 찾을 말이 아니다
   if(RA_VQ_GENERIC.test(key)){ const pv=String(m[1]||'').replace(/의$/,''); if(!pv||pv.length<2||/^(?:제\d+조|조문|내규|규정)$/.test(pv)) return null; key=pv; }
   if(key.length<2) return null;
   let n=parseFloat(m[3].replace(/,/g,'')), u=m[4].replace(/\s/g,'');
@@ -1182,6 +1216,18 @@ function raVqFmt(v, num, unit){                 // 원래 표기(2만원·25,000
 }
 const raVqKeyRe=k=>k.split('').map(ch=>ch.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('\\s*');
 function raVqInText(body, q){
+  if(q.old!=null){                                                // 현행 값을 적었으면 그 값과 같은 곳만(단위가 같은 것만) 바꾼다
+    const src=String(body), hits=[]; let m; const re=new RegExp(RA_VQ_AMT,'g');
+    while((m=re.exec(src))){ if(raVqUnitOf(m[0])===q.unit&&raVqAmt(m[0])===q.old) hits.push({i:m.index, s:m[0]}); }
+    let pick=hits;
+    if(hits.length>1){                                            // 같은 조 안에 여럿(“4시간 미만 … 1만원”·“차량 이용 … 1만원을 감하여”) — 앞 구절이 요청문 낱말과 맞는 것만
+      const ctx=raArr(q.ctx), sc=hits.map(h=>{ const pre=src.slice(Math.max(0,h.i-40),h.i), cut=Math.max(pre.lastIndexOf(','),pre.lastIndexOf('.'),pre.lastIndexOf('\n'),pre.lastIndexOf('，'));
+        const seg=(cut>=0?pre.slice(cut+1):pre).replace(/\s+/g,''); return ctx.filter(w=>seg.includes(w.replace(/\s+/g,''))).length; });
+      const best=Math.max(...sc); pick=best>0?hits.filter((h,k)=>sc[k]===best):[];
+      if(!pick.length||pick.length===hits.length) return {body:src, n:0, olds:[], multi:hits.length}; }
+    let out=src; [...pick].reverse().forEach(h=>{ out=out.slice(0,h.i)+raVqFmtAmt(q.val,h.s)+out.slice(h.i+h.s.length); });
+    return {body:out, n:pick.length, olds:pick.map(h=>h.s.replace(/\s+/g,''))};
+  }
   const ure=q.unit==='원'?'(?:만\\s*원|천\\s*원|원)':q.unit==='%'?'(?:%|퍼센트)':q.unit;
   const re=new RegExp(`(${raVqKeyRe(q.key)}[^\\n.。]{0,30}?)(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${ure})`,'g');
   let n=0; const olds=[];
@@ -1200,6 +1246,7 @@ function raVqInTable(body, q){
   const h=idx.findIndex(i=>/^구\s*분$/.test(T(i))); if(h<0) return null;
   const isRow=x=>/^제\s*\d+\s*호(?:\s*[가-힣]\s*목)?$/.test(x);
   const r0=idx.findIndex((i,k)=>k>h&&isRow(T(i))); if(r0<0) return null;
+  if(q.keyless) return null;                                      // 열 이름 없이 값만 적었으면 표의 열을 정할 수 없다
   const merge=ks=>{ const out=[]; ks.forEach(i=>{ const x=T(i), pv=out[out.length-1];
     const open=pv&&((pv.t.match(/[(（]/g)||[]).length>(pv.t.match(/[)）]/g)||[]).length);
     if(pv&&(/^[(（]/.test(x)||open)){ pv.t+=' '+x; pv.ix.push(i); } else out.push({t:x, ix:[i]}); }); return out; };
@@ -1215,18 +1262,86 @@ function raVqInTable(body, q){
   const c=cols[0].c; if(q.unit==='원'&&!/단\s*위\s*[:：]?\s*원/.test(body)&&!rows.some(r=>/원/.test(r.cells[c].t))) return null;
   let n=0; const olds=[], where=[];
   rows.forEach(r=>{ const cell=r.cells[c], li=cell.ix[0], m=T(li).match(/^(\d[\d,]*(?:\.\d+)?)\s*(원)?$/); if(!m) return;
-    const old=raVqNum(m[1],m[2]||''); if(old===q.val) return;
+    const old=raVqNum(m[1],m[2]||''); if(old===q.val||(q.old!=null&&old!==q.old)) return;      // 현행 값을 적었으면 그 값인 칸만
     lines[li]=lines[li].replace(m[1], raVqFmt(q.val,m[1],'')); n++; olds.push(m[1]); where.push(r.label); });
   return {body:lines.join('\n'), n, olds, where, col:hdr[c].t};
 }
 // 개정 작업(A)의 수정안·별표에 지시문의 수치를 넣는다 → {q, n, notes[]} (바꾼 곳이 없으면 n=0)
+// ── 현행 값을 적은 수치 지시(“여비 2만원을 3만원으로”·“정산 14일에서 30일로”) — 바꿀 곳을 하나로 정할 수 있을 때만 바꾼다 ──
+//  ① 범위: 요청문에 조를 적었으면 그 조(와 그 조의 별표), 아니면 내규 전체(에이전트가 유사 검색으로 고른 조에 매이지 않는다)
+//  ② 후보: 현행 값과 같은 금액·일수. 조를 적지 않았으면 적은 말(“여비”)이 그 문장이나 조 제목에 있는 곳만. 표는 열 이름이 맞는 열 하나를 한 후보로
+//  ③ 후보가 여럿이면 요청문의 다른 낱말(“국내”·“4시간 미만”)이 앞 구절·조 제목에 가장 많은 한 곳만. 가릴 수 없으면 바꾸지 않고 후보를 알린다
+function raVqOcc(body, q){ const src=String(body||''), out=[]; let m; const re=new RegExp(RA_VQ_AMT,'g');
+  while((m=re.exec(src))){ if(raVqUnitOf(m[0])===q.unit&&raVqAmt(m[0])===q.old) out.push({i:m.index, s:m[0]}); } return out; }
+function raVqSentence(body, i){ const s=String(body||''); let a=i; while(a>0&&!/[.\n。]/.test(s[a-1])) a--; let b=i; while(b<s.length&&!/[.\n。]/.test(s[b])) b++; return s.slice(a,b); }
+// 값의 앞 구절과 뒤 구절(쉼표·마침표까지) — “이의신청을 받은 날부터 7일 이내에 결정”처럼 뜻을 정하는 말이 값 뒤에 오기도 한다
+function raVqPre(body, i, len){ const src=String(body||''), pre=src.slice(Math.max(0,i-60),i), cut=Math.max(pre.lastIndexOf(','),pre.lastIndexOf('.'),pre.lastIndexOf('\n'),pre.lastIndexOf('，'));
+  const post=src.slice(i+(len||0), i+(len||0)+24), pc=post.search(/[,.\n，]/); return (cut>=0?pre.slice(cut+1):pre)+' '+(pc>=0?post.slice(0,pc):post); }
+// 그 말이 있는지 — 띄어쓰기를 무시하고, 네 글자 이상이면 사이에 네 글자까지 끼어도(“연차휴가” ↔ “연차유급휴가”) 인정
+function raVqKeyNear(text, key){ const t=String(text||'').replace(/\s+/g,''), k=String(key||'').replace(/\s+/g,''); if(!k) return false; if(t.includes(k)) return true;
+  if(k.length<4) return false; const e=x=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return new RegExp(e(k.slice(0,2))+'[가-힣]{1,4}'+e(k.slice(2))).test(t); }
+function raVqOldApply(A, text, q){
+  A.vqLog=null; if(!_raArts) return {q, n:0, notes:[]};
+  const named=raNamedArts(text), regT=String(_raArts.title||A.title||'').replace(/\s+/g,''), key=String(q.key||'').replace(/\s+/g,'');
+  const keyless=q.keyless||(!!key&&regT.includes(key));            // 열쇠말이 내규명(“감사규정 60일을 …”)이면 무엇인지 적지 않은 것
+  const need=!named.length&&!keyless, cands=[], all=[];
+  raArr(_raArts.articles).forEach(a=>{ if(a.deleted||(named.length&&!named.includes(a.no))) return; const c=A.changes.find(x=>x.no===a.no); if(c&&c.type==='delete') return;
+    const body=c?c.body:a.body;
+    raVqOcc(body,q).forEach(h=>{ all.push(raLbl(a.no)); if(need&&!raVqKeyNear(a.title,q.key)&&!raVqKeyNear(raVqSentence(body,h.i),q.key)) return;
+      cands.push({isX:0, o:a, body, h, pre:raVqPre(body,h.i,h.s.length), title:a.title, lbl:raLbl(a.no), byTitle:need&&!raVqKeyNear(raVqSentence(body,h.i),q.key)}); }); });
+  raArr(_raArts.appendix).forEach(x=>{ if(named.length&&!raAppxCites(x.head).some(n=>named.includes(n))) return; const c=raArr(A.appx).find(y=>y.id===x.id); if(c&&c.type==='delete') return;
+    const body=c?c.body:x.body, t=!keyless?raVqInTable(body,q):null;
+    if(t&&t.n){ all.push(x.id); cands.push({isX:1, o:x, body, tab:t, pre:t.col, title:x.head, lbl:`${x.id} “${t.col}” 열`}); return; }
+    raVqOcc(body,q).forEach(h=>{ all.push(x.id); if(need&&!raVqKeyNear(x.head,q.key)&&!raVqKeyNear(raVqSentence(body,h.i),q.key)) return;
+      cands.push({isX:1, o:x, body, h, pre:raVqPre(body,h.i,h.s.length), title:x.head, lbl:x.id, byTitle:need&&!raVqKeyNear(raVqSentence(body,h.i),q.key)}); }); });
+  const oj=raJosa(q.oldStr,['이','가']);
+  if(!cands.length){
+    const where=[...new Set(all)];
+    A.valNote=where.length?`“${q.key}”${raJosa(q.key,['과','와'])} 현행 ${q.oldStr}${oj} 함께 있는 곳을 찾지 못해 바꾸지 않았습니다(현행 ${q.oldStr}${raJosa(q.oldStr,['은','는'])} ${raWhere(where)}에 있습니다). 조 번호를 적어 다시 요청하거나 직접 고치세요.`
+      :`${named.length?named.map(raLbl).join(', ')+'에':'이 '+RA_ORG.reg_word+'에'} 현행 ${q.oldStr}${oj} 없어 바꾸지 않았습니다. 현행 값을 확인해 다시 요청하세요.`;
+    return {q, n:0, notes:[], keyMiss:!!where.length}; }
+  let pick=cands;
+  // 무엇인지 적지 않고(“기간 2년을 …”) 조도 적지 않았으면 한 곳뿐이어도 요청문의 다른 말이 그 구절에 있어야 바꾼다
+  if(cands.length>1||(keyless&&!named.length)){
+    const ctx=raArr(q.ctx).map(w=>w.replace(/\s+/g,'')).filter(Boolean);
+    const sc=cands.map(c=>{ const seg=(String(c.pre)+' '+String(c.title||'')).replace(/\s+/g,''); return ctx.filter(w=>seg.includes(w)).length; });
+    const best=Math.max(...sc); pick=best>0?cands.filter((c,k)=>sc[k]===best):[];
+    if(pick.length!==1&&cands.length===1){
+      A.valNote=`현행 ${q.oldStr}${oj} ${cands[0].lbl}에 있지만 요청문의 말과 맞는지 알 수 없어 바꾸지 않았습니다. 조 번호나 항목 이름을 함께 적어 다시 요청하거나 직접 고치세요.`;
+      return {q, n:0, notes:[], ambiguous:[`${cands[0].lbl} ${q.oldStr}`]}; }
+    if(pick.length!==1){
+      const lst=cands.map(c=>c.lbl), ex=String((cands.find(c=>c.h)||{}).pre||'').replace(/\s+/g,' ').trim().split(' ').slice(-2).join(' ');
+      A.valNote=`현행 ${q.oldStr}${oj} ${cands.length}곳(${raWhere(lst)})에 있어 어느 것인지 정하지 않았습니다. 바꿀 곳의 앞뒤 말${ex?`(예: “${ex} ${q.oldStr}”)`:''}이나 조 번호를 함께 적어 다시 요청하거나 아래 칸에서 직접 고치세요.`;
+      return {q, n:0, notes:[], ambiguous:lst.map(l=>`${l} ${q.oldStr}`)}; } }
+  const c=pick[0], u=q.unit==='원'?'원':q.unit;
+  let olds, neu, body, note, info;
+  if(c.tab){ body=c.tab.body; olds=c.tab.olds.map(o=>o+u); neu=raVqFmt(q.val,c.tab.olds[0],'')+u;
+    note=`${c.o.id} 표 “${c.tab.col}” 열 ${c.tab.where.join('·')} ${[...new Set(c.tab.olds)].join('·')} → ${raVqFmt(q.val,c.tab.olds[0],'')}`; info={col:c.tab.col,where:c.tab.where.join('·'),old:[...new Set(olds)].join('·'),neu}; }
+  else { body=c.body.slice(0,c.h.i)+raVqFmtAmt(q.val,c.h.s)+c.body.slice(c.h.i+c.h.s.length); olds=[c.h.s.replace(/\s+/g,'')]; neu=raVqFmtAmt(q.val,c.h.s);
+    note=`${c.lbl} ${olds[0]} → ${neu}`; info={col:'',where:'',old:olds[0],neu}; }
+  let card;
+  if(c.isX){ A.appx=raArr(A.appx); A.selx=A.selx||{}; card=A.appx.find(y=>y.id===c.o.id);
+    if(!card){ card={type:'modify',id:c.o.id,head:c.o.head,body:c.o.body,why:''}; A.appx.push(card); A.selx[c.o.id]=true; }
+    card.why=`지시문의 현행 ${q.oldStr} 반영 — 확인하세요`; }
+  else { card=A.changes.find(y=>y.no===c.o.no);
+    if(!card){ card={type:'modify',no:c.o.no,title:c.o.title,body:c.o.body,why:`현행 ${q.oldStr}${oj} 있는 곳`}; A.changes.push(card); A.sel[c.o.no]=true; A.changes.sort((x,y)=>raCmp(x.no,y.no)); } }
+  card.body=body;
+  A.vqLog=[Object.assign({id:c.isX?c.o.id:c.o.no,isX:!!c.isX,key:q.key},info)];
+  A.valNote=`지시문대로 ${q.keyless?'':`“${q.key}” `}현행 ${q.oldStr}${raJosa(q.oldStr,['을','를'])} 바꿨습니다: ${note}${c.byTitle?`(조 제목 “${c.title}”에서 “${q.key}”${raJosa(q.key,['을','를'])} 찾아 고름)`:''}. 맞는지 확인하세요(다른 곳은 바꾸지 않았습니다${cands.length>1?` — 같은 값이 있는 다른 ${cands.length-1}곳은 요청문과 덜 맞아 그대로 둠`:''}).`;
+  const vs=q.unit==='원'?q.val.toLocaleString('en-US')+'원':q.val+q.unit, lc=vs.charCodeAt(vs.length-1)-0xAC00, jong=lc>=0&&lc<11172?lc%28:0;
+  if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose))
+    A.purpose=`${q.keyless?'':q.key+' '}${q.oldStr}${raJosa(q.oldStr,['을','를'])} ${vs}${jong===0||jong===8?'로':'으로'} 조정하려는 것임.`;
+  return {q, n:olds.length, notes:[note]};
+}
 function raVqApply(A, text){
   const q=raVqReq(text); if(!q) return null;
+  if(q.old!=null) return raVqOldApply(A, text, q);
   const plan=[];                                                  // [대상, 새 본문, 바꿀 현행 값들, 설명, 별표 여부, 보고서용 기록]
   A.vqLog=null;
-  A.changes.forEach(c=>{ if(c.type==='delete') return; const r=raVqInText(c.body,q); if(r.n){ const neu=raVqFmt(q.val,r.olds[0].replace(/[^\d,.]/g,''),r.olds[0].replace(/[\d,.\s]/g,'')); plan.push([c,r.body,r.olds,`${raLbl(c.no)} ${r.olds.join('·')} → ${neu}`,0,{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
+  const neuOf=o=>raVqFmt(q.val,o.replace(/[^\d,.]/g,''),o.replace(/[\d,.\s]/g,''));
+  A.changes.forEach(c=>{ if(c.type==='delete') return; const r=raVqInText(c.body,q); if(r.n){ const neu=neuOf(r.olds[0]); plan.push([c,r.body,r.olds,`${raLbl(c.no)} ${r.olds.join('·')} → ${neu}`,0,{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
   raArr(A.appx).forEach(x=>{ if(x.type==='delete') return; const t=raVqInTable(x.body,q), r=t&&t.n?t:raVqInText(x.body,q);
-    if(r.n){ const tb=t&&t.n, u=q.unit==='원'?'원':q.unit, neu=tb?raVqFmt(q.val,t.olds[0],'')+u:raVqFmt(q.val,r.olds[0].replace(/[^\d,.]/g,''),r.olds[0].replace(/[\d,.\s]/g,''));
+    if(r.n){ const tb=t&&t.n, u=q.unit==='원'?'원':q.unit, neu=tb?raVqFmt(q.val,t.olds[0],'')+u:neuOf(r.olds[0]);
       plan.push([x,r.body,tb?t.olds.map(o=>o+u):r.olds,tb?`${x.id} 표 “${t.col}” 열 ${t.where.join('·')} ${[...new Set(t.olds)].join('·')} → ${raVqFmt(q.val,t.olds[0],'')}`:`${x.id} ${r.olds.join('·')} → ${neu}`,1,
         tb?{col:t.col,where:t.where.join('·'),old:[...new Set(t.olds)].map(o=>o+u).join('·'),neu}:{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
   if(!plan.length) return {q, n:0, notes:[]};
@@ -1280,14 +1395,14 @@ function raRepJosa(text, a, b){
   return {s:out, n};
 }
 // 지시한 낱말이 담긴 조문·별표를 내규 전체에서 찾아 수정안 칸에 담는다(최대 30곳). 담은 것을 돌려줘 아무것도 못 바꾸면 되돌린다
-function raRuleEnsure(A, term){
-  const add={arts:[], xs:[]}; if(!_raArts||!term) return add;
-  const has=(x)=>String(x||'').includes(term);
+function raRuleEnsure(A, term, label){                            // term: 찾을 낱말, 또는 본문을 받아 참·거짓을 돌려주는 함수(label: 카드에 보일 말)
+  const add={arts:[], xs:[]}; if(!_raArts||!term) return add; const lb=label||(typeof term==='string'?term:'지시한 값');
+  const has=typeof term==='function'?(x)=>!!x&&term(String(x)):(x)=>String(x||'').includes(term);
   raArr(_raArts.articles).forEach(o=>{ if(add.arts.length+add.xs.length>=30||o.deleted||A.changes.some(c=>c.no===o.no)) return;
-    if(has(o.body)||has(o.title)){ const was=!!A.sel[o.no]; A.sel[o.no]=true; A.changes.push({type:'modify',no:o.no,title:o.title,body:o.body,why:`“${term}”이 들어 있어 함께 담음`}); add.arts.push([o.no,was]); } });
+    if(has(o.body)||has(o.title)){ const was=!!A.sel[o.no]; A.sel[o.no]=true; A.changes.push({type:'modify',no:o.no,title:o.title,body:o.body,why:`“${lb}”${raJosa(lb,['이','가'])} 들어 있어 함께 담음`}); add.arts.push([o.no,was]); } });
   A.appx=raArr(A.appx); A.selx=A.selx||{};
   raArr(_raArts.appendix).forEach(o=>{ if(add.arts.length+add.xs.length>=30||A.appx.some(x=>x.id===o.id)) return;
-    if(has(o.body)||has(o.head)){ const was=!!A.selx[o.id]; A.selx[o.id]=true; A.appx.push({type:'modify',id:o.id,head:o.head,body:o.body,why:`“${term}”이 들어 있어 함께 담음`}); add.xs.push([o.id,was]); } });
+    if(has(o.body)||has(o.head)){ const was=!!A.selx[o.id]; A.selx[o.id]=true; A.appx.push({type:'modify',id:o.id,head:o.head,body:o.body,why:`“${lb}”${raJosa(lb,['이','가'])} 들어 있어 함께 담음`}); add.xs.push([o.id,was]); } });
   A.changes.sort((x,y)=>raCmp(x.no,y.no)); return add;
 }
 function raRuleUndo(A, add){
@@ -1298,8 +1413,12 @@ function raRuleUndo(A, add){
 function raCiteHits(body, no){
   const m=String(no).match(/^(\d+)(?:의(\d+))?$/); if(!m) return [];
   const re=new RegExp(`제\\s*${m[1]}\\s*조${m[2]?`\\s*의\\s*${m[2]}`:'(?!\\s*의\\s*\\d)'}(?:\\s*제\\s*\\d+\\s*[항호])*`,'g'), t=String(body||''), out=[];
+  // 다른 법령의 조에 “및·또는”으로 이어진 조도 다른 법령의 조다(“「감염병예방법」 제24조 및 제25조”) — 이어짐을 보려고 모든 조 표기를 함께 훑는다
+  const all=/제\s*(\d+)\s*조(?:\s*의\s*\d+)?/g, ext=[]; let e=-1, g;
+  while((g=all.exec(t))){ const pv=t.slice(Math.max(0,g.index-24),g.index);
+    if(!RA_SELF_PRE.test(pv)&&(/」\s*$|(?:법|령|규칙|규정|정관|지침|세칙|요령|조례|협약|같은\s*법|동법)\s*$/.test(pv)||(e>=0&&RA_EXT_CONT.test(t.slice(e,g.index))))){ ext.push(g.index); e=g.index+g[0].length; } else e=-1; }
   let h; while((h=re.exec(t))){ const pre=t.slice(Math.max(0,h.index-14),h.index).replace(/\s+$/,'');
-    if(/[」』]$|(?:법|령|규칙|규정|정관|세칙|지침|요령|조례|협약|같은|동)$/.test(pre)) continue;    // 다른 법령·내규의 조
+    if((!RA_SELF_PRE.test(pre)&&/[」』]$|(?:법|령|규칙|규정|정관|세칙|지침|요령|조례|협약|같은|동)$/.test(pre))||ext.includes(h.index)) continue;    // 다른 법령·내규의 조
     if(/[0-9가-힣]$/.test(t.slice(Math.max(0,h.index-1),h.index))) continue;                   // “부칙제2조” 같은 붙은 말
     out.push({i:h.index, s:h[0]}); }
   return out;
@@ -1345,13 +1464,15 @@ function raRepApply(A, r){
 // 지시문 하나를 규칙으로 반영: ① “○○를 3만원으로”(수치) ② “A를 B로 바꿔”(낱말 — 내규 안 모든 곳) ③ “제N조 삭제”.
 // 사람이 놓치기 쉬운 곳(고르지 않은 조문·별표)까지 찾아 바꾸고, 애매하면(값이 여러 개) 바꾸지 않고 알린다
 // 지시문에 적은 조(“제15조의 …”) — 있으면 그 조(와 그 조의 별표)만 고친다
+// 요청문 속 조 번호 — “제8조의 14일”·“제17조의 2만원”·“제8조의 2항”의 ‘의’는 소유격이지 가지번호(제8조의14)가 아니다
+const RA_REQ_ART='제\\s*(\\d+)\\s*조(?:\\s*의\\s*(\\d+)(?![\\d,.]|\\s*(?:만\\s*원|천\\s*원|원|일|개월|년|시간|%|퍼센트|회|항|호|배|명|분|세)(?:을|를|은|는|이|가|에|에서|으로|로|까지|부터|도|만|과|와|씩|간|이내|이상|이하|미만|초과)?(?![가-힣])))?';
 function raNamedArts(t){ if(!_raArts) return []; const out=[];
-  String(t||'').replace(/제\s*(\d+)\s*조(?:\s*의\s*(\d+))?(?!\s*[^가-힣\s]{0,3}\s*삭제)/g,(x,a,b)=>{ const no=b?`${a}의${b}`:a; if(raOld(no)&&!out.includes(no)) out.push(no); return x; });
+  String(t||'').replace(new RegExp(RA_REQ_ART+'(?!\\s*[^가-힣\\s]{0,3}\\s*삭제)','g'),(x,a,b)=>{ const no=b?`${a}의${b}`:a; if(raOld(no)&&!out.includes(no)) out.push(no); return x; });
   return out; }
 function raRuleApply(A, text){
   const t=String(text||''), named=/삭제/.test(t)?[]:raNamedArts(t);
   if(raVqReq(t)){ let r=raVqApply(A,t);
-    if(r&&!r.n&&!r.ambiguous){
+    if(r&&!r.n&&!r.ambiguous&&r.q.old==null){                      // 현행 값을 적은 지시는 raVqOldApply가 범위·후보를 이미 다 정했다
       if(named.length){ named.forEach(no=>{ if(!A.changes.some(c=>c.no===no)){ const o=raOld(no); A.sel[no]=true; A.changes.push({type:'modify',no,title:o.title,body:o.body,why:''}); } }); raAppxForArts(named); r=raVqApply(A,t); }   // 지정한 조와 그 조의 별표 안에서만
       else { const add=raRuleEnsure(A,r.q.key); r=raVqApply(A,t); if(!(r&&r.n)) raRuleUndo(A,add); } }
     if(r&&(r.n||r.ambiguous)) return r;
@@ -1367,7 +1488,7 @@ function raRuleApply(A, text){
       (left.length?`다른 말에 붙은 “${rp.a}”(${left.slice(0,6).join(', ')}${left.length>6?' 외':''})는 뜻이 다를 수 있어 그대로 두었습니다. `:'')+'뒤 조사도 맞췄으니 문장이 자연스러운지 확인하세요.';
     if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose)) A.purpose=`“${rp.a}”${raJosa(rp.a,['을','를'])} “${rp.b}”${ro} 변경하려는 것임.`;
     return {n:r.n, notes:[`“${rp.a}” → “${rp.b}” ${r.where.length}개 조·별표 ${r.n}곳(${raWhere(r.where)})`+(left.length?` · 다른 말에 붙은 곳 ${left.length}곳은 그대로`:'')], rep:rp}; }
-  const dm=t.match(/제\s*(\d+)\s*조(?:\s*의\s*(\d+))?[^。.\n]{0,12}?삭제/);
+  const dm=t.match(new RegExp(RA_REQ_ART+'[^。.\\n]{0,12}?삭제'));
   if(dm&&_raArts){ const no=dm[2]?`${dm[1]}의${dm[2]}`:dm[1], o=raOld(no);
     if(o&&!o.deleted){ let c=A.changes.find(x=>x.no===no); if(!c){ A.sel[no]=true; c={type:'modify',no,title:o.title,body:o.body,why:''}; A.changes.push(c); A.changes.sort((x,y)=>raCmp(x.no,y.no)); }
       c.type='delete'; c.why='지시문대로 삭제';
@@ -1594,10 +1715,15 @@ function raFullRenumber(F){
   return {arts:live.map(a=>({...a, no:map[raNormNo(a.no)], body:raRetargetRefs(a.body,map)})), map};
 }
 // 같은 내규 안의 조 인용을 이동표대로 고친다(다른 법령·내규의 조는 그대로). “제9조” → “제8조”, “제7조의2” → “제8조”
+// 외부 인용(「…법」 제24조, 같은 법 제24조)에 “및·또는·,”로 이어진 조(“… 제24조 및 제25조”)도 그 법령의 조다 — 서버 retarget_refs·internal_refs와 같은 규칙
+const RA_EXT_CONT=/^(?:\s*제\s*\d+\s*(?:항|호)(?:\s*[가-하]\s*목)?)*(?:\s*[(（][^)）]{0,24}[)）])?(?:\s*의\s*[가-힣]{1,12}?\s*(?:,|및|또는|ㆍ|·|와|과))?[\s,및또는ㆍ·와과]*$/;
+const RA_SELF_PRE=/(?:^|[^가-힣])(?:이|본)\s+(?:규정|규칙|지침|정관|요령|기준|세칙|매뉴얼|강령)\s*$|(?:^|[^가-힣])본(?:규정|규칙|지침)\s*$/;   // “직원이 규정 제35조”의 ‘이’는 조사     // “이 지침 제6조” — 같은 내규(서버 _SELF_BEFORE)
 function raRetargetRefs(text, map){
+  let extEnd=-1;
   return String(text||'').replace(/제\s*(\d+)\s*조(?:\s*의\s*(\d+))?/g,(m,n,k,off,all)=>{
     const pre=all.slice(Math.max(0,off-24),off);
-    if(/」\s*$|(?:법|령|규칙|규정|정관|지침|세칙|같은\s*법|동법)\s*$/.test(pre)) return m;
+    if(!RA_SELF_PRE.test(pre)&&(/」\s*$|(?:법|령|규칙|규정|정관|지침|세칙|같은\s*법|동법)\s*$/.test(pre)||(extEnd>=0&&RA_EXT_CONT.test(all.slice(extEnd,off))))){ extEnd=off+m.length; return m; }
+    extEnd=-1;
     const to=map[n+(k?'의'+k:'')]; if(!to) return m;
     return (k||/의/.test(to))?raLbl(to):m.replace(n,to); });   // 원문 띄어쓰기(“제15 조”)는 그대로 두고 숫자만 바꾼다
 }
@@ -2916,7 +3042,7 @@ function raSubmitExport(mode, fmt){
 // ══════════════════════════════════════════════════════════════════════════
 const RA_AG_EX=[
   ['개정','여비규정 제15조의 일비를 3만원으로 올려줘'],
-  ['개정','출장 숙박비 상한을 실비 기준으로 바꾸고 싶어'],
+  ['개정','여비규정의 국내 출장 숙박비 상한을 실비 기준으로 바꾸고 싶어'],      // 내규명을 넣어 둔다 — 없으면 유사 검색 1위(공무국외출장 관리규칙)로 간다
   ['제정','업무용 드론 운영지침을 새로 만들어줘'],
   ['일괄 정비','기획운영본부를 경영기획본부로 모든 내규에서 바꿔줘'],
   ['상위법','「공공기관의 운영에 관한 법률」 제31조가 개정됐어'],
@@ -3167,14 +3293,14 @@ async function raAgAmend(P, step, fin, stop){
       RA.agent.done={title:`「${A.title}」에 “${vr.rep.a}”${raJosa(vr.rep.a,['이','가'])} 없습니다`,sub:`모든 ${RA_ORG.reg_word}에서 찾아 바꾸려면 일괄 정비를 쓰세요.`,
         acts:[[`모든 ${RA_ORG.reg_word}에서 찾기(일괄 정비)`,"raAgentGoBulk()",1],['개정 화면 열기',"RA.amend.step=1;raTab('amend')"]]};
       return; }
-    fin(s,'대상 조문'+(relX.length?'과 관련 별표를':'을')+' 수정안 칸에 담았습니다. '+(vr&&vr.ambiguous?`“${_e(vr.q.key)}” 값이 여러 곳에 서로 다르게 있어(${vr.ambiguous.slice(0,4).map(x=>_e(x.replace(/ → .*$/,''))).join(' / ')}) 어느 것인지 추측하지 않고 그대로 두었습니다. 조 번호를 넣어 다시 요청하거나 직접 고치세요. `:vr&&vr.q?`“${_e(vr.q.key)}” 값이 들어 있는 곳을 찾지 못해 바꾸지 않았습니다${raNear(vr.q.key).length?` — 이 ${_e(RA_ORG.reg_word)}에 있는 비슷한 말: ${raNear(vr.q.key).map(w=>'“'+_e(w)+'”').join(', ')}`:'(조 번호·용어를 확인하세요)'}. `:'')+'문장을 고친 뒤 확인·검토 단계로 넘어가세요.','warn');
+    fin(s,'대상 조문'+(relX.length?'과 관련 별표를':'을')+' 수정안 칸에 담았습니다. '+(vr&&vr.ambiguous?`${vr.q.old!=null?`현행 “${_e(vr.q.oldStr)}”${raJosa(vr.q.oldStr,['이','가'])} 여러 곳에 있어`:`“${_e(vr.q.key)}” 값이 여러 곳에 서로 다르게 있어`}(${vr.ambiguous.slice(0,4).map(x=>_e(x.replace(/ → .*$/,''))).join(' / ')}) 어느 것인지 추측하지 않고 그대로 두었습니다. 조 번호를 넣어 다시 요청하거나 직접 고치세요. `:vr&&vr.q?`${vr.q.old!=null?`현행 “${_e(vr.q.oldStr)}”${vr.q.keyless?'':`(${_e(vr.q.key)})`}이 들어 있는 곳`:`“${_e(vr.q.key)}” 값이 들어 있는 곳`}을 찾지 못해 바꾸지 않았습니다${vr.q.old==null&&raNear(vr.q.key).length?` — 이 ${_e(RA_ORG.reg_word)}에 있는 비슷한 말: ${raNear(vr.q.key).map(w=>'“'+_e(w)+'”').join(', ')}`:'(조 번호·용어를 확인하세요)'}. `:'')+'문장을 고친 뒤 확인·검토 단계로 넘어가세요.','warn');
     A.step=1;
     // 수치 지시를 못 바꾼 이유를 결론 줄에 올린다 — 단계 안내까지 내려 읽지 않아도 다음 행동을 알 수 있게(비슷한 말로 바로 다시 요청)
-    const vq=vr&&vr.q, near=vq&&!vr.ambiguous?raNear(vr.q.key).filter(w=>/^[가-힣]+$/.test(w)).slice(0,2):[];
+    const vq=vr&&vr.q, near=vq&&!vr.ambiguous&&vr.q.old==null?raNear(vr.q.key).filter(w=>/^[가-힣]+$/.test(w)).slice(0,2):[];
     _raRetryKey=vq?vr.q.key:null;
-    RA.agent.done=vq&&vr.ambiguous?{title:`“${vr.q.key}” 값이 여러 곳에 서로 달라 그대로 두었습니다`,sub:`${vr.ambiguous.slice(0,4).map(x=>x.replace(/ → .*$/,'')).join(' / ')}${vr.ambiguous.length>4?' 외':''} — 어느 값인지 추측하지 않았습니다. 고치기 단계에서 해당 값을 직접 고치세요.`,
+    RA.agent.done=vq&&vr.ambiguous?{title:vr.q.old!=null?`현행 ${vr.q.oldStr}${raJosa(vr.q.oldStr,['이','가'])} 여러 곳에 있어 그대로 두었습니다`:`“${vr.q.key}” 값이 여러 곳에 서로 달라 그대로 두었습니다`,sub:`${vr.ambiguous.slice(0,4).map(x=>x.replace(/ → .*$/,'')).join(' / ')}${vr.ambiguous.length>4?' 외':''} — 어느 값인지 추측하지 않았습니다. 고치기 단계에서 해당 값을 직접 고치세요.`,
         acts:[['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",1]]}
-      :vq?{title:`「${A.title}」에서 “${vr.q.key}” 값을 찾지 못했습니다`,sub:near.length?`이 ${RA_ORG.reg_word}에는 ${near.map(w=>'“'+w+'”').join(', ')}${raJosa(near[near.length-1],['이','가'])} 있습니다. 그 말로 다시 요청하거나 고치기 단계에서 직접 고치세요.`:'조 번호·용어를 확인해 다시 요청하거나 고치기 단계에서 직접 고치세요.',
+      :vq?{title:vr.q.old!=null?`「${A.title}」에서 현행 ${vr.q.oldStr}${raJosa(vr.q.oldStr,['을','를'])} 찾지 못했습니다`:`「${A.title}」에서 “${vr.q.key}” 값을 찾지 못했습니다`,sub:near.length?`이 ${RA_ORG.reg_word}에는 ${near.map(w=>'“'+w+'”').join(', ')}${raJosa(near[near.length-1],['이','가'])} 있습니다. 그 말로 다시 요청하거나 고치기 단계에서 직접 고치세요.`:'조 번호·용어를 확인해 다시 요청하거나 고치기 단계에서 직접 고치세요.',
         acts:near.map((w,i)=>[`“${w}”${raJosa(w,['으로','로'])} 다시 요청`,`raAgentRetryKey('${w}')`,i?0:1]).concat([['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",near.length?0:1]])}
       :{title:`「${A.title}」 개정 대상 조문을 준비했습니다`,sub:'결과 화면의 “고치기” 단계에서 조문 문장을 고치면 대비표·개정문·문서가 바로 만들어집니다.',
         acts:[['고치기 단계 열기',"RA.amend.step=1;raTab('amend')",1]]};

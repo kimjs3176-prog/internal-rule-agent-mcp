@@ -1,5 +1,43 @@
 # ⚖ 규정 제·개정 에이전트
 
+> **2026 공공 AI 대전환 챌린지 세션2 · 지정과제 ③ 규정 제·개정 에이전트** — 한국농업기술진흥원 출품작
+
+## 심사위원 빠른 구동(3분)
+
+**1. 설치·실행** — Python 3.12 이상만 있으면 됩니다(DB·미들웨어 없음, AI 키 없이 핵심 기능 동작).
+```bash
+python -m venv .venv && . .venv/bin/activate        # Windows: python -m venv .venv  →  .venv\Scripts\activate
+pip install -r requirements.txt
+python run_local.py
+```
+
+**2. 접속:** 브라우저로 `http://localhost:5100`에 접속합니다. 왼쪽 아래에 “한국농업기술진흥원 · 등록 내규 126건”이 보이면 정상입니다.
+- 온라인 시연 주소: (등록 후 기재)
+
+**3. 핵심 흐름 3개**(AI 키 없이, 각 1초 안팎)
+
+| # | 해 볼 일 | 결과 |
+|---|---|---|
+| ① 한 문장 개정 | **에이전트**에 `여비규정 제15조의 일비를 3만원으로 올려줘` → **에이전트 실행** | 별표 2 일비 25,000 → 30,000, 신구조문대비표·개정문·개정문 검증(“일치”)·검토 보고서·한글/Word 문서 |
+| ② 제정 | **제정**에 내규명 `업무용 드론 운영지침` → **초안까지 한 번에** | 표준 조문 초안, 형식 점검, 문서 세트 |
+| ③ 정비·점검 | **건강검진** → **오류 목록**, 또는 에이전트에 `기획운영본부를 경영기획본부로 모든 내규에서 바꿔줘` | 기관 내규 126건 진단, 모든 내규 일괄 정비안(조사 교정·개정문·부칙) |
+
+**4. 모의데이터(다른 기관 도입 시연)** — 가상 기관 「가상행정진흥원」 내규 7건으로 바꿔 띄웁니다. 결과는 `po/` 폴더에 만들고, 저장소 기본 데이터는 건드리지 않습니다.
+```bash
+export REG_DIR=po/regulations REG_MANIFEST=po/manifest.json ORG_CONFIG=samples/public_org/org_config.json
+python scripts/import_regulations.py samples/public_org/regs --reset
+python run_local.py
+```
+Windows PowerShell에서는 첫 줄을 `$env:REG_DIR="po\regulations"; $env:REG_MANIFEST="po\manifest.json"; $env:ORG_CONFIG="samples\public_org\org_config.json"`로 바꿉니다.
+
+**5. 더 보기**
+- 자동 시험: `pip install pytest` → `python -m pytest -q tests`, `node --test tests/js/*.test.mjs`(Node.js 18+)
+- 구동안내서 원고: `docs/contest/구동안내서.md` · 모델 교체 시험: `docs/contest/모델교체시험.md` · MCP 서버: `docs/MCP.md`
+- 라이선스: `THIRD_PARTY_LICENSES.md`(재배포 제한 구성요소 없음)
+- AI 연결(선택): 화면 오른쪽 위 **[AI 미설정]** → Gemini·Claude·GPT 키, 또는 서버 환경변수 `OPENAI_COMPAT_BASE_URL`로 사내·공통기반 모델(OpenAI 호환)
+
+---
+
 **모든 직원이 따르는 규정의 품질과 상위법 정합성을 관리하는 웹 서비스**입니다.
 기관의 내규(사규)·지자체의 자치법규·중앙부처의 행정규칙은 조직 구성원 전체의 권리·의무와 일하는 방식을 정하지만, 이를 다듬는 규정 담당자는 기관마다 한두 명입니다. 이 서비스는 그 담당자가 **규정 전체를 한눈에 진단**(없는 조 인용, 바뀐 명칭, 상위법 개정 미반영, 수치 불일치)하고, **한 문장 지시로 개정안·신구조문대비표·이유서·심의 문서까지** 만들며, 만든 개정문이 맞는지 **스스로 검증**하도록 돕습니다.
 
@@ -56,7 +94,7 @@
 - **건강검진**: 보고된 문제 16건(없는 조 인용, 다른 내규의 삭제된 조 인용, 바뀐 내규명 7건, 옛 명칭, 조 번호 중복, 중복 등록)을 원문과 대조해 **16건 모두 실제 결함**. 일부러 심은 오류 10종 중 8종 탐지(나머지 2종은 이후 보강: 별표·서식의 옛 명칭, 조문을 읽지 못한 내규 표시).
 - **지시문 해석**(규칙 기반, AI 없음): 30건 중 모드 30/30, 대상 내규 19/19, 대상 조문 14/15.
 - **개정문 왕복 검증**: 내규 126건에 무작위 개정(글자 바꾸기·단서·항 신설·끼워 넣기·삭제·조 신설 등)을 가해 개정문을 만들고 그 개정문을 현행에 되돌려 적용하면 수정안과 일치 — 6개 시드 **1,279건 중 1,279건(100%)**. `python scripts/roundtrip_amend.py`로 재현하며, 테스트(`tests/test_verify_fixes.py`)에 포함. 화면의 “확인·검토 → 개정문 검증”이 같은 함수로 매 개정안을 검증합니다.
-- **끝까지 실행**: “여비규정 제15조의 일비를 3만원으로” 한 문장 → 제15조·관련 별표 2·4 자동 연결 → 별표 숫자 수정 → 영향분석·점검·사전검토·개정문 검증 → 개정문·대비표·한글 저장까지 사람이 하는 일은 표의 숫자 두 곳과 제안 부서 입력뿐.
+- **끝까지 실행**: “여비규정 제15조의 일비를 3만원으로” 한 문장 → 제15조·관련 별표 2·4 자동 연결 → 별표 2 “일 비” 열 숫자 자동 수정 → 영향분석·점검·사전검토·개정문 검증 → 개정문·대비표·한글 저장까지 사람이 하는 일은 결과 확인과 제안 부서 입력뿐.
 
 ## 개인정보
 
@@ -108,7 +146,7 @@ node --test tests/js/*.test.mjs
 - **바로 해 보기(설치 없이)**: 개정 화면의 **원문 붙여넣기**에 조례 전문을 붙여 넣으면 개정안·개정문(“○○ 조례 일부개정조례안”)·대비표·점검·개정문 검증이 그대로 동작합니다. 부칙 기본 문구도 “이 조례는 공포한 날부터 시행한다.”로 바뀝니다.
 - **기관 전체로 쓰기**: 가상의 ‘가온군’ 예시 프로필과 자치법규 2건을 `samples/local_gov/`에 두었습니다.
   ```bash
-  export ORG_CONFIG=samples/local_gov/org_config.json REG_DIR=samples/local_gov/regulations REG_MANIFEST=samples/local_gov/regulations_manifest.json
+  export ORG_CONFIG=samples/local_gov/org_config.json REG_DIR=lg/regulations REG_MANIFEST=lg/manifest.json   # 결과는 별도 폴더(lg)에
   python scripts/import_regulations.py samples/local_gov/regs --reset   # 조례·시행규칙 등록
   python run_local.py                                                   # 군수·자치법규·입법예고 기준으로 동작
   ```

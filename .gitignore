@@ -15,3 +15,9 @@ tts_assets/
 # 구동안내서대로 만든 가상환경
 .venv/
 guide_out/
+
+# 모의데이터·다른 기관 시험 결과 폴더(구동안내서·README 예시)와 --reset 백업
+po/
+lg/
+regulations.backup-*/
+regulations_manifest.json.backup-*
