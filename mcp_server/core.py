@@ -443,7 +443,7 @@ def t_alio_compare_values(item, unit, keyword, scope="peer", agencies=None, max_
     out = {"item": item, "unit": unit, "keyword": kw, "agencies_searched": len(ids), "regulations_checked": len(pick),
            "values": sorted(rows, key=lambda r: -r["value"]), "not_found": none,
            "summary": ({"count": len(vals), "min": min(vals), "max": max(vals), "median": statistics.median(vals)} if vals else {"count": 0}),
-           "ours": _our_values(kw, item, unit),
+           "ours": _our_values(kw, item, unit) or {"note": f"우리 기관 내규 문장에서 “{item}” 수치를 찾지 못했습니다(별표 표에만 있을 수 있음). get_regulation 의 appendices 로 별표를 읽어 확인하세요."},
            "caution": "기관마다 표기가 달라 잘못 뽑힐 수 있습니다. sentence(원문 문장)를 보고 같은 기준인지 확인한 뒤 인용하세요. 별표 표로만 적힌 수치는 못 찾을 수 있습니다."}
     if failed:
         out["failed"] = failed[:10]
