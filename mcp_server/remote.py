@@ -7,7 +7,7 @@ claude.ai·ChatGPT 의 커넥터, Claude Code(--transport http), VS Code·Cursor
   - 환경변수
       MCP_HTTP=off            원격 MCP 를 끈다(기본 켜짐)
       MCP_TOKEN=…             설정하면 Authorization: Bearer <값> 이 있어야 쓴다(사내 배포용). 내려받기 링크도 이 값으로 서명한다.
-      MCP_ALLOWED_ORIGINS=…   브라우저에서 직접 부를 때 허용할 출처(쉼표 구분). 같은 주소와 ALLOWED_ORIGINS(화면 CORS)는 늘 허용
+      MCP_ALLOWED_ORIGINS=…   브라우저에서 직접 부를 때 허용할 출처(쉼표 구분). ALLOWED_ORIGINS(화면 CORS)·MCP_PUBLIC_URL 은 늘 허용
       MCP_PUBLIC_URL=…        링크에 쓸 공개 주소(프록시 뒤라 주소가 다르게 보일 때)
 """
 import hmac
@@ -18,7 +18,7 @@ from urllib.parse import quote, urlsplit
 
 from flask import Blueprint, Response, request
 
-from . import core
+from . import core, engine
 
 bp = Blueprint("mcp_remote", __name__)
 MAX_BODY = 1_000_000
@@ -40,23 +40,35 @@ def _public_base():
 
 
 def _origin_ok(origin: str) -> bool:
-    """브라우저가 보낸 Origin 확인(DNS 재바인딩·다른 사이트의 몰래 호출 막기). Origin 이 없으면(서버 간 호출) 통과."""
+    """브라우저가 보낸 Origin 확인(DNS 재바인딩·다른 사이트의 몰래 호출 막기). Origin 이 없으면(서버 간 호출 — claude.ai·ChatGPT·Claude Code) 통과.
+    요청의 Host 와 같은지로는 판단하지 않는다(재바인딩에서는 공격 사이트의 Origin 과 Host 가 늘 같다). 허용 목록에 있는 출처만 받는다."""
     if not origin:
         return True
     o = origin.strip().rstrip("/")
-    if urlsplit(o).netloc and urlsplit(o).netloc == (request.headers.get("X-Forwarded-Host") or request.host):
-        return True
-    extra = [x.strip().rstrip("/") for x in (os.environ.get("MCP_ALLOWED_ORIGINS") or "").split(",") if x.strip()]
-    if o in extra:
+    allow = [x.strip().rstrip("/") for x in (os.environ.get("MCP_ALLOWED_ORIGINS") or "").split(",") if x.strip()]
+    pub = (os.environ.get("MCP_PUBLIC_URL") or "").strip()
+    if pub:
+        u = urlsplit(pub)
+        allow.append(f"{u.scheme}://{u.netloc}")
+    if o in allow:
         return True
     try:
-        import api_server                                   # 화면 CORS 허용 출처와 같은 목록
-        for p in getattr(api_server, "_cors_origins", []):
+        for p in getattr(engine.server_module(), "_cors_origins", []):     # 화면 CORS 허용 출처와 같은 목록(localhost·배포 주소)
             if (hasattr(p, "match") and p.match(o)) or p == o:
                 return True
     except Exception:
         pass
     return False
+
+
+def _dump(obj) -> str:
+    """응답 JSON — 한글은 그대로 두되, 글에 깨진 유니코드(짝 없는 대리 문자)가 섞이면 \\u 꼴로(500 오류 대신)."""
+    s = json.dumps(obj, ensure_ascii=False)
+    try:
+        s.encode("utf-8")
+        return s
+    except UnicodeEncodeError:
+        return json.dumps(obj)
 
 
 def _auth_ok() -> bool:
@@ -78,7 +90,7 @@ def _cors(resp, origin):
 
 
 def _rpc_error(status, code, message, origin="", extra=None):
-    r = Response(json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": message}}, ensure_ascii=False),
+    r = Response(_dump({"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": message}}),
                  status=status, mimetype="application/json")
     for k, v in (extra or {}).items():
         r.headers[k] = v
@@ -128,7 +140,7 @@ def mcp_endpoint():
         out = core.handle(msg, mode="http", base=base)
     if not out:                                             # 알림·응답만 왔으면 본문 없이 202
         return _cors(Response(status=202), origin)
-    body = json.dumps(out, ensure_ascii=False)
+    body = _dump(out)
     accept = request.headers.get("Accept", "")
     if "text/event-stream" in accept and "application/json" not in accept and "*/*" not in accept:
         r = Response(f"event: message\ndata: {body}\n\n", mimetype="text/event-stream")    # SSE 만 받는 클라이언트 — 응답 한 건을 보내고 닫는다

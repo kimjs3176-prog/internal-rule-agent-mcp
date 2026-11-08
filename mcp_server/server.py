@@ -37,7 +37,12 @@ def handle(msg):
 
 
 def _send(obj):
-    _PROTO.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    s = json.dumps(obj, ensure_ascii=False)
+    try:
+        s.encode("utf-8")
+    except UnicodeEncodeError:                        # 깨진 유니코드(짝 없는 대리 문자)는 \u 꼴로 — 서버가 죽지 않게
+        s = json.dumps(obj)
+    _PROTO.write(s + "\n")
     _PROTO.flush()
 
 

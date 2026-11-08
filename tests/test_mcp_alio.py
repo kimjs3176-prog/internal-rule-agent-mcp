@@ -4,6 +4,7 @@ import json
 import os
 
 import pytest
+from conftest import needs_engine
 
 FX = os.path.join(os.path.dirname(__file__), "fixtures", "alio")
 H = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
@@ -98,6 +99,7 @@ def test_alio_down_is_reported(client, monkeypatch, ra):
     assert r["isError"] and "알리오에 연결하지 못했습니다" in r["content"][0]["text"]
 
 
+@needs_engine
 def test_references_go_into_amend_and_enact_documents(client, alio_fake):
     ref = [{"agency": "인천국제공항공사", "regulation": "인사규정", "article": "제2조", "title": "여비", "body": "② 일비는 1일 20,000원으로 한다."}]
     d = call(client, "amend_regulation", {"regulation": "여비규정", "changes": [{"article": "제2조", "body": "여비는 운임·일비·숙박비·식비·이전비 및 가족여비로 구분한다."}],
@@ -117,6 +119,7 @@ def test_references_go_into_amend_and_enact_documents(client, alio_fake):
     assert call(client, "enact_regulation", {"title": "x지침", "text": "조문 없음"})["isError"]
 
 
+@needs_engine
 def test_run_agent_compare_mode(client, alio_fake, ra, monkeypatch):
     monkeypatch.setitem(ra.ORG, "alio", {**(ra.ORG.get("alio") or {}), "peers": ["C0105"]})        # 시험 자료 기관을 유관 기관으로
     d = call(client, "run_agent", {"request": "다른 기관은 여비를 어떻게 규정했어?"})["structuredContent"]

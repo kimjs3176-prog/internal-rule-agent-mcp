@@ -13,12 +13,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TIMEOUT = int(os.environ.get("MCP_ENGINE_TIMEOUT", "90") or 90)      # 한 번 실행의 전체 제한(초)
+HTTP_TIMEOUT = min(TIMEOUT, 40)                                     # 원격(/mcp): 클라이언트 요청 제한(흔히 60초)·서버리스 함수 제한 안에 답한다
 EVAL_LIMIT = 30                                                     # QuickJS: 한 번에 이어서 도는 JS 계산의 제한(초) — 끝나지 않는 계산을 끊는다
 MEM_LIMIT = 384 * 1024 * 1024
 MAX_TICKS = 20000                                                   # 가상 타이머가 이보다 많이 돌면 끝나지 않는 대기로 본다
@@ -48,9 +50,28 @@ def _src():
     return _SRC["reg"], _SRC["core"]
 
 
-def _app():
-    import api_server                                   # 웹 서비스와 같은 앱(이미 불러왔으면 그대로 쓴다)
-    return api_server.app
+def server_module():
+    """웹 서비스 모듈 — `python api_server.py` 로 띄웠으면 __main__ 이 그것이다(다시 불러 두 벌이 되지 않게)."""
+    for name in ("api_server", "__main__"):
+        m = sys.modules.get(name)
+        if m is not None and getattr(m, "app", None) is not None and hasattr(m, "_cors_origins"):
+            return m
+    import api_server
+    return api_server
+
+
+def app():
+    """지금 요청을 받는 Flask 앱(요청 안이면 그 앱, 아니면 웹 서비스 모듈의 앱)."""
+    try:
+        from flask import current_app, has_app_context
+        if has_app_context():
+            return current_app._get_current_object()
+    except Exception:
+        pass
+    return server_module().app
+
+
+_app = app
 
 
 def local_fetch(method: str, url: str, body=None):
@@ -125,9 +146,10 @@ def quickjs_ready() -> bool:
         return False
 
 
-def _run_quickjs(inp: dict, fetch=local_fetch, deadline=None, script=None) -> dict:
+def _run_quickjs(inp: dict, fetch=local_fetch, deadline=None, script=None, timeout=None) -> dict:
     import quickjs
-    deadline = deadline or (time.monotonic() + TIMEOUT)
+    timeout = timeout or TIMEOUT
+    deadline = deadline or (time.monotonic() + timeout)
     ctx = quickjs.Context()
     ctx.set_memory_limit(MEM_LIMIT)
     ctx.set_max_stack_size(1024 * 1024)
@@ -171,7 +193,7 @@ def _run_quickjs(inp: dict, fetch=local_fetch, deadline=None, script=None) -> di
                 continue
             return {"error": "엔진이 결과를 내지 못했습니다(기다리는 작업이 없음)."}
     except TimeoutError:
-        return {"error": f"엔진이 {TIMEOUT}초 안에 끝나지 않았습니다."}
+        return {"error": f"엔진이 {timeout}초 안에 끝나지 않았습니다."}
     except quickjs.JSException as e:
         msg = str(e).splitlines()[0] if str(e) else "JS 오류"
         if "interrupted" in msg:
@@ -199,15 +221,20 @@ def _base():
         return _HTTP["base"]
 
 
-def _run_node(inp: dict) -> dict:
+NO_ENGINE = ("서버에 화면 엔진이 없어 이 도구를 쓸 수 없습니다(다른 도구는 됩니다). 관리자: Python 3.12 로 실행·배포하면 requirements.txt 의 quickjs 가 함께 "
+             "설치됩니다(Vercel 은 .python-version). 3.13 이상이면 `pip install quickjs`(C 컴파일러 필요)나 Node.js 18 이상을 설치하세요.")
+
+
+def _run_node(inp: dict, timeout=None) -> dict:
     node = shutil.which("node")
     if not node:
-        return {"error": "엔진을 돌릴 수 없습니다. `pip install quickjs`(Python 3.12 이하는 requirements.txt 에 포함)나 Node.js 18 이상을 설치하세요."}
+        return {"error": NO_ENGINE}
+    timeout = timeout or TIMEOUT
     try:
         p = subprocess.run([node, os.path.join(HERE, "engine.mjs")], input=json.dumps({**inp, "base": _base()}, ensure_ascii=False),
-                           capture_output=True, text=True, timeout=TIMEOUT, encoding="utf-8")
+                           capture_output=True, text=True, timeout=timeout, encoding="utf-8")
     except subprocess.TimeoutExpired:
-        return {"error": f"엔진이 {TIMEOUT}초 안에 끝나지 않았습니다."}
+        return {"error": f"엔진이 {timeout}초 안에 끝나지 않았습니다."}
     try:
         return json.loads(p.stdout or "{}")
     except json.JSONDecodeError:
@@ -223,12 +250,14 @@ def backend() -> str:
     return "node"
 
 
-def run(op: str, **kw) -> dict:
-    """엔진 작업 하나(op: agent|amend) → 결과 dict. 오류도 {"error": …} 로 돌려준다."""
-    inp = {"op": op, **kw}
+def run(op: str, inp: dict | None = None, timeout=None, **kw) -> dict:
+    """엔진 작업 하나(op: agent|amend|enact) → 결과 dict. 오류도 {"error": …} 로 돌려준다. timeout: 이번 실행의 전체 제한(초)."""
+    inp = {**(inp or {}), **kw}
     inp.pop("base", None)                               # 내부 주소는 실행기만 정한다
+    inp["op"] = op
+    timeout = min(timeout or TIMEOUT, TIMEOUT)
     if backend() == "quickjs":
         if not quickjs_ready():
-            return {"error": "MCP_ENGINE=quickjs 인데 quickjs 패키지가 없습니다. `pip install quickjs` 하세요."}
-        return _run_quickjs(inp)
-    return _run_node(inp)
+            return {"error": "MCP_ENGINE=quickjs 인데 quickjs 패키지가 없습니다. " + NO_ENGINE}
+        return _run_quickjs(inp, deadline=time.monotonic() + timeout, timeout=timeout)
+    return _run_node(inp, timeout)

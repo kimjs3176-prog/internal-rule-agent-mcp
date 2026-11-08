@@ -3950,7 +3950,7 @@ def ra_alio_rule():
     ranked = _alio_rank(p["articles"], b.get("q") or "", str(b.get("kw") or "")[:40], cap=8000 if want else 1500)
     if want:                                                  # 고른 조만, 본문 전체로(조 번호 순)
         ranked = sorted([a for a in ranked if a["no"] in set(want)], key=lambda a: art_key(a["no"]))
-    lim = _clamp_int(b.get("limit"), 1, 80, 12)
+    lim = max(_clamp_int(b.get("limit"), 1, 80, 12), len(want))   # 고른 조는 limit 와 상관없이 모두
     warn = "" if p["articles"] else "“제N조” 형식의 조문을 찾지 못했습니다. 원문 링크로 확인하세요."
     return jsonify({"success": True, "file": r["file"], "versions": len(r["files"]), "count": len(p["articles"]),
                     "toc": [f"{art_label(a['no'])}({a['title']})" for a in p["articles"] if not a["deleted"]][:80],

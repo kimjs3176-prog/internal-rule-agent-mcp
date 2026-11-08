@@ -47,7 +47,7 @@ claude mcp add --transport http reg-agent https://<배포 주소>/mcp
 |---|---|
 | `MCP_HTTP=off` | 원격 MCP를 끈다(기본 켜짐). |
 | `MCP_TOKEN` | 값을 정하면 `Authorization: Bearer <값>` 머리글이 있어야 쓴다. 사내 배포용이다. 머리글을 넣을 수 있는 도구(Claude Code `--header`, VS Code, Cursor)에서 쓴다. 내려받기 링크는 이 값으로 서명된다. claude.ai·ChatGPT 커넥터는 이 방식의 토큰을 넣을 수 없으니, 공개 시연 서버는 비워 둔다. |
-| `MCP_ALLOWED_ORIGINS` | 브라우저에서 직접 부르는 클라이언트의 출처(쉼표 구분). 서버 간 호출(claude.ai·ChatGPT·Claude Code)은 출처가 없어 이 값과 상관없다. |
+| `MCP_ALLOWED_ORIGINS` | 브라우저에서 직접 부르는 클라이언트의 출처(쉼표 구분). 화면 CORS 허용 출처(`ALLOWED_ORIGINS`, localhost)와 `MCP_PUBLIC_URL`은 늘 허용한다. 서버 간 호출(claude.ai·ChatGPT·Claude Code)은 출처가 없어 이 값과 상관없다. |
 | `MCP_PUBLIC_URL` | 링크에 쓸 공개 주소. 프록시 뒤라 주소가 다르게 보일 때만 쓴다. |
 | `MCP_ENGINE`, `MCP_ENGINE_TIMEOUT` | 엔진 실행 방식(`quickjs`·`node`, 6절)과 한 번의 제한 시간(초, 기본 90) |
 
@@ -55,10 +55,12 @@ claude mcp add --transport http reg-agent https://<배포 주소>/mcp
 - MCP 2025-06-18·2025-03-26 판의 Streamable HTTP를 따른다. 한 주소에 JSON-RPC를 POST하고, JSON으로 답한다(SSE만 받는 클라이언트에는 SSE 한 건).
 - 세션을 두지 않는다. 요청마다 독립이라 서버리스(Vercel)에서도 된다. 서버가 먼저 보내는 알림 흐름(GET)은 없다(405).
 - **막는 것**
-  - 다른 웹사이트의 브라우저 호출: Origin 확인, 허용하지 않은 출처는 403
+  - 다른 웹사이트의 브라우저 호출: 허용 목록에 없는 Origin은 403이다. 요청의 Host와 같은지로는 판단하지 않는다(DNS 재바인딩 대비).
   - 지원하지 않는 판 머리글: 400
   - 1MB가 넘는 요청: 413
   - 엔진이 서버 API 밖(외부 주소, 내규 등록, 작업 실적 기록)을 부르는 것
+  - 엔진에 가는 글의 길이: 내규안 3만 자, 고친 조문 합계 6만 자, 부칙·이유·목적 각 3천 자까지. 내려받기 링크도 같은 규칙으로 다시 정리한다.
+- **응답 시간:** 원격에서 엔진 도구는 40초 안에 답한다. 다른 기관 수치 비교는 45초 안에 답하고, 그 안에 못 읽은 기관은 “시간 제한으로 건너뜀”으로 알린다. 흔한 클라이언트 요청 제한(60초) 안이다.
 
 ## 2. 내 컴퓨터(stdio)로 연결
 
@@ -139,6 +141,8 @@ claude mcp add reg-agent -- python /경로/mcp_server/server.py
 - `id`를 `alio_get_regulation`에 넣으면 더 읽는다.
 
 **주의**
+- **기관 고르기:** `agencies`의 기관명은 정확히 맞거나, 일부만 적었으면 그 말이 든 기관이 하나뿐일 때만 고른다. 여럿이면(예: “한국전력” → 한국전력공사·한국전력거래소 …) 고르지 않고 후보를 알린다.
+- **조회 실패:** 조회한 기관의 절반 이상이 실패하고 결과가 없으면 “그런 규정이 없다”로 읽히지 않게 오류로 알린다. 실패 수(`failed_count`)도 준다.
 - **조회 범위:** 유관 기관은 `org_config.json`의 `alio.peer_depts`(주무부처)·`alio.peers`로 정한다. 범위가 넓으면 한 번에 48곳까지만 조회한다(알리오 서버 부담·응답 시간).
 - **원문 형식:** 알리오 첨부 파일(한글·PDF·Word)의 글을 읽는다. 표로만 적힌 수치(별표 표)는 못 찾을 수 있다. 수치 비교는 원문 문장(`sentence`)을 보고 같은 기준인지 확인한다.
 - **접속:** 서버가 alio.go.kr에 닿아야 한다.
@@ -170,6 +174,16 @@ claude mcp add reg-agent -- python /경로/mcp_server/server.py
   - Python SDK(mcp 2.3.0): `run_agent`, `search`, `enact_regulation`
   - TypeScript SDK(@modelcontextprotocol/sdk 1.32.2): `amend_regulation`, `fetch`
 - **처리 시간:** 엔진 도구는 한 번에 0.2~0.6초다(첫 호출은 데이터 적재로 약 2초, AI 키·외부망 없이).
+- **독립 검토(11/8):** 검토자 4명(프로토콜·보안·기능·배포)이 따로 보고, 지적마다 다른 검토자가 재현했다. 재현된 결함은 모두 고쳤고 `tests/test_mcp_review_fixes.py`로 묶었다.
+  - 엔진 정규식이 아주 긴 입력에서 오래 도는 것: 입력 길이 상한
+  - 수치 비교가 60초를 넘길 수 있던 것: 45초 상한
+  - Python 3.13 이상 배포에서 엔진이 빠지는 것: Python 3.12 고정·안내
+  - 짧은 기관명이 다른 기관을 고르던 것
+  - 조의 조 번호 표기(제13조의2)
+  - 바뀐 것 없는 개정안에도 문서 링크를 주던 것
+  - 같은 조를 두 번 준 개정안, 빈 조 제목
+  - 조회 실패를 0건으로 보이던 것
+  - 재바인딩 Origin, 깨진 유니코드·잘못된 링크의 500 오류
 
 ## 6. 엔진 실행 방식
 
@@ -177,4 +191,5 @@ claude mcp add reg-agent -- python /경로/mcp_server/server.py
 
 - **QuickJS(기본):** 파이썬 안에서 JS를 돌린다(`quickjs` 패키지, MIT). Node.js가 필요 없어 서버리스(Vercel)에서도 된다. Python 3.8~3.12는 `requirements.txt`로 함께 설치된다.
 - **Node.js 18 이상(대체):** Python 3.13 이상처럼 `quickjs`의 미리 빌드된 판이 없으면 Node.js로 돌린다. `pip install quickjs`로 소스에서 빌드해도 된다(C 컴파일러 필요).
+- **Vercel:** 함수에는 Node.js가 없다. 그래서 저장소의 `.python-version`으로 Python 3.12를 고정해 `quickjs`가 함께 설치되게 했다. 엔진이 없으면 엔진 도구만 이유와 할 일을 알리고, 나머지 도구는 그대로 된다.
 - **바꾸기:** 환경변수 `MCP_ENGINE=quickjs` 또는 `node`. 기본은 QuickJS가 있으면 QuickJS다.

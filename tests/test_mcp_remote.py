@@ -2,6 +2,7 @@
 import json
 
 import pytest
+from conftest import needs_engine
 
 H = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 PUB = {"Host": "agro-law-demo.vercel.app", "X-Forwarded-Proto": "https"}
@@ -79,6 +80,7 @@ def test_origin_token_and_switch(client, monkeypatch):
     assert rpc(client, "ping").status_code == 404
 
 
+@needs_engine
 def test_run_agent_with_download_links(client):
     res = call(client, "run_agent", {"request": "여비규정 제15조의 일비를 3만원으로 올려줘"}, headers=PUB)
     d = res["structuredContent"]
@@ -101,6 +103,7 @@ def test_run_agent_with_download_links(client):
     assert "saved" not in d and "제20조를 삭제한다." in d["amendment_text"]
 
 
+@needs_engine
 def test_signed_links_with_token(client, monkeypatch):
     monkeypatch.setenv("MCP_TOKEN", "s3cret")
     auth = {**PUB, "Authorization": "Bearer s3cret"}

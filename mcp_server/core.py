@@ -36,8 +36,7 @@ def _base_url():
 
 # ── 웹 서비스 API 를 그대로 부른다(같은 프로세스, 네트워크 없음) ───────────────────────
 def _client():
-    import api_server                                   # 웹 서비스와 같은 앱·블루프린트·데이터
-    return api_server.app.test_client()
+    return engine.app().test_client()                    # 웹 서비스와 같은 앱·블루프린트·데이터(지금 요청을 받는 그 앱)
 
 
 def _get(path, **q):
@@ -93,6 +92,15 @@ def _art_no(a):
     return re.sub(r"\s+", "", str(a)).replace("제", "").replace("조", "", 1) if str(a).strip() else ""
 
 
+def _lbl(no):
+    """조 번호 → 인용 꼴(“7의3” → “제7조의3”) — 화면·원문과 같다. 숫자가 아니면(별표 등) 그대로."""
+    s = str(no or "")
+    if not re.match(r"\d", s):
+        return s
+    import reg_agent
+    return reg_agent.art_label(s)
+
+
 def _reg_url(slug):
     """원문 보기 주소(원격 연결일 때만 — 서버가 /regulations/ 아래 원문 HTML 을 내준다)."""
     base = _base_url()
@@ -129,7 +137,7 @@ def t_search_regulations(query, limit=10):
     out = []
     for r in d.get("regs", [])[: max(1, min(int(limit or 10), 30))]:
         row = {"regulation": _title(r["slug"]), "slug": r["slug"], "hits": r.get("hits"),
-               "articles": [{"article": f"제{a['no']}조", "title": a["title"], "snippet": a["snip"]} for a in r.get("arts", [])[:5]]}
+               "articles": [{"article": _lbl(a['no']), "title": a["title"], "snippet": a["snip"]} for a in r.get("arts", [])[:5]]}
         if _reg_url(r["slug"]):
             row["url"] = _reg_url(r["slug"])
         out.append(row)
@@ -155,7 +163,7 @@ def t_get_regulation(regulation, articles=None, include_appendix=False, appendic
     arts = [a for a in d["articles"] if not want or a["no"] in want]
     out = {"regulation": d["title"], "category": d.get("category"), "revision": d.get("revision"),
            "article_count": len(d["articles"]),
-           "articles": [{"article": f"제{a['no']}조", "title": a.get("title", ""), "deleted": bool(a.get("deleted")), "body": a.get("body", "")} for a in arts],
+           "articles": [{"article": _lbl(a['no']), "title": a.get("title", ""), "deleted": bool(a.get("deleted")), "body": a.get("body", "")} for a in arts],
            "appendices": [x.get("id") for x in d.get("appendix", [])]}
     if _reg_url(r["slug"]):
         out["url"] = _reg_url(r["slug"])
@@ -184,7 +192,7 @@ def t_check_regulation(regulation="", text="", title=""):
     lv = {"error": "오류", "warn": "주의", "info": "표기 제안"}
     return {"regulation": d.get("reg") or title or "검토안", "errors": sum(i["level"] == "error" for i in iss), "warnings": sum(i["level"] == "warn" for i in iss),
             "suggestions": sum(i["level"] == "info" for i in iss),
-            "issues": [{"level": lv.get(i["level"], i["level"]), "article": f"제{i['no']}조" if i.get("no") else "", "message": i["msg"], "fix": i.get("fix", "")} for i in iss[:60]]}
+            "issues": [{"level": lv.get(i["level"], i["level"]), "article": _lbl(i['no']) if i.get("no") else "", "message": i["msg"], "fix": i.get("fix", "")} for i in iss[:60]]}
 
 
 def t_health_check(top=10):
@@ -207,7 +215,7 @@ def t_citation_impact(regulation, articles):
     if not d.get("success"):
         return d
     return {"regulation": r["title"], "summary": d.get("summary"),
-            "same_regulation": [{"article": f"제{h['no']}조", "title": h.get("title"), "cites": h.get("text"), "snippet": h.get("snippet"), "suggest": h.get("suggest")} for h in d.get("inner", [])],
+            "same_regulation": [{"article": _lbl(h['no']), "title": h.get("title"), "cites": h.get("text"), "snippet": h.get("snippet"), "suggest": h.get("suggest")} for h in d.get("inner", [])],
             "other_regulations": d.get("outer", []), "appendices": d.get("appendix", []), "mentions": d.get("mentions", [])}
 
 
@@ -215,7 +223,7 @@ def t_upper_law_impact(law, articles=None, old_text="", new_text=""):
     d = _post("/api/regagent/upper", {"law": law, "arts": _list(articles), "old": old_text, "new": new_text})
     if not d.get("success"):
         return d
-    return {"law": d.get("law"), "candidates": [{"regulation": c.get("reg"), "article": f"제{c['no']}조", "body": c.get("body"), "score": c.get("score"),
+    return {"law": d.get("law"), "candidates": [{"regulation": c.get("reg"), "article": _lbl(c['no']), "body": c.get("body"), "score": c.get("score"),
                                                  "cites": c.get("cites")} for c in d.get("candidates", [])[:30]],
             "count": d.get("count"), "removed_terms": d.get("removed_terms")}
 
@@ -260,7 +268,7 @@ class _AlioDown(Exception):
     pass
 
 
-_ALIO_DATE = re.compile(r"[(（\[]\s*(?:제정|개정|시행|전부개정|일부개정)?\s*[`'’]?[\d.\s년월일~-]{4,}\s*(?:제정|개정|시행)?\s*[)）\]]")
+_ALIO_DATE = re.compile(r"[(（\[]\s*(?:제정|개정|시행|전부개정|일부개정)?\s*[`'’]?[\d.\s년도월일차~-]{4,}\s*(?:제정|개정|시행)?\s*[)）\]]")
 
 
 def _alio_base(t):
@@ -285,20 +293,31 @@ def _alio_url(rule):
 
 
 def _alio_scope(D, scope, agencies):
-    """조회할 기관 ID 목록과 알림. agencies(기관명·ID)가 있으면 그것만, 없으면 범위(peer 유관·type 같은 유형·all 전체)."""
+    """조회할 기관 ID 목록과 알림. agencies(기관명·ID)가 있으면 그것만, 없으면 범위(peer 유관·type 같은 유형·all 전체).
+    기관명은 정확히 맞거나, 일부만 적었으면 그 말이 든 기관이 하나뿐일 때만 고른다(여럿이면 고르지 않고 후보를 알린다)."""
     orgs, me, note = D["orgs"], D.get("self"), ""
     if agencies:
-        ids, miss = [], []
+        ids, miss, amb = [], [], []
         for a in _list(agencies):
             k = re.sub(r"\s+", "", str(a))
-            o = next((o for o in orgs if o["id"] == a or re.sub(r"\s+", "", o["name"]) == k), None) \
-                or next((o for o in orgs if k and k in re.sub(r"\s+", "", o["name"])), None)
+            o = next((o for o in orgs if k and (o["id"] == k or re.sub(r"\s+", "", o["name"]) == k)), None)
+            if not o:
+                cand = [o for o in orgs if k and k in re.sub(r"\s+", "", o["name"])]
+                if len(cand) == 1:
+                    o = cand[0]
+                elif cand:
+                    amb.append(f"‘{a}’ → {', '.join(c['name'] for c in cand[:6])}{' 등' if len(cand) > 6 else ''}")
+                    continue
             if not o:
                 miss.append(str(a))
             elif o["id"] not in ids:
                 ids.append(o["id"])
+        notes = []
+        if amb:
+            notes.append("이름이 여러 기관에 맞아 고르지 않았습니다(정확한 기관명이나 ID로 다시 주세요): " + "; ".join(amb))
         if miss:
-            note = f"알리오에서 찾지 못한 기관: {', '.join(miss[:5])}"
+            notes.append(f"알리오에서 찾지 못한 기관: {', '.join(miss[:5])}")
+        note = " ".join(notes)
     elif scope == "type":
         t = next((o.get("type") for o in orgs if o["id"] == me), "")
         ids = [o["id"] for o in orgs if o["id"] != me and (not t or o.get("type") == t)]
@@ -314,53 +333,84 @@ def _alio_scope(D, scope, agencies):
     return ids, note
 
 
-def _alio_hits(keyword, ids, batch, category="", all_=False):
-    hits, failed = [], []
-    for i in range(0, len(ids), batch or 12):
-        d = _post("/api/regagent/alio/search", {"q": keyword, "orgs": ids[i:i + (batch or 12)], "category": category, "all": all_})
-        if not d.get("success"):
-            if not hits:
-                raise _AlioDown(d.get("error") or "알리오 조회 실패")
-            failed.append({"error": d.get("error")})
+def _alio_cat(category):
+    """분류: 코드(K1100)·이름(인사·복무·징계)·그 일부(인사, 복무) → 코드. 모르는 말이면 (None, 안내)."""
+    import alio
+    c = re.sub(r"\s+", "", str(category or ""))
+    if not c:
+        return "", ""
+    for k, v in alio.CATEGORIES.items():
+        if c in (k, v.replace(" ", "")) or c in v.split("·") or c in v:
+            return k, ""
+    return None, f"분류는 {', '.join(alio.CATEGORIES.values())} 중 하나입니다."
+
+
+def _alio_hits(keyword, ids, batch, category="", all_=False, deadline=None):
+    """기관을 나눠(한 번에 12곳) 알리오 규정 검색 → (hits, 실패 목록, 실제로 조회한 기관 수). 시간이 모자라면 남은 기관은 조회하지 않는다."""
+    import time
+    hits, failed, queried, B = [], [], 0, batch or 12
+    for i in range(0, len(ids), B):
+        if i and deadline and time.monotonic() > deadline - 10:          # 첫 묶음은 늘 조회한다
+            failed.append({"error": f"시간 제한으로 {len(ids) - i}곳은 조회하지 않음", "skipped": len(ids) - i})
             break
+        d = _post("/api/regagent/alio/search", {"q": keyword, "orgs": ids[i:i + B], "category": category, "all": all_})
+        if not d.get("success"):
+            if not queried:
+                raise _AlioDown(d.get("error") or "알리오 조회 실패")
+            failed.append({"error": d.get("error") or "알리오 조회 실패", "skipped": len(ids) - i})
+            break
+        queried += len(ids[i:i + B])
         hits += d.get("hits", [])
         failed += [{"agency": f.get("org"), "error": f.get("error")} for f in (d.get("failed") or []) + (d.get("timedOut") or [])]
     k = re.sub(r"\s+", "", keyword or "")
     hits.sort(key=lambda h: (0 if k and re.sub(r"\s+", "", _alio_base(h["title"])).startswith(k) else 1, -int(re.sub(r"\D", "", h.get("enf") or "") or 0)))
-    return hits, failed
+    return hits, failed, queried
+
+
+def _alio_fail_report(out, hits, failed, queried):
+    """조회 실패를 숨기지 않는다: 실패 수를 적고, 결과 없이 절반 이상 실패했으면 오류로 돌린다(“그런 규정이 없다”로 읽히지 않게)."""
+    bad = sum(1 for f in failed if f.get("agency"))
+    skipped = sum(int(f.get("skipped") or 0) for f in failed)
+    if failed:
+        out["failed_count"] = bad + skipped
+        out["failed"] = failed[:10]
+    if not hits and (bad + skipped) and (bad + skipped) >= max(1, (queried + skipped) / 2):
+        first = next((f.get("error") for f in failed if f.get("error")), "알리오 응답 없음")
+        return {"error": f"알리오에서 {queried + skipped}곳 중 {bad + skipped}곳을 조회하지 못했습니다({first}). 잠시 뒤 다시 시도하거나 agencies 로 기관을 좁히세요.",
+                "failed": failed[:10]}
+    return out
 
 
 def t_alio_search(keyword, scope="peer", agencies=None, category="", include_old=False, limit=30):
-    import alio
     kw = re.sub(r"\s+", " ", str(keyword or "")).strip()[:40]
-    if len(kw.replace(" ", "")) < 2 and not category:
+    cat, cat_err = _alio_cat(category)
+    if cat is None:
+        return {"error": cat_err}
+    if len(kw.replace(" ", "")) < 2 and not cat:
         return {"error": "규정명 검색어를 두 글자 이상 주세요(예: 여비, 드론, 재택근무)."}
-    cat = next((k for k, v in alio.CATEGORIES.items() if category in (k, v)), "") if category else ""
     try:
         D = _alio_orgs()
         ids, note = _alio_scope(D, scope if scope in ALIO_SCOPES else "peer", agencies)
         if not ids:
             return {"error": note or "조회할 기관이 없습니다."}
-        hits, failed = _alio_hits(kw, ids, D.get("batch"), cat, all_=not kw)
+        hits, failed, queried = _alio_hits(kw, ids, D.get("batch"), cat, all_=not kw)
     except _AlioDown as e:
         return {"error": str(e)}
     if not include_old:
         hits = [h for h in hits if not h.get("superseded")]
     lim = max(1, min(int(limit or 30), 100))
-    out = {"keyword": kw, "scope": "agencies" if agencies else (scope if scope in ALIO_SCOPES else "peer"), "agencies_searched": len(ids),
+    out = {"keyword": kw, "scope": "agencies" if agencies else (scope if scope in ALIO_SCOPES else "peer"), "agencies_searched": queried,
            "agencies_found": len({h["orgId"] for h in hits}), "count": len(hits),
            "results": [{"id": _alio_id(h), "agency": h["org"], "regulation": _alio_base(h["title"]), "title": h["title"],
                         "category": h.get("categoryName") or "", "enforced": h.get("enf") or "", "superseded": bool(h.get("superseded")),
                         "url": _alio_url({"orgId": h["orgId"], "idx": h["idx"], "category": h.get("category"), "table": h.get("table"), "idxName": h.get("idxName")})}
                        for h in hits[:lim]],
            "next": "조문은 alio_get_regulation 에 id 를 넣어 읽는다(질문·주제를 query 로 주면 관련 조문이 먼저 온다)."}
-    if failed:
-        out["failed"] = failed[:10]
     if note:
         out["note"] = note
     if len(hits) > lim:
         out["truncated"] = f"{len(hits)}건 중 {lim}건만 보였습니다(limit)."
-    return out
+    return _alio_fail_report(out, hits, failed, queried)
 
 
 def t_alio_get_regulation(id, query="", articles=None, limit=12):
@@ -380,7 +430,7 @@ def t_alio_get_regulation(id, query="", articles=None, limit=12):
         pass
     out = {"id": id, "agency": agency, "regulation": _alio_base(os.path.splitext(name)[0]) if name else "", "file": name,
            "article_count": d.get("count"), "toc": d.get("toc", []),
-           "articles": [{"article": f"제{a['no']}조", "title": a.get("title", ""), "body": a.get("body", ""), "relevant": bool(a.get("rel"))}
+           "articles": [{"article": _lbl(a['no']), "title": a.get("title", ""), "body": a.get("body", ""), "relevant": bool(a.get("rel"))}
                         for a in d.get("articles", [])],
            "url": d.get("url") or _alio_url(rule),
            "source": "알리오(공공기관 경영정보 공개시스템) 공시 현행본 — 인용할 때 기관명·규정명·조를 밝히세요."}
@@ -388,18 +438,23 @@ def t_alio_get_regulation(id, query="", articles=None, limit=12):
         if d.get(k):
             out[k] = d[k]
     if d.get("missing"):
-        out["missing"] = [f"제{n}조" for n in d["missing"]]
+        out["missing"] = [_lbl(n) for n in d["missing"]]
     return out
 
 
 _UNITS = ("원", "일", "개월", "년", "시간", "%", "회", "명", "배", "분")
+COMPARE_BUDGET = 45                                     # 수치 비교 한 번의 전체 제한(초) — 클라이언트 요청 제한(흔히 60초) 안에 답한다
 
 
 def t_alio_compare_values(item, unit, keyword, scope="peer", agencies=None, max_agencies=15):
-    """유관 기관 사규에서 같은 항목(일비·경조휴가 일수 등)의 수치를 뽑아 견준다(화면의 ‘다른 기관은 얼마로 정했나’와 같은 방식)."""
+    """유관 기관 사규에서 같은 항목(일비·경조휴가 일수 등)의 수치를 뽑아 견준다(화면의 ‘다른 기관은 얼마로 정했나’와 같은 방식).
+    전체를 COMPARE_BUDGET 안에 끝낸다: 남은 시간이 모자란 기관은 ‘시간 제한으로 건너뜀’으로 알리고 끝난 것만 돌려준다."""
     import concurrent.futures as cf
     import statistics
     import time
+    import alio
+    import reg_agent
+    t_end = time.monotonic() + COMPARE_BUDGET
     item = re.sub(r"\s+", " ", str(item or "")).strip()[:20]
     kw = re.sub(r"\s+", " ", str(keyword or "")).strip()[:40]
     if len(item.replace(" ", "")) < 2 or unit not in _UNITS:
@@ -411,7 +466,7 @@ def t_alio_compare_values(item, unit, keyword, scope="peer", agencies=None, max_
         ids, note = _alio_scope(D, scope if scope in ALIO_SCOPES else "peer", agencies)
         if not ids:
             return {"error": note or "조회할 기관이 없습니다."}
-        hits, failed = _alio_hits(kw, ids, D.get("batch"))
+        hits, failed, queried = _alio_hits(kw, ids, D.get("batch"), deadline=t_end)
     except _AlioDown as e:
         return {"error": str(e)}
     best = {}
@@ -419,37 +474,44 @@ def t_alio_compare_values(item, unit, keyword, scope="peer", agencies=None, max_
         if not h.get("superseded") and h["orgId"] not in best:
             best[h["orgId"]] = h
     pick = list(best.values())[: max(1, min(int(max_agencies or 15), 30))]
-    app = __import__("api_server").app
-    deadline = time.monotonic() + 50
 
     def one(h):
-        if time.monotonic() > deadline:
-            return h, {"success": False, "error": "시간 제한으로 건너뜀"}
-        with app.test_client() as c:
-            r = c.post("/api/regagent/bench/rule", json={**{k: h.get(k) for k in ("orgId", "idx", "category", "table", "idxName", "mod")}, "item": item, "unit": unit})
-            return h, (r.get_json(silent=True) or {"success": False, "error": f"응답 오류({r.status_code})"})
+        left = t_end - time.monotonic()
+        if left < 3:
+            return {"error": "시간 제한으로 건너뜀"}
+        try:
+            r = alio.rule_text({k: h.get(k) or "" for k in ("orgId", "idx", "category", "table", "idxName", "mod")}, budget=min(alio.RULE_BUDGET, left - 1))
+        except alio.AlioError as e:
+            return {"error": str(e)}
+        except Exception as e:                           # noqa: BLE001 — 한 기관의 실패가 전체를 멈추지 않게
+            return {"error": f"읽지 못함({type(e).__name__})"}
+        return {"matches": reg_agent.bench_extract(r["text"], item, unit)}
 
+    ex = cf.ThreadPoolExecutor(max_workers=3)            # 화면과 같이 세 곳씩
+    futs = {ex.submit(one, h): h for h in pick}
+    done, _pending = cf.wait(futs, timeout=max(1.0, t_end - time.monotonic()))
+    ex.shutdown(wait=False, cancel_futures=True)         # 끝나지 않은 것은 기다리지 않는다
     rows, none = [], []
-    with cf.ThreadPoolExecutor(max_workers=3) as ex:                 # 화면과 같이 세 곳씩
-        for h, d in ex.map(one, pick):
-            base = {"agency": h["org"], "regulation": _alio_base(h["title"]), "url": d.get("url") or _alio_url(h), "id": _alio_id(h)}
-            if d.get("success") and d.get("matches"):
-                m = d["matches"][0]
-                rows.append({**base, "value": m["first"], "values": m.get("vals", []), "article": f"제{m['no']}조" if re.match(r"\d", str(m.get("no") or "")) else (m.get("no") or ""),
-                             "sentence": m.get("text", ""), "other_matches": [x.get("text", "") for x in d["matches"][1:3]]})
-            else:
-                none.append({**base, "reason": d.get("error") or "이 항목의 수치를 찾지 못함(표로만 적혀 있을 수 있음)"})
+    for f, h in futs.items():
+        base = {"agency": h["org"], "regulation": _alio_base(h["title"]), "url": _alio_url(h), "id": _alio_id(h)}
+        d = f.result() if f in done else {"error": "시간 제한으로 건너뜀"}
+        if d.get("matches"):
+            m = d["matches"][0]
+            rows.append({**base, "value": m["first"], "values": m.get("vals", []), "article": _lbl(m.get("no")),
+                         "sentence": m.get("text", ""), "other_matches": [x.get("text", "") for x in d["matches"][1:3]]})
+        else:
+            none.append({**base, "reason": d.get("error") or "이 항목의 수치를 찾지 못함(표로만 적혀 있을 수 있음)"})
     vals = [r["value"] for r in rows]
-    out = {"item": item, "unit": unit, "keyword": kw, "agencies_searched": len(ids), "regulations_checked": len(pick),
+    out = {"item": item, "unit": unit, "keyword": kw, "agencies_searched": queried, "regulations_checked": len(pick),
            "values": sorted(rows, key=lambda r: -r["value"]), "not_found": none,
            "summary": ({"count": len(vals), "min": min(vals), "max": max(vals), "median": statistics.median(vals)} if vals else {"count": 0}),
            "ours": _our_values(kw, item, unit) or {"note": f"우리 기관 내규 문장에서 “{item}” 수치를 찾지 못했습니다(별표 표에만 있을 수 있음). get_regulation 의 appendices 로 별표를 읽어 확인하세요."},
            "caution": "기관마다 표기가 달라 잘못 뽑힐 수 있습니다. sentence(원문 문장)를 보고 같은 기준인지 확인한 뒤 인용하세요. 별표 표로만 적힌 수치는 못 찾을 수 있습니다."}
-    if failed:
-        out["failed"] = failed[:10]
+    if any(n["reason"] == "시간 제한으로 건너뜀" for n in none):
+        out["partial"] = f"{COMPARE_BUDGET}초 안에 끝내려고 일부 기관은 읽지 못했습니다. max_agencies 를 줄이거나 agencies 로 기관을 고르면 그 기관을 끝까지 봅니다."
     if note:
         out["note"] = note
-    return out
+    return _alio_fail_report(out, hits, failed, queried)
 
 
 def _our_values(kw, item, unit):
@@ -460,7 +522,7 @@ def _our_values(kw, item, unit):
     for r in _catalog():
         if k and k in r["title"].replace(" ", ""):
             for m in reg_agent.bench_extract(reg_agent._reg_raw_text(r["slug"]), item, unit)[:2]:
-                out.append({"regulation": r["title"], "value": m["first"], "article": f"제{m['no']}조" if re.match(r"\d", str(m.get("no") or "")) else (m.get("no") or ""),
+                out.append({"regulation": r["title"], "value": m["first"], "article": _lbl(m.get("no")),
                             "sentence": m.get("text", "")})
         if len(out) >= 4:
             break
@@ -492,7 +554,8 @@ def t_search(query):
     res = []
     for e in rows[:20]:
         title = titles.get(e["slug"], e["slug"])
-        res.append({"id": f"{e['slug']}#제{e['no']}조", "title": f"「{title}」 제{e['no']}조({e['title']})" if e.get("title") else f"「{title}」 제{e['no']}조",
+        lb = _lbl(e["no"])
+        res.append({"id": f"{e['slug']}#{lb}", "title": f"「{title}」 {lb}({e['title']})" if e.get("title") else f"「{title}」 {lb}",
                     "url": _reg_url(e["slug"]) or f"reg:{e['slug']}"})
     return {"results": res}
 
@@ -518,10 +581,10 @@ def t_fetch(id):
         no = _art_no(part)
         a = next((a for a in d["articles"] if a["no"] == no), None)
         if not a:
-            return {"error": f"「{d['title']}」에 제{no}조가 없습니다."}
-        t = f"제{a['no']}조({a.get('title', '')})" if a.get("title") else f"제{a['no']}조"
+            return {"error": f"「{d['title']}」에 {_lbl(no)}가 없습니다."}
+        t = f"{_lbl(a['no'])}({a.get('title', '')})" if a.get("title") else _lbl(a["no"])
         return {"id": rid, "title": f"「{d['title']}」 {t}", "text": f"{t} {a.get('body', '')}".strip(), "url": url, "metadata": meta}
-    body = "\n\n".join((f"제{a['no']}조({a.get('title', '')}) " if a.get("title") else f"제{a['no']}조 ") + a.get("body", "") for a in d["articles"])
+    body = "\n\n".join((f"{_lbl(a['no'])}({a.get('title', '')}) " if a.get("title") else f"{_lbl(a['no'])} ") + a.get("body", "") for a in d["articles"])
     return {"id": rid, "title": f"「{d['title']}」", "text": body[:100000], "url": url, "metadata": meta}
 
 
@@ -553,6 +616,77 @@ def _secret():
     return (os.environ.get("MCP_TOKEN") or "").strip()
 
 
+# 엔진에 넘기는 입력: 작업별로 허용한 키만, 글 길이 상한을 둔다. 엔진(JS 정규식)은 서버에서 돌고 QuickJS 는 정규식 계산을 중간에 끊지 못하므로
+# 입력 크기로 계산량을 묶는다(내려받기 링크도 같은 정리를 거친다).
+_KEYS = {"agent": ("request",), "amend": ("slug", "changes", "appendix_changes", "addenda", "reason", "effective", "references"),
+         "enact": ("title", "text", "purpose", "addenda", "effective", "references")}
+_CAP = {"request": 500, "slug": 200, "title": 120, "text": 30000, "purpose": 3000, "reason": 3000, "addenda": 3000, "effective": 40}
+MAX_CHANGE_CHARS = 60000                                # 고친 조문 본문의 합
+
+
+def _norm_changes(changes):
+    """고칠 조문: 조 번호를 엔진 꼴로(“제13조의2”·“제13의2조” → 13의2), 같은 조가 두 번이면 마지막 것만(알림), 본문 길이 상한."""
+    if isinstance(changes, dict):
+        changes = [changes]
+    if not isinstance(changes, list):
+        return [], []
+    by, order, warn, total = {}, [], [], 0
+    for c in changes[:80]:
+        if not isinstance(c, dict):
+            continue
+        no = _art_no(c.get("article") or c.get("no") or "")
+        if not no:
+            continue
+        t = str(c.get("type") or ("delete" if c.get("delete") else "modify")).lower()
+        body = str(c.get("body") or "")[:20000]
+        if total + len(body) > MAX_CHANGE_CHARS:
+            warn.append(f"고친 조문이 너무 길어 {_lbl(no)}부터는 빼었습니다(합계 {MAX_CHANGE_CHARS:,}자까지).")
+            break
+        total += len(body)
+        e = {"article": no, "type": t if t in ("modify", "insert", "delete") else "modify", "body": body}
+        if c.get("title") is not None and str(c.get("title")).strip():        # 비우면 현행 제목
+            e["title"] = str(c["title"])[:100]
+        if no in by:
+            warn.append(f"{_lbl(no)}가 두 번 들어와 마지막 것을 썼습니다.")
+        else:
+            order.append(no)
+        by[no] = e
+    return [by[n] for n in order], warn
+
+
+def _norm_appx(xs):
+    out = []
+    for x in (xs if isinstance(xs, list) else [xs] if isinstance(xs, dict) else [])[:20]:
+        if not isinstance(x, dict) or not str(x.get("id") or "").strip():
+            continue
+        k = str(x["id"]).strip()[:40]
+        if re.fullmatch(r"\d+(?:의\d+)?", re.sub(r"\s+", "", k)):            # “2” → “별표 2”
+            k = "별표 " + re.sub(r"\s+", "", k)
+        e = {"id": k, "body": str(x.get("body") or "")[:30000]}
+        if x.get("head") is not None and str(x.get("head")).strip():
+            e["head"] = str(x["head"])[:300]
+        out.append(e)
+    return out
+
+
+def clean_input(op, inp):
+    """작업 입력 정리 → (inp, 알림). 도구 호출과 내려받기 링크가 같은 규칙을 쓴다."""
+    if op not in _KEYS or not isinstance(inp, dict):
+        raise ValueError("알 수 없는 작업입니다.")
+    out, warn = {}, []
+    for k in _KEYS[op]:
+        if k in _CAP and inp.get(k) is not None:
+            out[k] = str(inp[k])[:_CAP[k]]
+    if op == "amend":
+        out["changes"], warn = _norm_changes(inp.get("changes"))
+        out["appendix_changes"] = _norm_appx(inp.get("appendix_changes"))
+    if "references" in _KEYS[op]:
+        refs = _refs_in(inp.get("references"))
+        if refs:
+            out["references"] = refs
+    return out, warn
+
+
 def make_token(op, inp):
     """내려받기 링크에 담을 요청 — 서버에 저장하지 않고 링크 자체에 담는다(서버리스에서도 된다). MCP_TOKEN 이 있으면 서명한다."""
     raw = base64.urlsafe_b64encode(zlib.compress(json.dumps([op, inp], ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)).decode().rstrip("=")
@@ -561,29 +695,34 @@ def make_token(op, inp):
     return raw
 
 
+MAX_TOKEN_DATA = 160_000                                # 링크 안 요청(압축을 푼 크기) 상한 — 도구 입력 상한의 합보다 조금 크게
+
+
 def read_token(tok):
-    """링크 토큰 → (op, inp). 잘못됐거나 서명이 맞지 않으면 ValueError."""
+    """링크 토큰 → (op, inp). 잘못됐으면 ValueError, 서명이 맞지 않으면 PermissionError. 입력은 도구 호출과 같은 규칙으로 다시 정리한다."""
     tok = str(tok or "")
     if len(tok) > MAX_LINK * 2:
         raise ValueError("링크가 너무 깁니다.")
     raw, _, sig = tok.partition(".")
     if _secret():
-        want = base64.urlsafe_b64encode(hmac.new(_secret().encode(), raw.encode(), hashlib.sha256).digest()[:18]).decode()
-        if not sig or not hmac.compare_digest(sig, want):
+        want = base64.urlsafe_b64encode(hmac.new(_secret().encode(), raw.encode(), hashlib.sha256).digest()[:18])
+        if not sig or not sig.isascii() or not hmac.compare_digest(sig.encode(), want):
             raise PermissionError("서명이 맞지 않는 링크입니다.")
     try:
-        data = zlib.decompressobj().decompress(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), 2_000_000)
+        z = zlib.decompressobj()
+        data = z.decompress(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), MAX_TOKEN_DATA)
+        if z.unconsumed_tail:
+            raise ValueError
         op, inp = json.loads(data.decode("utf-8"))
+        inp, _ = clean_input(op, inp)
     except Exception:
-        raise ValueError("링크를 읽지 못했습니다.")
-    if op not in ("agent", "amend", "enact") or not isinstance(inp, dict):
         raise ValueError("링크를 읽지 못했습니다.")
     return op, inp
 
 
 def doc_file(op, inp, fmt):
     """링크로 받은 요청을 다시 실행해 문서 세트 파일을 만든다 → (bytes, 파일 이름, 오류)."""
-    res = engine.run(op, **{**inp, "docs": True})
+    res = engine.run(op, {**inp, "docs": True}, timeout=engine.HTTP_TIMEOUT)
     doc = res.get("doc") if isinstance(res, dict) else None
     if not doc:
         return None, "", (res or {}).get("error") or "이 요청으로는 만들 문서가 없습니다(바뀐 조문 없음)."
@@ -594,8 +733,13 @@ def doc_file(op, inp, fmt):
 def _with_docs(op, inp, out_dir, fmt, documents):
     """엔진 실행 + 문서: stdio 는 output_dir 에 파일로, http 는 내려받기 링크로."""
     fmt = _fmt(fmt)
+    inp, warn = clean_input(op, inp)
+    if op == "amend" and not inp["changes"] and not inp["appendix_changes"]:
+        return {"error": "changes 에 고칠 조문을 하나 이상 주세요(예: [{\"article\": \"제15조\", \"body\": \"…\"}]).", "warnings": warn}
     if _mode() == "http":
-        res = engine.run(op, **inp)
+        res = engine.run(op, inp, timeout=engine.HTTP_TIMEOUT)
+        if warn:
+            res["warnings"] = warn + list(res.get("warnings") or [])
         if documents is not False and not res.get("error") and res.get("doc_ready"):
             tok = make_token(op, inp)
             if len(tok) <= MAX_LINK and _base_url():
@@ -604,7 +748,9 @@ def _with_docs(op, inp, out_dir, fmt, documents):
             else:
                 res["download"] = {"note": "요청이 길어 내려받기 링크를 만들지 못했습니다. 웹 화면에서 같은 작업을 하고 ‘문서 받기’를 쓰세요."}
         return res
-    res = engine.run(op, **inp, docs=bool(out_dir))
+    res = engine.run(op, {**inp, "docs": bool(out_dir)})
+    if warn:
+        res["warnings"] = warn + list(res.get("warnings") or [])
     doc = res.pop("doc", None) if isinstance(res, dict) else None
     if out_dir and doc:
         res["saved"] = _save(doc, out_dir, fmt)
@@ -612,7 +758,7 @@ def _with_docs(op, inp, out_dir, fmt, documents):
 
 
 def t_run_agent(request, output_dir="", format="hwpx", documents=True):
-    return _with_docs("agent", {"request": str(request or "")[:500]}, output_dir, format, documents)
+    return _with_docs("agent", {"request": request}, output_dir, format, documents)
 
 
 def t_amend_regulation(regulation, changes, appendix_changes=None, addenda="", reason="", effective="", references=None,
@@ -620,22 +766,17 @@ def t_amend_regulation(regulation, changes, appendix_changes=None, addenda="", r
     r, cand = _find(regulation)
     if not r:
         return _not_found(regulation, cand)
-    if isinstance(changes, dict):
-        changes = [changes]
-    if not isinstance(changes, list) or not changes:
-        return {"error": "changes 에 고칠 조문을 하나 이상 주세요(예: [{\"article\": \"제15조\", \"body\": \"…\"}])."}
-    inp = {"slug": r["slug"], "changes": changes, "appendix_changes": appendix_changes or [], "addenda": addenda, "reason": reason, "effective": effective}
-    if _refs_in(references):
-        inp["references"] = _refs_in(references)
+    inp = {"slug": r["slug"], "changes": changes, "appendix_changes": appendix_changes, "addenda": addenda, "reason": reason, "effective": effective,
+           "references": references}
     return _with_docs("amend", inp, output_dir, format, documents)
 
 
 def t_enact_regulation(title, text, purpose="", addenda="", effective="", references=None, output_dir="", format="hwpx", documents=True):
     if not str(text or "").strip():
         return {"error": "text 에 내규안 조문 전체(제1조(목적) …)를 주세요."}
-    inp = {"title": str(title or "")[:80], "text": str(text)[:60000], "purpose": purpose, "addenda": addenda, "effective": effective}
-    if _refs_in(references):
-        inp["references"] = _refs_in(references)
+    if len(str(text)) > _CAP["text"]:
+        return {"error": f"내규안이 너무 깁니다({len(str(text)):,}자). {_CAP['text']:,}자 이하로 나눠 점검하세요."}
+    inp = {"title": title, "text": text, "purpose": purpose, "addenda": addenda, "effective": effective, "references": references}
     return _with_docs("enact", inp, output_dir, format, documents)
 
 

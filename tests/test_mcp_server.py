@@ -1,11 +1,11 @@
 """MCP 서버(mcp_server/server.py): 표준 입출력 JSON-RPC 로 도구 목록·호출이 되는지, 화면 엔진 도구가 개정문·대비표·검증을 내는지."""
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 import pytest
+from conftest import needs_engine
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVER = os.path.join(ROOT, "mcp_server", "server.py")
@@ -87,15 +87,7 @@ def test_read_tools(mcp):
     assert r["isError"]
 
 
-def _engine_ok():
-    try:
-        import quickjs  # noqa: F401
-        return True
-    except ImportError:
-        return bool(shutil.which("node"))
-
-
-@pytest.mark.skipif(not _engine_ok(), reason="화면 엔진 도구는 quickjs 패키지나 Node.js 가 필요하다")
+@needs_engine
 def test_engine_tools(mcp, tmp_path):
     r, d = mcp.call("amend_regulation", {"regulation": "여비규정", "changes": [{"article": "제20조", "type": "delete"}], "output_dir": str(tmp_path)})
     assert not r["isError"], d

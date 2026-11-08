@@ -90,11 +90,13 @@
       if (type !== 'insert' && !old) { errors.push(`제${no}조가 「${d.title}」에 없습니다.`); continue; }
       if (type === 'delete') { changes.push({ type, no, title: old.title, body: '' }); continue; }
       if (!String(c.body || '').trim()) { errors.push(`제${no}조의 새 본문(body)이 비었습니다.`); continue; }
-      changes.push({ type, no, title: c.title != null ? String(c.title) : (old ? old.title : ''), body: String(c.body).replace(/\r/g, '') });
+      const tt = c.title != null && String(c.title).trim() ? String(c.title) : (old ? old.title : '');      // 비우면 현행 제목
+      changes.push({ type, no, title: tt, body: String(c.body).replace(/\r/g, '') });
     }
     const appx = [];
     for (const x of inp.appendix_changes || []) {
-      const ox = raOldX(String(x.id || ''));
+      const key = String(x.id || '').replace(/\s+/g, '');                  // “별표2”·“별표 2” 모두
+      const ox = raArr(_raArts && _raArts.appendix).find(y => String(y.id || '').replace(/\s+/g, '') === key);
       if (!ox) { errors.push(`${x.id}가 「${d.title}」에 없습니다.`); continue; }
       appx.push({ type: 'modify', id: ox.id, head: x.head != null ? String(x.head) : ox.head, body: String(x.body || '') });
     }
@@ -125,7 +127,8 @@
         other_regulations: (im.outer || []).slice(0, 10).map(h => `「${h.reg || h.title || ''}」 제${h.no}조에서 “${h.text}” 인용`),
         appendices: (im.appendix || []).slice(0, 10).map(h => typeof h === 'string' ? h : (h.id || h.label || JSON.stringify(h))) };
     }
-    out.doc_ready = !!(changes.length || appx.length);
+    out.doc_ready = (raEffChanges().length + raEffAppx().length) > 0;      // 현행과 같은 “수정안”이면 문서를 만들지 않는다(화면과 같음)
+    if (!out.doc_ready) out.warnings.push('바뀐 조문·별표가 없습니다(현행과 같음). 고친 본문을 주세요.');
     if (inp.docs && out.doc_ready) { await raResearch('amend'); out.doc = docPayload('amend'); }
     return out;
   }
