@@ -8,6 +8,9 @@
   "rules_name": "내규관리규칙",
   "email_domain": "koat.or.kr",
   "lint_refs": {"deleted": "제6조제2항", "title": "제5조제3호", "addenda": "제5조제5호"},
+  "doc_refs": {"basis": "제14조(입안)·제16조({reg}심의)", "notice": "제15조의3", "notice_public": "제15조의3제2항", "notice_minor": "제15조의3제3항",
+               "staff": "제15조의4", "staff_minor": "제15조의4제2항", "level_ye": "제3조의2", "upper_review": "제16조의2",
+               "minor_skip": "제16조제1항 단서", "full_rev": "제6조", "corrupt": "제15조의2", "regul": "제17조", "submit_due": "제14조제1항"},
   "notice_days": 20,
   "staff_days": 7,
   "stale_terms": [

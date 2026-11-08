@@ -60,7 +60,7 @@ def test_check_org_config_sample_and_ours(tmp_path):
     r = subprocess.run([sys.executable, "scripts/check_org_config.py"], capture_output=True, text=True,
                        encoding="utf-8", env=env, cwd=ROOT, timeout=300)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "근거 조항 15개 모두 「내규관리규칙」에 있음" in r.stdout and "오류 0" in r.stdout
+    assert "근거 조항 18개 모두 「내규관리규칙」에 있음" in r.stdout and "오류 0" in r.stdout
     # 운영 프로필을 그대로 베낀 경우 — 조 번호가 가상 기관 규칙에 없다고 짚는다
     env["ORG_CONFIG"] = os.path.join(ROOT, "org_config.json")
     r = subprocess.run([sys.executable, "scripts/check_org_config.py"], capture_output=True, text=True,

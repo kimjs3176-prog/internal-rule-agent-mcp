@@ -12,6 +12,7 @@
   "title": "제4조제2항",
   "addenda": "제4조제1항"
  },
+ "doc_refs": {"basis": "제5조(제정·개정의 요청)·제7조(심의)", "staff": "제6조"},
  "notice_days": 20,
  "staff_days": 7,
  "stale_terms": [

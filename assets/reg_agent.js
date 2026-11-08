@@ -100,6 +100,10 @@ async function raLoadOrg(){
 const RA_KEY_URL='https://aistudio.google.com/apikey';
 function raAiKeyNote(what){ return raHasAi()?'':`<div class="ra-note ra-keynote">${raIc('spark')}<span>${_e(what||'AI 키가 없으면 규칙 기반으로 처리합니다.')}</span><button class="svc-btn sm" onclick="openAiModal()">AI 설정</button></div>`; }   // 키 발급 링크는 AI 설정 창 안에
 function raRules(){ return (RA_ORG&&RA_ORG.rules_name)||'내규관리규칙'; }
+// 문서 문장에 붙이는 근거 조항 — 기관 프로필 doc_refs 에서만 읽는다(다른 기관 문서에 농진원 조 번호가 박히지 않게). 비면 근거 문구를 통째로 뺀다
+function raRef(k){ const r=RA_ORG&&RA_ORG.doc_refs; return r&&typeof r[k]==='string'?r[k].trim().replace(/\{reg\}/g,RA_ORG.reg_word||'내규'):''; }
+function raRefP(k){ const r=raRef(k); return r?`(「${raRules()}」 ${r})`:''; }                    // “(「내규관리규칙」 제15조의3)”
+function raRefBy(k){ const r=raRef(k); return r?`「${raRules()}」 ${r}에 따라 `:''; }             // “「내규관리규칙」 제15조의4에 따라 ”
 function _raBlank(){
   return {tab:'agent',
     agent:{req:'',steps:[],plan:null,done:null,running:false},
@@ -2445,7 +2449,7 @@ function raOutReason(c){
   return {title:`「${c.title}」 ${c.word} 이유서`, items:[
     {t:`${c.word} 이유`, s:[c.purpose||`○○에 필요한 사항을 정하기 위하여 「${c.title}」${raEul(c.title)} ${c.word}하려는 것임.`]},
     {t:'주요 내용', s:main.length?main:['○○']},
-    {t:'관련 근거', s:[`「${raRules()}」 제14조(입안)·제16조(${RA_ORG.reg_word}심의)`,...raBasisList(c,c.mode)]},
+    {t:'관련 근거', s:[...(raRef('basis')?[`「${raRules()}」 ${raRef('basis')}`]:[]),...raBasisList(c,c.mode)]},
     ...(raAlioRefList(c.mode).length?[{t:'다른 공공기관 사례(알리오 공시 내부규정)', s:raAlioRefList(c.mode).slice(0,6).map(raAlioRefLine)}]:[]),
     {t:'행정사항', s:raAgendaEtc(c,c.mode).filter(x=>!/^관련 근거:/.test(x))},   // 심의안건서 “관련근거 및 기타사항”과 같은 내용
   ], tail:raBunim(c)};
@@ -2475,8 +2479,8 @@ function raAppxMain(x){
 function raOutNotice(c, staff){
   const days=staff?(+RA_ORG.staff_days||7):(+RA_ORG.notice_days||20);
   return {title:staff?`「${c.title}」 ${c.word}(안) 직원 의견수렴 공고`:`「${c.title}」 ${c.word}(안) 사전예고`,
-    lead:staff?`「${c.title}」${raEul(c.title)} ${c.word}하기에 앞서 임직원의 의견을 듣고자 「${raRules()}」 제15조의4에 따라 다음과 같이 알립니다.`
-              :`${RA_ORG.org_name}${raJosa(RA_ORG.org_name)} 「${c.title}」${raEul(c.title)} ${c.word}하기에 앞서 국민·기관·단체의 의견을 듣고자 「${raRules()}」 제15조의3에 따라 다음과 같이 예고합니다.`,
+    lead:staff?`「${c.title}」${raEul(c.title)} ${c.word}하기에 앞서 임직원의 의견을 듣고자 ${raRefBy('staff')}다음과 같이 알립니다.`
+              :`${RA_ORG.org_name}${raJosa(RA_ORG.org_name)} 「${c.title}」${raEul(c.title)} ${c.word}하기에 앞서 국민·기관·단체의 의견을 듣고자 ${raRefBy('notice')}다음과 같이 예고합니다.`,
     items:[
       {t:`${RA_ORG.reg_word}명: ${c.title}`},
       {t:`${c.word} 이유`, s:[c.purpose||'○○']},
@@ -2528,7 +2532,7 @@ function raDocsView(mode){
     `<div class="ra-save">${all}<div class="ra-row"><button class="svc-btn ghost" onclick="raCopyDoc('${mode}')">복사</button><button class="svc-btn ghost" onclick="raPrintDoc('${mode}')">인쇄</button>`+
     `<span class="ra-sep"></span><button class="svc-btn yes" onclick="raExport('${mode}','hwpx')">한글(.hwpx)</button><button class="svc-btn" onclick="raExport('${mode}','docx')">Word(.docx)</button></div></div>`+
     raSubmitPanel(mode,B)+                                              // 문서·저장 단추를 먼저 보이고, 제출 정보 입력은 그 아래(접힘)
-    `<div class="ra-meta"><span class="ra-days">사전예고 ${RA_ORG.notice_days}일↑</span><span class="ra-days">직원 의견수렴 ${RA_ORG.staff_days}일↑</span>${raTip(`사전예고는 국민 권리·의무 관련 ${RA_ORG.reg_word}(「${raRules()}」 제15조의3제2항)일 때, 직원 의견수렴은 제15조의4 — 절차 안내를 확인하세요.`)}</div>`;
+    `<div class="ra-meta"><span class="ra-days">사전예고 ${RA_ORG.notice_days}일↑</span><span class="ra-days">직원 의견수렴 ${RA_ORG.staff_days}일↑</span>${raTip(`사전예고는 국민 권리·의무 관련 ${RA_ORG.reg_word}${raRefP('notice_public')}일 때, 직원 의견수렴은 ${raRef('staff')?`「${raRules()}」 ${raRef('staff')}에 따라`:'기관 절차에 따라'} — 절차 안내를 확인하세요.`)}</div>`;
 }
 // ── 공문서 표기 점검(행정업무운영편람) — 서버 notation.py 규칙: 날짜·기간·시각·금액·쌍점·붙임·끝·낫표·줄표·외래어 ──
 const RA_NOTA_DOCS=['agenda','law','reason','notice','staff','opinion','review'];
@@ -2642,10 +2646,10 @@ function raAgendaEtc(c, mode){
   const opTxt=oc.all?`제출 의견 ${oc.all}건(반영 ${oc.acc}건, 일부 반영 ${oc.part}건, 미반영 ${oc.rej}건${oc.open?`, 검토 중 ${oc.open}건`:''})`:'제출된 의견 없음';
   const qd=c.mode==='amend'?raArr(c.changes).map(ch=>{ const o=ch.type==='insert'?null:raOld(ch.no); const d=o?raQtyDiff(o.body,ch.body):null; return d&&[...d.from,...d.to].some(x=>/원$/.test(x)); }).some(Boolean):false;
   return [
-    `관련 근거: 「${raRules()}」 제14조(입안)·제16조(${RA_ORG.reg_word}심의)`+(law.length?`, ${law.join(', ')}`:''),
+    `관련 근거: `+([raRef('basis')?`「${raRules()}」 ${raRef('basis')}`:'',...law].filter(Boolean).join(', ')||'(기관 규칙의 근거 조항을 적으세요)'),
     `관련 부서 협의: ${S.agree||q(n.agree?'○○팀 협의(완료/예정)':'해당 없음')}`,
-    `대국민 사전예고: ${S.noticeDone||q(n.notice?`${RA_ORG.notice_days}일 이상 실시(기간: ○○. ○. ○.∼○○. ○. ○.)`:n.minor?`경미한 변경으로 생략(「${raRules()}」 제15조의3제3항)`:'해당 없음(국민 권리·의무와 직접 관련 없음)')}`,
-    `직원 의견수렴: ${S.staffDone||q(n.staff?`${RA_ORG.staff_days}일 이상 실시(기간: ○○. ○. ○.∼○○. ○. ○.)`:`경미한 변경으로 생략(「${raRules()}」 제15조의4제2항)`)}`+(S.staffDone||S.noticeDone||oc.all||(n.answered&&n.staff)?`, ${opTxt}`:''),
+    `대국민 사전예고: ${S.noticeDone||q(n.notice?`${RA_ORG.notice_days}일 이상 실시(기간: ○○. ○. ○.∼○○. ○. ○.)`:n.minor?`경미한 변경으로 생략${raRefP('notice_minor')}`:'해당 없음(국민 권리·의무와 직접 관련 없음)')}`,
+    `직원 의견수렴: ${S.staffDone||q(n.staff?`${RA_ORG.staff_days}일 이상 실시(기간: ○○. ○. ○.∼○○. ○. ○.)`:`경미한 변경으로 생략${raRefP('staff_minor')}`)}`+(S.staffDone||S.noticeDone||oc.all||(n.answered&&n.staff)?`, ${opTxt}`:''),
     `부패영향평가: ${S.corrupt||q(n.corrupt?'평가 요청(결과: ○○)':'해당 없음')}`,
     `자체 규제심사: ${n.regul?'실시(붙임 자체 규제심사서)':raRegulAuto(c,mode).length?`검토 필요(의무·허가·신고 등 규제성 조문 ${raRegulAuto(c,mode).length}건, 유사 행정규제 해당 여부 확인)`:q('해당 없음(신설·강화되는 규제 없음)')}`,
     ...(rel.length?[`관계 ${RA_ORG.reg_word} 정비: ${rel.slice(0,4).map(o=>`「${o.reg}」`).join(', ')}${rel.length>4?` 등 ${rel.length}건`:''}의 인용 조문을 부칙(다른 ${RA_ORG.reg_word}의 개정)으로 함께 정비`]:[]),
@@ -2764,8 +2768,8 @@ function raOpinionBlocks(c, mode){
   const out=[{t:'p',text:lead,titleBold:1}];
   if(ops.length) out.push({t:'table',colWidths:[3500,8000,18128,7000,11000],rows:[[H('연번',{hd:1}),H('제출자',{hd:1}),H('의견 요지',{hd:1}),H('반영 여부',{hd:1}),H('사유',{hd:1})],
     ...ops.map((o,i)=>[H(i+1),H(o.who||''),H(o.what||''),H(o.res||'검토 중'),H(o.why||'')])]});
-  out.push({t:'p',text:(n.notice||S.noticeDone)?`※ 사전예고에 제출된 의견의 반영 여부는 의견 제출자에게 통지함(「${raRules()}」 제15조의3).  끝.`
-    :`※ 제출 의견을 검토하여 ${RA_ORG.reg_word}안에 반영함(「${raRules()}」 제15조의4).  끝.`});
+  out.push({t:'p',text:(n.notice||S.noticeDone)?`※ 사전예고에 제출된 의견의 반영 여부는 의견 제출자에게 통지함${raRefP('notice')}.  끝.`
+    :`※ 제출 의견을 검토하여 ${RA_ORG.reg_word}안에 반영함${raRefP('staff')}.  끝.`});
   return out;
 }
 // 규제성 조문 후보: 의무·허가·제출·제한·금지 표현 — 기관(농진원·원장·부서·위원회) 자신의 의무는 규제가 아니다
@@ -2848,9 +2852,9 @@ function raRgMark(mode,k,v){ raSub_(mode).regul.marks[k]=v; _raSave(); raSubRedr
 // 제출 전 점검표: 막는 문제(err)·보완 권장(warn)·확인(ok)
 function raSubmitCheck(mode, B){
   const S=RA[mode], sub=raSub_(mode), n=raSubNeeds(mode), out=[], add=(st,t,act)=>out.push({st,t,act}), picks=raPicks(mode), names=Object.fromEntries(RA_DOCS[mode]);
-  if(n.level==='ye') add('warn',`예규는 ${RA_ORG.head} 결재로 정합니다 — ${RA_ORG.reg_word}심의 안건 대신 결재 문서로 올리세요(「${raRules()}」 제3조의2).`);
-  if(n.level==='reg') add('ok',`규정(이사회 의결 대상): 상급위원회 ${RA_ORG.reg_word}심의(「${raRules()}」 제16조의2) 뒤 이사회에 부의합니다.`);
-  if(n.minor) add('ok',`경미한 변경: ${RA_ORG.reg_word}심의를 생략하고 ${RA_ORG.reg_word}관리부서장 심사로 대신할 수 있습니다(「${raRules()}」 제16조제1항 단서).`);
+  if(n.level==='ye') add('warn',`예규는 ${RA_ORG.head} 결재로 정합니다 — ${RA_ORG.reg_word}심의 안건 대신 결재 문서로 올리세요${raRefP('level_ye')}.`);
+  if(n.level==='reg') add('ok',`규정(이사회 의결 대상): 상급위원회 ${RA_ORG.reg_word}심의${raRefP('upper_review')} 뒤 이사회에 부의합니다.`);
+  if(n.minor) add('ok',`경미한 변경: ${RA_ORG.reg_word}심의를 생략하고 ${RA_ORG.reg_word}관리부서장 심사로 대신할 수 있습니다${raRefP('minor_skip')}.`);
   const lint=raArr(S.lint), le=lint.filter(i=>i.level==='error').length;
   if(!S.lint) add('warn','조문 형식 점검을 아직 하지 않았습니다.',`raLint('${mode}')`);
   else add(le?'err':'ok',le?`조문 형식 점검 오류 ${le}건이 남아 있습니다.`:'조문 형식 점검 — 오류 없음');
@@ -2869,7 +2873,7 @@ function raSubmitCheck(mode, B){
   if(pv) add(aok&&raMe()?'ok':'err',aok&&raMe()?`AI 작성분 검토 확인 — ${raMe()}(${raAiParts(pv)})`
     :stale?`검토 확인 뒤 조문·이유·사전검토가 바뀌었습니다 — 바뀐 내용을 다시 검토하고 “AI 작성분 검토 확인”에 다시 체크하세요.`
     :`AI 작성분(${raAiParts(pv)}) — 현행·근거와 대조해 검토한 뒤 “AI 작성분 검토 확인”에 체크하세요.`);
-  if(mode==='amend'){ const sc=raAmendScale(); if(sc.full&&!RA.amend.fullRev) add('warn',`조문의 ${Math.round(sc.ratio*100)}%를 고칩니다 — 3분의 2 이상이면 전부개정 방식입니다(「${raRules()}」 제6조).`); }
+  if(mode==='amend'){ const sc=raAmendScale(); if(sc.full&&!RA.amend.fullRev) add('warn',`조문의 ${Math.round(sc.ratio*100)}%를 고칩니다 — 3분의 2 이상이면 전부개정 방식입니다${raRefP('full_rev')}.`); }
   const rel=raRelRegs(mode); if(rel.length&&!/다른\s*\S*\s*개정/.test(B.c.addenda||'')) add('warn',`다른 ${RA_ORG.reg_word} ${rel.length}건이 바뀌는 조문을 인용합니다 — 부칙에 “다른 ${RA_ORG.reg_word}의 개정”을 넣으세요.`);
   add(sub.dept&&sub.proposer?'ok':'warn',sub.dept&&sub.proposer?`제안: ${sub.dept} ${sub.proposer}`:'제안 부서·제안자(직위·성명)를 입력하세요.');
   if(sub.open==='비공개'&&!String(sub.openWhy||'').trim()) add('warn','비공개 사유를 입력하세요(공개 여부는 심의사항입니다).');
@@ -2880,12 +2884,12 @@ function raSubmitCheck(mode, B){
     if(n.agree) add(sub.agree?'ok':'warn',sub.agree?`관련 부서 협의: ${sub.agree}`:'여러 부서 소관 — 관련 부서 협의 결과를 입력하세요.');
     if(n.regul){ const R=sub.regul, full=RA_REGUL_ITEMS.every(([k])=>(R.marks||{})[k]), op=String(R.opinion||'').trim();
       add(!picks.includes('regul')?'warn':full&&op?'ok':'warn',!picks.includes('regul')?'유사 행정규제 — 자체 규제심사서[별지 제5호 서식]를 패키지에 넣으세요.':full&&op?'자체 규제심사서 — 판단·의견 입력 완료':'자체 규제심사서의 항목별 판단과 검토 의견을 입력하세요.'); }
-    if(n.corrupt) add(!picks.includes('corrupt')?'warn':sub.corrupt?'ok':'warn',!picks.includes('corrupt')?'국민 생활 영향 — 부패영향평가 기초자료[별지 제8호 서식]를 패키지에 넣으세요.':sub.corrupt?`부패영향평가 결과: ${sub.corrupt}`:`부패영향평가 결과(원안 동의 또는 개선의견 반영)를 입력하세요(「${raRules()}」 제15조의2).`);
+    if(n.corrupt) add(!picks.includes('corrupt')?'warn':sub.corrupt?'ok':'warn',!picks.includes('corrupt')?'국민 생활 영향 — 부패영향평가 기초자료[별지 제8호 서식]를 패키지에 넣으세요.':sub.corrupt?`부패영향평가 결과: ${sub.corrupt}`:`부패영향평가 결과(원안 동의 또는 개선의견 반영)를 입력하세요${raRefP('corrupt')}.`);
   }
-  const rg=raRegulAuto(B.c); if(rg.length&&!n.regul) add('warn',`국민·임직원에게 의무·허가·신고를 지우는 조문 ${rg.length}건 — 유사 행정규제면 자체 규제심사서[별지 제5호 서식]가 필요합니다(「${raRules()}」 제17조).`,"raTab('proc')");
+  const rg=raRegulAuto(B.c); if(rg.length&&!n.regul) add('warn',`국민·임직원에게 의무·허가·신고를 지우는 조문 ${rg.length}건 — 유사 행정규제면 자체 규제심사서[별지 제5호 서식]가 필요합니다${raRefP('regul')}.`,"raTab('proc')");
   const oc=raOpCount(sub); if(oc.open) add('err',`반영 여부를 정하지 않은 의견 ${oc.open}건`);
   if(sub.meet){ const due=raDueDate(sub.meet), now=new Date(); now.setHours(0,0,0,0);
-    add(now>due?'warn':'ok',`제출 기한: ${raDateFmt(due,1)}(위원회 ${raDateFmt(raYmdP(sub.meet),1)} 개최 7일 전, 「${raRules()}」 제14조제1항) · 위원 통보는 개최 3일 전까지`+(now>due?' — 기한이 지났습니다. 긴급한 사유를 적어 제출하세요.':''));
+    add(now>due?'warn':'ok',`제출 기한: ${raDateFmt(due,1)}(위원회 ${raDateFmt(raYmdP(sub.meet),1)} 개최 7일 전${raRef('submit_due')?`, 「${raRules()}」 ${raRef('submit_due')}`:''}) · 위원 통보는 개최 3일 전까지`+(now>due?' — 기한이 지났습니다. 긴급한 사유를 적어 제출하세요.':''));
     const em=String(raEffOf(B.c)).match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\./); if(em&&new Date(+em[1],+em[2]-1,+em[3])<=raYmdP(sub.meet)) add('warn',`시행일(${raEffOf(B.c)})이 심의 예정일보다 빠르거나 같습니다.`); }
   else add('warn','심의(위원회) 예정일을 입력하면 제출 기한(7일 전)을 알려 드립니다.');
   return out;
@@ -3849,7 +3853,7 @@ function raBulkDocs(){
   const reason=[`${RA_ORG.reg_word} 일괄 정비 이유서`,'','1. 정비 이유',`  ${U.reason||`“${R.old}”${raJosa(R.old,['이','가'])} “${R.new}”${raRo(R.new)} 바뀜에 따라 이를 인용하는 ${RA_ORG.reg_word}를 일괄 정비하려는 것임.`}`,'',
     '2. 정비 대상',...regs.map((g,i)=>`  ${RA_GANA(i)}. 「${g.reg}」 ${g.articles.map(a=>raLbl(a.no)).join(', ')} (${g.count}곳)`),'',
     '3. 정비 방식',`  각 ${RA_ORG.reg_word}의 해당 조문 중 “${R.old}”${raEul(R.old)} “${R.new}”${raRo(R.new)} 고침(조사 포함). 근거 ${RA_ORG.reg_word} 개정 시 부칙 “다른 ${RA_ORG.reg_word}의 개정”으로 함께 개정하거나 각 ${RA_ORG.reg_word}별로 개정함.`,'',
-    `4. 관련: 「${raRules()}」 제16조제1항(법령·상위 내규 변경에 따른 개폐는 심의 생략 가능)`].join('\n');
+    ...(raRef('minor_skip')?[`4. 관련: 「${raRules()}」 ${raRef('minor_skip').replace(/\s*단서$/,'')}(법령·상위 ${RA_ORG.reg_word} 변경에 따른 개폐는 심의 생략 가능)`]:[])].join('\n');
   const cmp=[]; regs.forEach(g=>{ cmp.push({reg:g.reg}); g.articles.forEach(a=>{ const o={no:a.no,title:a.title,body:a.old_body}, n={no:a.no,title:a.new_title||a.title,body:a.new_body}; cmp.push(raCmpCell(o,n,true)); }); });
   return {regs, amend, addenda, reason, cmp};
 }
