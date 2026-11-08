@@ -15,7 +15,7 @@ def test_arrow_with_reg_or_number_is_amend_not_bulk(ra):
     assert p["mode"] == "bulk" and p["old"] == "기획운영본부" and p["new"] == "경영기획본부"
     # 내규명이 있는 낱말 화살표는 그 내규의 낱말 바꾸기 의도로 고쳐 쓴다
     p = ra.heuristic_plan("여비규정에서 여비 → 출장비")
-    assert p["mode"] == "amend" and "“여비”을 “출장비”로 바꿔" in p["intent"]
+    assert p["mode"] == "amend" and "“여비”를 “출장비”로 바꿔" in p["intent"]
 
 
 def test_possessive_ui_is_not_branch_article(ra):
@@ -48,7 +48,7 @@ def test_advise_example_chips_and_colloquial_endings(client):
     src = open("assets/reg_agent.js", encoding="utf-8").read()
     chips = re.findall(r"'([^']+)'", re.search(r"const RA_ADV_EX=\[(.*?)\];", src).group(1))
     assert len(chips) == 4
-    for q in chips + ["명예퇴직수당 어떻게 계산해?", "임신한 직원 야간근무 가능한가요?", "CCTV 영상 보관 기간은?"]:
+    for q in chips + ["임신한 직원 야간근무 가능한가요?", "CCTV 영상 보관 기간은?"]:
         d = client.post("/api/regagent/advise", json={"question": q}).get_json()
         assert d["conclusion"] == "해당 규정" and not d["gap"], (q, d["answer"][:120])
     d = client.post("/api/regagent/advise", json={"question": "CCTV 영상 보관 기간은?"}).get_json()
@@ -99,7 +99,7 @@ def test_review_regressions_server(ra):
     assert p["mode"] == "bulk" and p["old"] == "기획운영본부"
     # intent 고쳐 쓰기에 따옴표가 겹치지 않는다
     p = ra.heuristic_plan("여비규정의 ‘여비’→‘출장비’로 바꿔")
-    assert p["mode"] == "amend" and "“여비”을 “출장비”로 바꿔" in p["intent"] and "““" not in p["intent"] and "‘“" not in p["intent"]
+    assert p["mode"] == "amend" and "“여비”를 “출장비”로 바꿔" in p["intent"] and "““" not in p["intent"] and "‘“" not in p["intent"]
     # 서버 인용 정정 — “규정 제25조의 이행관리책임자는 제30조제3항”의 제30조는 같은 내규
     t = "② 규정 제25조의 이행관리책임자는 제30조제3항에 따라 분류된 사항을 관리한다."
     out, n = ra.retarget_refs(t, {"30": "31"})
@@ -109,3 +109,21 @@ def test_review_regressions_server(ra):
         assert keep in ra._adv_query(q)[1], q
     # 자문용 구어 동의어는 개정 대상 고르기(유사 검색)에 섞이지 않는다
     assert "보관" not in ra._SYN and "보유" in ra._ADV_SYN["보관"]
+
+
+def test_review2_regressions_server(ra, client):
+    # 범위어는 낱말 경계에서만 — “복무규정 전반”·“개정 전 규정처럼”은 그 내규 개정
+    assert ra.heuristic_plan("복무규정 전반에서 연차휴가를 연차유급휴가로 바꿔줘")["mode"] == "amend"
+    assert ra.heuristic_plan("여비규정 일비를 개정 전 규정처럼 2만원으로 바꿔줘")["mode"] == "amend"
+    p = ra.heuristic_plan("규정 전반의 기획운영본부를 경영기획본부로 바꿔")
+    assert p["mode"] == "bulk" and p["old"] == "기획운영본부"
+    # 쉼표 뒤 화살표, 내규명이 개정 사유인 조직명 변경은 일괄 정비
+    for q in ("조직개편,기획운영본부→경영기획본부", "직제규정 개정에 따라 기획운영본부 → 경영기획본부"):
+        p = ra.heuristic_plan(q)
+        assert p["mode"] == "bulk" and p["old"] == "기획운영본부", (q, p)
+    assert ra.heuristic_plan("여비규정의 일비 25,000원→30,000원")["mode"] == "amend"
+    # 예·아니요 질의는 묻는 낱말이 한 문장에 함께 나와야 단정한다
+    d = client.post("/api/regagent/advise", json={"question": "임직원에 계약직도 포함되나요?"}).get_json()
+    assert d["conclusion"] == "확인 필요"
+    d = client.post("/api/regagent/advise", json={"question": "육아휴직 기간도 승진소요 최저 근무연수에 포함되나요?"}).get_json()
+    assert d["conclusion"] == "해당 규정"

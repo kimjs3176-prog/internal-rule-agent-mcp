@@ -1303,7 +1303,7 @@ test('수치 지시: 같은 현행 값이 여러 조에 있고 무엇인지 적�
     RA.amend.title='여비규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.valNote=''; RA.amend.purpose='';`, c);
   const A = vm.runInContext('RA.amend', c);
   const r = c.raRuleApply(A, '2만원을 3만원으로 바꿔');
-  assert.equal(r.n, 0); assert.ok(r.ambiguous && A.valNote.includes('여러 곳')); assert.equal(A.changes.length, 0);
+  assert.equal(r.n, 0); assert.ok(r.ambiguous && A.valNote.includes('2곳'), A.valNote); assert.equal(A.changes.length, 0);
   // 무엇인지(여비) 적으면 그 말이 든 조만 바꾼다
   const r2 = c.raRuleApply(A, '출장 여비 2만원을 3만원으로 올려줘');
   assert.equal(r2.n, 1); assert.equal(A.changes.map(x => x.no).join(','), '17');
@@ -1362,9 +1362,9 @@ test('독립 검토 회귀: 현행 값 모드는 적은 말·앞 구절로 가�
   assert.equal(c.raVqKeyWord('연차휴가'), '연차휴가'); assert.equal(c.raVqKeyWord('병가'), '병가'); assert.equal(c.raVqKeyWord('일비를'), '일비');
   assert.equal(c.raVqReq('복무규정 제14조의 근무 시간을 35시간으로 줄여줘').key, '근무');
   // “2만5천원” 꼴 안내 표기
-  const B = { title: 'x', purpose: '', changes: [{ type: 'modify', no: '5', body: '일비는 2만5천원으로 한다.' }], appx: [] };
-  c.raVqApply(B, '일비 2만5천원을 3만원으로');
-  assert.equal(B.changes[0].body, '일비는 3만원으로 한다.'); assert.ok(B.valNote.includes('→ 3만원') && !B.valNote.includes('만천원'), B.valNote);
+  vm.runInContext(`_raArts={slug:'x',title:'x',articles:[{no:'5',title:'일비',body:'일비는 2만5천원으로 한다.'}],appendix:[]}; RA.amend.changes=[]; RA.amend.sel={}; RA.amend.valNote='';`, c);
+  c.raVqApply(A, '일비 2만5천원을 3만원으로');
+  assert.equal(A.changes[0].body, '일비는 3만원으로 한다.'); assert.ok(A.valNote.includes('→ 3만원') && !A.valNote.includes('만천원'), A.valNote);
 });
 
 test('독립 검토 회귀: 요청문 가지조 뒤 단위 글자로 시작하는 낱말, 외부 인용 뒤 “의 ○○는”, “이 지침 제N조”', () => {
@@ -1385,4 +1385,31 @@ test('독립 검토 회귀: 요청문 가지조 뒤 단위 글자로 시작하�
   // “이 지침 제6조 … 및 제12조” → 같은 내규
   const t3 = '이 지침 제6조제4호 각목 및 제12조제4항에 따른 조치';
   assert.equal(c.raCiteHits(t3, '12').length, 1);
+});
+
+test('현행 값 모드 재검토: 열쇠말 느슨한 일치·내규명 열쇠말·흔한 말 여러 조', () => {
+  const c = load();
+  vm.runInContext(`_raArts={slug:'s',title:'감사규정',articles:[
+      {no:'8',title:'여비의 결제와 정산 등',body:'② 국내 여행자 및 국외 여행자는 여행을 마친 날의 다음날부터 기산하여 14일 이내에 정산을 신청하여야 한다.'},
+      {no:'15',title:'일비·숙박비·식비의 지급',body:'② 국외 여행의 경우에는 14일 이내에 추가지급을 신청한다.'},
+      {no:'20',title:'전문위원',body:'전문위원의 임기는 2년으로 한다.'},
+      {no:'21',title:'전문직위',body:'전문직위에 임용된 사람은 다른 위원회 위원으로 2년 이내 전보할 수 없다.'},
+      {no:'24',title:'감사결과 통보',body:'감사결과는 60일 이내에 통보한다.'},
+      {no:'27',title:'재심의',body:'재심의 신청은 60일 이내에 처리한다.'}],appendix:[]};
+    RA.amend.title='감사규정'; RA.amend.sel={}; RA.amend.selx={}; RA.amend.changes=[]; RA.amend.appx=[]; RA.amend.valNote=''; RA.amend.purpose='';`, c);
+  const A = vm.runInContext('RA.amend', c);
+  // “국내 … 정산”이 앞 구절·제목에 있는 제8조만(제15조 국외 14일은 그대로)
+  let r = c.raRuleApply(A, '국내 출장 정산을 14일에서 30일로');
+  assert.equal(r.n, 1, A.valNote); assert.equal(A.changes.map(x => x.no).join(','), '8');
+  // “전문위원”이 붙어 있는 조만(전문·위원이 따로 있는 제21조는 아님)
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  r = c.raRuleApply(A, '전문위원 2년을 3년으로');
+  assert.equal(r.n, 1, A.valNote); assert.equal(A.changes.map(x => x.no).join(','), '20');
+  // 열쇠말이 내규명이면 무엇인지 적지 않은 것 — 60일이 두 조에 있으면 추측하지 않는다(안내 예시에 다른 내규의 말이 박히지 않는다)
+  vm.runInContext(`RA.amend.changes=[]; RA.amend.sel={};`, c);
+  r = c.raRuleApply(A, '감사규정 60일을 30일로');
+  assert.equal(r.n, 0); assert.ok(r.ambiguous && A.valNote.includes('2곳') && !A.valNote.includes('4시간'), A.valNote);
+  // 요청문의 다른 말(감사결과·통보)로 가린다
+  r = c.raRuleApply(A, '감사결과 통보 60일을 30일로');
+  assert.equal(r.n, 1, A.valNote); assert.equal(A.changes.map(x => x.no).join(','), '24');
 });

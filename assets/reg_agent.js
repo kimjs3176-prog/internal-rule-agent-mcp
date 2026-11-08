@@ -1165,7 +1165,7 @@ function raSenPreviewX(x){ return raXChanged(x)?`<div class="ra-sen">${raIc('doc
 //    조문은 그 낱말 바로 뒤(30자 안)의 같은 단위 숫자만 바꾼다. 확정할 수 없으면 손대지 않는다(사용자가 확인·수정). ──
 const RA_VQ_UNIT='만\\s*원|천\\s*원|원|일|개월|년|시간|퍼센트|%|회';
 // “일수·금액·기간·한도”처럼 그 자체로는 무엇인지 모르는 말은 앞 낱말(“연차휴가 일수” → 연차휴가)을 열쇠로 쓴다
-const RA_VQ_GENERIC=/^(?:일수|금액|기간|한도|횟수|시간|비율|요율|액수|상한액?|하한액?|기준액?|단가|수당액|지급액|지급률|일|액|수)$/;
+const RA_VQ_GENERIC=/^(?:일수|금액|기간|한도|횟수|시간|비율|요율|액수|상한액?|하한액?|기준액?|단가|수당액|지급액|지급률|일|액|수|이상|이하|미만|초과|이내|매월|매년|연간|현행)$/;
 // 금액·기간 한 덩어리 — “2만5천원”·“25,000원”·“3만 원”·“14일”. 앞이 숫자·쉼표면(“25,000”의 “000”) 잡지 않는다
 const RA_VQ_AMT=`(?<![\\d,.])(?:\\d[\\d,]*(?:\\.\\d+)?\\s*만\\s*\\d[\\d,]*\\s*천\\s*원|\\d[\\d,]*(?:\\.\\d+)?\\s*(?:${RA_VQ_UNIT}))`;
 function raVqAmt(s){ const t=String(s||'').replace(/\s/g,'');
@@ -1187,9 +1187,6 @@ function raVqCtxWords(t, a, b){
   return String(t||'').replace(a,' ').replace(b,' ').replace(/제\s*\d+\s*조(?:\s*의\s*\d+)?/g,' ')
     .split(/[^가-힣A-Za-z0-9]+/).map(w=>w.replace(/(?:에서|으로|을|를|은|는|이|가|의|에|로|도)$/,''))
     .filter(w=>w.length>=2&&!/(?:규정|규칙|지침|세칙|요령|기준)$/.test(w)&&!RA_VQ_GENERIC.test(w)&&!/(?:줘|해|요|자|고|게|서)$/.test(w)&&!/^(?:올려|내려|바꿔|늘려|줄여|변경|조정|인상|인하|현행|현재|지금)/.test(w)); }
-// 조문·별표에 그 말이 있는지 — 띄어쓰기를 무시하고, 네 글자 이상이면 앞뒤 두 글자씩 따로 있어도 인정(“연차휴가” ↔ “연차유급휴가”)
-function raVqKeyIn(text, key){ const t=String(text||'').replace(/\s+/g,''), k=String(key||'').replace(/\s+/g,''); if(!k) return false;
-  return t.includes(k)||(k.length>=4&&t.includes(k.slice(0,2))&&t.includes(k.slice(2))); }
 function raVqReq(t){
   t=String(t||'');
   // ① 현행 값을 함께 적은 꼴 — “여비 2만원을 3만원으로”·“14일에서 30일로”·“2만5천원 → 3만원”: 그 값과 같은 곳만 바꾼다(다른 숫자를 건드리지 않게)
@@ -1270,23 +1267,83 @@ function raVqInTable(body, q){
   return {body:lines.join('\n'), n, olds, where, col:hdr[c].t};
 }
 // 개정 작업(A)의 수정안·별표에 지시문의 수치를 넣는다 → {q, n, notes[]} (바꾼 곳이 없으면 n=0)
+// ── 현행 값을 적은 수치 지시(“여비 2만원을 3만원으로”·“정산 14일에서 30일로”) — 바꿀 곳을 하나로 정할 수 있을 때만 바꾼다 ──
+//  ① 범위: 요청문에 조를 적었으면 그 조(와 그 조의 별표), 아니면 내규 전체(에이전트가 유사 검색으로 고른 조에 매이지 않는다)
+//  ② 후보: 현행 값과 같은 금액·일수. 조를 적지 않았으면 적은 말(“여비”)이 그 문장이나 조 제목에 있는 곳만. 표는 열 이름이 맞는 열 하나를 한 후보로
+//  ③ 후보가 여럿이면 요청문의 다른 낱말(“국내”·“4시간 미만”)이 앞 구절·조 제목에 가장 많은 한 곳만. 가릴 수 없으면 바꾸지 않고 후보를 알린다
+function raVqOcc(body, q){ const src=String(body||''), out=[]; let m; const re=new RegExp(RA_VQ_AMT,'g');
+  while((m=re.exec(src))){ if(raVqUnitOf(m[0])===q.unit&&raVqAmt(m[0])===q.old) out.push({i:m.index, s:m[0]}); } return out; }
+function raVqSentence(body, i){ const s=String(body||''); let a=i; while(a>0&&!/[.\n。]/.test(s[a-1])) a--; let b=i; while(b<s.length&&!/[.\n。]/.test(s[b])) b++; return s.slice(a,b); }
+// 값의 앞 구절과 뒤 구절(쉼표·마침표까지) — “이의신청을 받은 날부터 7일 이내에 결정”처럼 뜻을 정하는 말이 값 뒤에 오기도 한다
+function raVqPre(body, i, len){ const src=String(body||''), pre=src.slice(Math.max(0,i-60),i), cut=Math.max(pre.lastIndexOf(','),pre.lastIndexOf('.'),pre.lastIndexOf('\n'),pre.lastIndexOf('，'));
+  const post=src.slice(i+(len||0), i+(len||0)+24), pc=post.search(/[,.\n，]/); return (cut>=0?pre.slice(cut+1):pre)+' '+(pc>=0?post.slice(0,pc):post); }
+// 그 말이 있는지 — 띄어쓰기를 무시하고, 네 글자 이상이면 사이에 네 글자까지 끼어도(“연차휴가” ↔ “연차유급휴가”) 인정
+function raVqKeyNear(text, key){ const t=String(text||'').replace(/\s+/g,''), k=String(key||'').replace(/\s+/g,''); if(!k) return false; if(t.includes(k)) return true;
+  if(k.length<4) return false; const e=x=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return new RegExp(e(k.slice(0,2))+'[가-힣]{1,4}'+e(k.slice(2))).test(t); }
+function raVqOldApply(A, text, q){
+  A.vqLog=null; if(!_raArts) return {q, n:0, notes:[]};
+  const named=raNamedArts(text), regT=String(_raArts.title||A.title||'').replace(/\s+/g,''), key=String(q.key||'').replace(/\s+/g,'');
+  const keyless=q.keyless||(!!key&&regT.includes(key));            // 열쇠말이 내규명(“감사규정 60일을 …”)이면 무엇인지 적지 않은 것
+  const need=!named.length&&!keyless, cands=[], all=[];
+  raArr(_raArts.articles).forEach(a=>{ if(a.deleted||(named.length&&!named.includes(a.no))) return; const c=A.changes.find(x=>x.no===a.no); if(c&&c.type==='delete') return;
+    const body=c?c.body:a.body;
+    raVqOcc(body,q).forEach(h=>{ all.push(raLbl(a.no)); if(need&&!raVqKeyNear(a.title,q.key)&&!raVqKeyNear(raVqSentence(body,h.i),q.key)) return;
+      cands.push({isX:0, o:a, body, h, pre:raVqPre(body,h.i,h.s.length), title:a.title, lbl:raLbl(a.no), byTitle:need&&!raVqKeyNear(raVqSentence(body,h.i),q.key)}); }); });
+  raArr(_raArts.appendix).forEach(x=>{ if(named.length&&!raAppxCites(x.head).some(n=>named.includes(n))) return; const c=raArr(A.appx).find(y=>y.id===x.id); if(c&&c.type==='delete') return;
+    const body=c?c.body:x.body, t=!keyless?raVqInTable(body,q):null;
+    if(t&&t.n){ all.push(x.id); cands.push({isX:1, o:x, body, tab:t, pre:t.col, title:x.head, lbl:`${x.id} “${t.col}” 열`}); return; }
+    raVqOcc(body,q).forEach(h=>{ all.push(x.id); if(need&&!raVqKeyNear(x.head,q.key)&&!raVqKeyNear(raVqSentence(body,h.i),q.key)) return;
+      cands.push({isX:1, o:x, body, h, pre:raVqPre(body,h.i,h.s.length), title:x.head, lbl:x.id, byTitle:need&&!raVqKeyNear(raVqSentence(body,h.i),q.key)}); }); });
+  const oj=raJosa(q.oldStr,['이','가']);
+  if(!cands.length){
+    const where=[...new Set(all)];
+    A.valNote=where.length?`“${q.key}”${raJosa(q.key,['과','와'])} 현행 ${q.oldStr}${oj} 함께 있는 곳을 찾지 못해 바꾸지 않았습니다(현행 ${q.oldStr}${raJosa(q.oldStr,['은','는'])} ${raWhere(where)}에 있습니다). 조 번호를 적어 다시 요청하거나 직접 고치세요.`
+      :`${named.length?named.map(raLbl).join(', ')+'에':'이 '+RA_ORG.reg_word+'에'} 현행 ${q.oldStr}${oj} 없어 바꾸지 않았습니다. 현행 값을 확인해 다시 요청하세요.`;
+    return {q, n:0, notes:[], keyMiss:!!where.length}; }
+  let pick=cands;
+  // 무엇인지 적지 않고(“기간 2년을 …”) 조도 적지 않았으면 한 곳뿐이어도 요청문의 다른 말이 그 구절에 있어야 바꾼다
+  if(cands.length>1||(keyless&&!named.length)){
+    const ctx=raArr(q.ctx).map(w=>w.replace(/\s+/g,'')).filter(Boolean);
+    const sc=cands.map(c=>{ const seg=(String(c.pre)+' '+String(c.title||'')).replace(/\s+/g,''); return ctx.filter(w=>seg.includes(w)).length; });
+    const best=Math.max(...sc); pick=best>0?cands.filter((c,k)=>sc[k]===best):[];
+    if(pick.length!==1&&cands.length===1){
+      A.valNote=`현행 ${q.oldStr}${oj} ${cands[0].lbl}에 있지만 요청문의 말과 맞는지 알 수 없어 바꾸지 않았습니다. 조 번호나 항목 이름을 함께 적어 다시 요청하거나 직접 고치세요.`;
+      return {q, n:0, notes:[], ambiguous:[`${cands[0].lbl} ${q.oldStr}`]}; }
+    if(pick.length!==1){
+      const lst=cands.map(c=>c.lbl), ex=String((cands.find(c=>c.h)||{}).pre||'').replace(/\s+/g,' ').trim().split(' ').slice(-2).join(' ');
+      A.valNote=`현행 ${q.oldStr}${oj} ${cands.length}곳(${raWhere(lst)})에 있어 어느 것인지 정하지 않았습니다. 바꿀 곳의 앞뒤 말${ex?`(예: “${ex} ${q.oldStr}”)`:''}이나 조 번호를 함께 적어 다시 요청하거나 아래 칸에서 직접 고치세요.`;
+      return {q, n:0, notes:[], ambiguous:lst.map(l=>`${l} ${q.oldStr}`)}; } }
+  const c=pick[0], u=q.unit==='원'?'원':q.unit;
+  let olds, neu, body, note, info;
+  if(c.tab){ body=c.tab.body; olds=c.tab.olds.map(o=>o+u); neu=raVqFmt(q.val,c.tab.olds[0],'')+u;
+    note=`${c.o.id} 표 “${c.tab.col}” 열 ${c.tab.where.join('·')} ${[...new Set(c.tab.olds)].join('·')} → ${raVqFmt(q.val,c.tab.olds[0],'')}`; info={col:c.tab.col,where:c.tab.where.join('·'),old:[...new Set(olds)].join('·'),neu}; }
+  else { body=c.body.slice(0,c.h.i)+raVqFmtAmt(q.val,c.h.s)+c.body.slice(c.h.i+c.h.s.length); olds=[c.h.s.replace(/\s+/g,'')]; neu=raVqFmtAmt(q.val,c.h.s);
+    note=`${c.lbl} ${olds[0]} → ${neu}`; info={col:'',where:'',old:olds[0],neu}; }
+  let card;
+  if(c.isX){ A.appx=raArr(A.appx); A.selx=A.selx||{}; card=A.appx.find(y=>y.id===c.o.id);
+    if(!card){ card={type:'modify',id:c.o.id,head:c.o.head,body:c.o.body,why:''}; A.appx.push(card); A.selx[c.o.id]=true; }
+    card.why=`지시문의 현행 ${q.oldStr} 반영 — 확인하세요`; }
+  else { card=A.changes.find(y=>y.no===c.o.no);
+    if(!card){ card={type:'modify',no:c.o.no,title:c.o.title,body:c.o.body,why:`현행 ${q.oldStr}${oj} 있는 곳`}; A.changes.push(card); A.sel[c.o.no]=true; A.changes.sort((x,y)=>raCmp(x.no,y.no)); } }
+  card.body=body;
+  A.vqLog=[Object.assign({id:c.isX?c.o.id:c.o.no,isX:!!c.isX,key:q.key},info)];
+  A.valNote=`지시문대로 ${q.keyless?'':`“${q.key}” `}현행 ${q.oldStr}${raJosa(q.oldStr,['을','를'])} 바꿨습니다: ${note}${c.byTitle?`(조 제목 “${c.title}”에서 “${q.key}”${raJosa(q.key,['을','를'])} 찾아 고름)`:''}. 맞는지 확인하세요(다른 곳은 바꾸지 않았습니다${cands.length>1?` — 같은 값이 있는 다른 ${cands.length-1}곳은 요청문과 덜 맞아 그대로 둠`:''}).`;
+  const vs=q.unit==='원'?q.val.toLocaleString('en-US')+'원':q.val+q.unit, lc=vs.charCodeAt(vs.length-1)-0xAC00, jong=lc>=0&&lc<11172?lc%28:0;
+  if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose))
+    A.purpose=`${q.keyless?'':q.key+' '}${q.oldStr}${raJosa(q.oldStr,['을','를'])} ${vs}${jong===0||jong===8?'로':'으로'} 조정하려는 것임.`;
+  return {q, n:olds.length, notes:[note]};
+}
 function raVqApply(A, text){
   const q=raVqReq(text); if(!q) return null;
+  if(q.old!=null) return raVqOldApply(A, text, q);
   const plan=[];                                                  // [대상, 새 본문, 바꿀 현행 값들, 설명, 별표 여부, 보고서용 기록]
   A.vqLog=null;
-  const neuOf=o=>q.old!=null?raVqFmtAmt(q.val,o):raVqFmt(q.val,o.replace(/[^\d,.]/g,''),o.replace(/[\d,.\s]/g,''));
-  // 현행 값을 적었고 무엇인지(“여비”)도 적었으면 그 말이 있는 조·별표만 — 요청문에 조 번호를 적었으면 그 조는 그대로 인정
-  const named=q.old!=null?raNamedArts(text):[], okKey=(o,isX)=>q.old==null||q.keyless||(!isX&&named.includes(o.no))||raVqKeyIn((o.title||o.head||'')+' '+(raOld(o.no)||{}).title+' '+o.body,q.key);
-  const multi=[];
-  A.changes.forEach(c=>{ if(c.type==='delete') return; const r=raVqInText(c.body,q); if(r.multi&&okKey(c,0)) multi.push(`${raLbl(c.no)}에 ${q.oldStr} ${r.multi}곳`); if(r.n&&okKey(c,0)){ const neu=neuOf(r.olds[0]); plan.push([c,r.body,r.olds,`${raLbl(c.no)} ${r.olds.join('·')} → ${neu}`,0,{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
+  const neuOf=o=>raVqFmt(q.val,o.replace(/[^\d,.]/g,''),o.replace(/[\d,.\s]/g,''));
+  A.changes.forEach(c=>{ if(c.type==='delete') return; const r=raVqInText(c.body,q); if(r.n){ const neu=neuOf(r.olds[0]); plan.push([c,r.body,r.olds,`${raLbl(c.no)} ${r.olds.join('·')} → ${neu}`,0,{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
   raArr(A.appx).forEach(x=>{ if(x.type==='delete') return; const t=raVqInTable(x.body,q), r=t&&t.n?t:raVqInText(x.body,q);
-    if(!(t&&t.n)&&r.multi&&okKey(x,1)) multi.push(`${x.id}에 ${q.oldStr} ${r.multi}곳`);
-    if(r.n&&((t&&t.n)||okKey(x,1))){ const tb=t&&t.n, u=q.unit==='원'?'원':q.unit, neu=tb?raVqFmt(q.val,t.olds[0],'')+u:neuOf(r.olds[0]);
+    if(r.n){ const tb=t&&t.n, u=q.unit==='원'?'원':q.unit, neu=tb?raVqFmt(q.val,t.olds[0],'')+u:neuOf(r.olds[0]);
       plan.push([x,r.body,tb?t.olds.map(o=>o+u):r.olds,tb?`${x.id} 표 “${t.col}” 열 ${t.where.join('·')} ${[...new Set(t.olds)].join('·')} → ${raVqFmt(q.val,t.olds[0],'')}`:`${x.id} ${r.olds.join('·')} → ${neu}`,1,
         tb?{col:t.col,where:t.where.join('·'),old:[...new Set(t.olds)].map(o=>o+u).join('·'),neu}:{col:'',where:'',old:[...new Set(r.olds)].join('·'),neu}]); } });
-  if(multi.length){                                               // 같은 조 안에 같은 현행 값이 여러 곳 — 어느 것인지 추측하지 않는다
-    A.valNote=`${multi.join(' / ')}이 있어 어느 것인지 정하지 않았습니다. 앞뒤 말을 더 적어 다시 요청하거나(예: “4시간 미만 ${q.oldStr}${raJosa(q.oldStr,['을','를'])} …”) 아래 칸에서 직접 고치세요.`;
-    return {q, n:0, notes:[], ambiguous:multi}; }
   if(!plan.length) return {q, n:0, notes:[]};
   const vals=new Set(plan.flatMap(p=>p[2]).map(o=>raVqNum(String(o).replace(/[^\d,.]/g,''),String(o).replace(/[\d,.\s]/g,''))));
   if(vals.size>1){                                                // “일수를 20일로” — 1일·5일·30일이 다 걸리면 어느 것인지 사람도 헷갈린다. 추측하지 않는다
@@ -1295,12 +1352,10 @@ function raVqApply(A, text){
   let n=0; const notes=[];
   plan.forEach(([o,body,olds,note,isX])=>{ o.body=body; n+=olds.length; notes.push(note); if(isX) o.why=o.why&&!/수치가 여기 있으면/.test(o.why)?o.why:`지시문의 “${q.key}” 값 반영 — 확인하세요`; });
   A.vqLog=plan.map(([o,,,,isX,info])=>Object.assign({id:isX?o.id:o.no,isX:!!isX,key:q.key},info));       // 검토 보고서 “현황”에 현행 값과 바꿀 값을 적는다
-  const what=q.old!=null?(q.keyless?'':`“${q.key}” `)+`현행 ${q.oldStr}`:`“${q.key}”`, wj=q.old!=null?q.oldStr:q.key;
-  A.valNote=`지시문대로 ${what}${raJosa(wj,['을','를'])} 바꿨습니다: ${notes.join(' / ')}. 맞는지 확인하세요(다른 곳은 바꾸지 않았습니다).`;
+  A.valNote=`지시문대로 “${q.key}”${raJosa(q.key,['을','를'])} 바꿨습니다: ${notes.join(' / ')}. 맞는지 확인하세요(다른 곳은 바꾸지 않았습니다).`;
   const vs=q.unit==='원'?q.val.toLocaleString('en-US')+'원':q.val+q.unit, lc=vs.charCodeAt(vs.length-1)-0xAC00, jong=lc>=0&&lc<11172?lc%28:0;
   if(!String(A.purpose||'').trim()||/의 내용을 정비하려는 것임\.$/.test(A.purpose))       // 일반 문구 대신 무엇을 얼마로 바꾸는지
-    A.purpose=q.old!=null?`${q.keyless?'':q.key+' '}${q.oldStr}${raJosa(q.oldStr,['을','를'])} ${vs}${jong===0||jong===8?'로':'으로'} 조정하려는 것임.`
-      :`${q.key}${raJosa(q.key,['을','를'])} ${vs}${jong===0||jong===8?'로':'으로'} 조정하려는 것임.`;
+    A.purpose=`${q.key}${raJosa(q.key,['을','를'])} ${vs}${jong===0||jong===8?'로':'으로'} 조정하려는 것임.`;
   return {q, n, notes};
 }
 function raAppxForArts(nos){
@@ -1417,21 +1472,8 @@ function raNamedArts(t){ if(!_raArts) return []; const out=[];
 function raRuleApply(A, text){
   const t=String(text||''), named=/삭제/.test(t)?[]:raNamedArts(t);
   if(raVqReq(t)){ let r=raVqApply(A,t);
-    if(r&&!r.n&&!r.ambiguous){
+    if(r&&!r.n&&!r.ambiguous&&r.q.old==null){                      // 현행 값을 적은 지시는 raVqOldApply가 범위·후보를 이미 다 정했다
       if(named.length){ named.forEach(no=>{ if(!A.changes.some(c=>c.no===no)){ const o=raOld(no); A.sel[no]=true; A.changes.push({type:'modify',no,title:o.title,body:o.body,why:''}); } }); raAppxForArts(named); r=raVqApply(A,t); }   // 지정한 조와 그 조의 별표 안에서만
-      else if(r.q.old!=null){                                       // 현행 값을 적었으면 그 값이 있는 조문·별표를 찾는다
-        const q=r.q, add=raRuleEnsure(A,x=>{ const v=raVqInText(x,q); return v.n>0||!!v.multi||!!(raVqInTable(x,q)||{}).n; },`현행 ${q.oldStr}`);
-        // 적은 말(“여비”)이 있으면 그 말이 함께 있는 조·별표만 남긴다(하나도 없으면 바꾸지 않는다). 말 없이 값만 적었는데 여러 곳이면 추측하지 않는다
-        const hits=add.arts.map(([no])=>no).concat(add.xs.map(([id])=>id));
-        if(!q.keyless&&hits.length){ const by=no=>{ const o=raOld(no)||raOldX(no); return o&&raVqKeyIn(String(o.title||o.head||'')+' '+String(o.body||''),q.key); };
-          const keep=hits.filter(by); raRuleUndo(A,{arts:add.arts.filter(([no])=>!keep.includes(no)),xs:add.xs.filter(([id])=>!keep.includes(id))});
-          if(!keep.length){ A.valNote=`“${q.key}”${raJosa(q.key,['과','와'])} 현행 ${q.oldStr}${raJosa(q.oldStr,['이','가'])} 함께 있는 조문·별표를 찾지 못해 바꾸지 않았습니다(현행 ${q.oldStr}${raJosa(q.oldStr,['은','는'])} ${raWhere(hits.map(h=>/^\d/.test(h)?raLbl(h):h))}에 있습니다). 조 번호를 적어 다시 요청하거나 직접 고치세요.`;
-            return {q, n:0, notes:[], keyMiss:true}; } }
-        if(hits.length>1&&q.keyless){
-          { raRuleUndo(A,add); const where=hits.map(h=>/^\d/.test(h)?raLbl(h):h);
-            A.valNote=`현행 ${q.oldStr}${raJosa(q.oldStr,['이','가'])} 여러 곳(${raWhere(where)})에 있어 어느 것인지 정하지 않았습니다. 조 번호나 항목 이름을 함께 적어 다시 요청하세요(예: “제17조의 ${q.oldStr}${raJosa(q.oldStr,['을','를'])} …”).`;
-            return {q, n:0, notes:[], ambiguous:where.map(w=>`${w} ${q.oldStr}`)}; } }
-        r=raVqApply(A,t); if(!(r&&r.n)) raRuleUndo(A,add); }
       else { const add=raRuleEnsure(A,r.q.key); r=raVqApply(A,t); if(!(r&&r.n)) raRuleUndo(A,add); } }
     if(r&&(r.n||r.ambiguous)) return r;
     if(!/삭제/.test(t)) return r; }                                    // 수치 지시는 낱말 바꾸기로 넘기지 않는다(“일수”를 “20일”로 바꾸는 일이 없게)
