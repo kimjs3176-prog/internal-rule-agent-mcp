@@ -41,6 +41,8 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
       #__card.on{opacity:1}#__card h1{font-size:68px;margin:0 0 20px;font-weight:800;letter-spacing:-.03em;color:#fff !important}#__card p{font-size:32px;margin:6px 0;color:#cbd5e1 !important}
       #__card .g{display:grid;grid-template-columns:repeat(2,560px);gap:22px;margin:34px 0 0}#__card .g div{background:#1e293b;border-radius:16px;padding:26px 30px}
       #__card .g b{display:block;font-size:56px;color:#93c5fd;margin-bottom:6px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}#__card .g span{font-size:28px;color:#e2e8f0}
+      #__card .t{width:1480px;margin:30px 0 0}#__card .t div{display:flex;gap:28px;align-items:baseline;background:#1e293b;border-radius:14px;padding:20px 30px;margin-top:14px;text-align:left}
+      #__card .t b{flex:none;width:96px;font-size:30px;color:#93c5fd}#__card .t span{font-size:30px;color:#e2e8f0;line-height:1.45;word-break:keep-all}
       .__hl{outline:4px solid #f59e0b !important;outline-offset:3px;border-radius:6px}`;
     const add = () => { if (document.getElementById('__cur')) return; const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
       for (const id of ['__cur', '__cap', '__scn']) { const d = document.createElement('div'); d.id = id; document.body.appendChild(d); }
@@ -83,6 +85,8 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   const agentRun = async req => { await type('#raAgIn', req); await click('.ra-ag-go');
     await p.waitForFunction(() => RA.agent && !RA.agent.running && RA.agent.done, null, { timeout: 120000 }); return since(); };
   const SINO = ['영', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const natN = n => n >= 10 && n < 20 ? ['열', '열한', '열두', '열세', '열네', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉'][n - 10] : String(n);
   const f1 = x => x.toFixed(1), sp = x => { const t = x.toFixed(1); return x < 1 ? `영 점 ${SINO[+t.slice(-1)]}` : t; }, kr = n => ['영', '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열'][n] || String(n);
 
   await p.goto(URL, { waitUntil: 'networkidle' }); await p.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} }); await p.reload({ waitUntil: 'networkidle' });
@@ -189,6 +193,30 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   await say('흔한 오류 10종을 1,243번 심었는데 모두 잡았고,\n개정문 검증은 619번 모두 일치했습니다.', { v: '흔한 오류 열 종을 천이백사십삼 번 심었는데 모두 잡았고, 개정문 검증은 육백십구 번 모두 일치했습니다.' });
   await say('다른 기관도 바로 쓸 수 있습니다. 가상 기관 내규를\n들여오는 데 코드는 한 줄도 고치지 않았습니다.');
   await say('상위법이 바뀌면 이를 인용한 내규를 찾아 알려 줍니다.');
+  await quiet();
+  // MCP: 같은 엔진을 AI 도우미의 도구로 — 화면에서 실제로 /mcp 를 불러 받은 결과를 보여 준다
+  const mcp = await p.evaluate(async () => {
+    const call = async (method, params) => (await (await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })).json()).result;
+    const tools = (await call('tools/list', {})).tools.length;
+    const t0 = performance.now();
+    const d = (await call('tools/call', { name: 'run_agent', arguments: { request: '여비규정 제15조의 일비를 3만원으로 올려줘' } })).structuredContent || {};
+    return { tools, sec: (performance.now() - t0) / 1000, law: String(d.amendment_text || '').split('\n').map(x => x.trim()).filter(Boolean).slice(1, 3).join(' '),
+      ok: !!(d.verification && d.verification.ok), links: Object.keys(d.download || {}).filter(k => k !== 'note') };
+  });
+  timing.mcp = mcp.sec; timing.mcpTools = mcp.tools; timing.mcpOk = mcp.ok; timing.mcpLinks = mcp.links;
+  await card(`<h1 style="font-size:56px">AI 도우미의 도구로 — MCP</h1><div class="t">
+    <div><b>연결</b><span>배포 주소/mcp → claude.ai·ChatGPT 커넥터, Claude Code</span></div>
+    <div><b>도구</b><span>${mcp.tools}개: 에이전트 실행 · 개정문·대비표·검증 · 건강검진 · 다른 기관 사규(알리오)</span></div>
+    <div><b>요청</b><span>run_agent “여비규정 제15조의 일비를 3만원으로 올려줘”</span></div>
+    <div><b>응답</b><span>${esc(mcp.law)} · 개정문 검증 ${mcp.ok ? '일치' : '불일치'} · ${mcp.links.length ? '한글·Word 링크' : '문서 링크 없음'}</span></div></div>`);
+  await shot('mcp');
+  await say(`AI 도우미에서도 씁니다. 배포 주소의 /mcp를 커넥터로 넣으면\nclaude.ai나 ChatGPT가 도구 ${mcp.tools}개로 부릅니다.`,
+    { v: `AI 도우미에서도 씁니다. 배포 주소의 엠씨피를 커넥터로 넣으면, 클로드나 챗지피티가 도구 ${natN(mcp.tools)} 개로 부릅니다.` });
+  await say(`같은 요청을 MCP로 보내면 같은 엔진이 ${f1(mcp.sec)}초 만에\n개정문·검증 결과·한글 문서 링크를 돌려줍니다.`,
+    { v: `같은 요청을 엠씨피로 보내면, 같은 엔진이 ${sp(mcp.sec)}초 만에 개정문과 검증 결과, 한글 문서 링크를 돌려줍니다.` });
+  await say('다른 기관 사규를 알리오에서 찾아 견주는 도구도 있고,\n어떤 AI가 부르든 결과는 같은 규칙 엔진이 만듭니다.',
+    { v: '다른 기관 사규를 알리오에서 찾아 견주는 도구도 있고, 어떤 AI가 부르든 결과는 같은 규칙 엔진이 만듭니다.' });
   await say('담당자가 틀리기 쉬운 일을 먼저 막는 에이전트를\n범정부 공공재로 내놓겠습니다. 감사합니다.');
   await quiet(); await wait(600);
   const total = now();
@@ -198,6 +226,6 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   fs.writeFileSync(OUT + '/subs.srt', subs.map((x, i) => `${i + 1}\n${ts(x.s)} --> ${ts(x.e)}\n${x.text}\n`).join('\n'));
   fs.writeFileSync(OUT + '/timing.json', JSON.stringify({ total, syncT, scenes, timing, dialogs, errs, subs }, null, 1));
   console.log('총 길이', total.toFixed(1) + 's', '| 자막', subs.length, '| 장면', scenes.map(s => s.t.slice(0, 6) + '@' + s.s.toFixed(0)).join(', '));
-  console.log('단계 시간', JSON.stringify({ health: timing.health, errorsTab: timing.errorsTab, agent: timing.agentAmend, check: timing.checkAll, hwpx: timing.hwpx, bulk: timing.bulk, del: timing.del, delDialog: timing.delDialog }));
+  console.log('단계 시간', JSON.stringify({ health: timing.health, errorsTab: timing.errorsTab, agent: timing.agentAmend, check: timing.checkAll, hwpx: timing.hwpx, bulk: timing.bulk, del: timing.del, delDialog: timing.delDialog, mcp: timing.mcp, mcpTools: timing.mcpTools, mcpOk: timing.mcpOk }));
   console.log('대화상자', dialogs.length ? dialogs : '없음', '| 페이지 오류', errs.length ? errs : '없음');
 })().catch(e => { console.error('FAILED', e); process.exit(1); });
