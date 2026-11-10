@@ -681,6 +681,12 @@ test('별표·서식 수정: 머리 줄 조 번호·개정문 문형·대비표�
   const ctx = c.raDocCtx('amend');
   const law = c.raDocLaw(ctx);
   assert.match(law, /별표 2를 별지와 같이 한다\./);
+  // 검토 보고서: 에이전트에 넣은 요청 문장은 그대로 옮기지 않는다(목적·추진 배경으로 다듬은 문장만)
+  RA.amend.intent = '여비규정 제15조의 일비를 3만원으로 올려줘';
+  const rep = c.raBlocksText(c.raReportBlocks(c.raDocCtx('amend'), 'amend'));
+  assert.ok(rep.includes('1. 추진 배경 및 목적'), rep);
+  assert.ok(!rep.includes('요청 내용') && !rep.includes('올려줘'), rep);
+  RA.amend.intent = '';
   assert.ok(law.indexOf('부    칙') < law.indexOf('〔별표 2〕'));
   assert.match(law, /30,000/); assert.doesNotMatch(law, /표3/);          // 고치지 않은 별표 3은 일부개정문에 안 붙는다
   // 점검용 전체 글에는 별표가 모두(고친 대로) 붙는다
