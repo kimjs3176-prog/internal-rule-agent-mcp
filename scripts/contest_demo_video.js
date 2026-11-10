@@ -1,7 +1,8 @@
 // 시연영상 녹화 v2 — docs/contest/시연대본.md 장면 6개를 실제로 눌러 1920x1080으로 녹화한다.
 // - 자막: 화면 위에 직접 그린다(반투명·둥근 상자, 앱 색: 남색 바탕 + 숫자만 밝은 파랑 강조, 어두운 화면에서는 흰 반투명).
 // - 음성: 로컬 TTS 서버(scripts/contest_demo_tts.py, Supertonic 3 오프라인)가 자막 한 줄마다 음성을 만들고, 음성 길이에 맞춰 장면을 진행한다.
-// - 설계 규칙은 digitalsamba/claude-code-video-toolkit(MIT)의 video-design·playwright-recording 스킬, alirezarezvani/claude-skills(MIT) demo-video 스킬을 따랐다.
+// - 설계 규칙은 digitalsamba/claude-code-video-toolkit(MIT)의 video-design·playwright-recording 스킬, alirezarezvani/claude-skills(MIT) demo-video 스킬,
+//   win4r/video-director(MIT)의 원칙(첫 3초 무음 훅, 첫·끝 화면 짝, 보이는 것만 말하기)을 따랐다.
 // 준비: 서버(python run_local.py), 음성 서버(python scripts/contest_demo_tts.py), Playwright(npm i playwright)
 // 실행: node scripts/contest_demo_video.js → demo_out/raw.webm, timing.json(자막·음성 시각), subs.srt, shots/*.png
 //       그다음 python scripts/contest_demo_build.py demo_out demo_out/demo.mp4 -0.35 로 음성을 깔아 mp4를 만든다(docs/contest/시연영상.md)
@@ -11,11 +12,14 @@ const OUT = require('path').resolve(process.env.DEMO_OUT || 'demo_out'); fs.mkdi
 for (const f of fs.readdirSync(OUT)) if (f.endsWith('.webm')) fs.unlinkSync(OUT + '/' + f);
 const URL = process.env.DEMO_URL || 'http://localhost:5100/';
 const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
+// 첫 화면과 끝 화면(서로 짝): 도구 이름 + 한 줄 약속 + 시연 조건. 약속 문구는 화면에서 실제로 보여 주는 것만 쓴다
+const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한 문장으로<br><em>개정안·대비표·검증</em>까지</p>
+  <div class="cond"><span>AI 키 없이</span><span>외부망 없이</span><span>실제 내규 126건</span></div>`;
 
 (async () => {
   const b = await chromium.launch();
   const ctx = await b.newContext({ viewport: { width: 1920, height: 1080 }, acceptDownloads: true, recordVideo: { dir: OUT, size: { width: 1920, height: 1080 } } });
-  await ctx.addInitScript(() => {
+  await ctx.addInitScript(HOOK => {
     const css = `
       #__cur{position:fixed;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;background:rgba(37,99,235,.30);border:2px solid #2563eb;z-index:2147483647;pointer-events:none;transition:transform .12s}
       #__cur.dn{transform:scale(.7);background:rgba(37,99,235,.55)}
@@ -43,15 +47,22 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
       #__card .g b{display:block;font-size:56px;color:#93c5fd;margin-bottom:6px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}#__card .g span{font-size:28px;color:#e2e8f0}
       #__card .t{width:1480px;margin:30px 0 0}#__card .t div{display:flex;gap:28px;align-items:baseline;background:#1e293b;border-radius:14px;padding:20px 30px;margin-top:14px;text-align:left}
       #__card .t b{flex:none;width:96px;font-size:30px;color:#93c5fd}#__card .t span{font-size:30px;color:#e2e8f0;line-height:1.45;word-break:keep-all}
+      #__card .eb{font-size:52px;font-weight:700;color:#93c5fd !important;margin:0 0 18px;letter-spacing:-.02em}
+      #__card .hk{font-size:88px;font-weight:800;line-height:1.2;letter-spacing:-.035em;margin:0;color:#fff !important;text-align:center}
+      #__card .hk em{font-style:normal;color:#93c5fd}
+      #__card .cond{display:flex;gap:16px;margin-top:40px}#__card .cond span{font-size:34px;font-weight:600;color:#e2e8f0;background:#1e293b;border-radius:999px;padding:12px 28px}
       .__hl{outline:4px solid #f59e0b !important;outline-offset:3px;border-radius:6px}`;
     const add = () => { if (document.getElementById('__cur')) return; const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
       for (const id of ['__cur', '__cap', '__scn']) { const d = document.createElement('div'); d.id = id; document.body.appendChild(d); }
+      // 첫 화면(훅): 페이지가 그려지는 첫 프레임부터 완성된 카드로 보이게 한다(서서히 나타나지 않음). 0~3초 소리 없이 읽혀야 한다
+      { const c = document.createElement('div'); c.id = '__card'; c.className = 'on'; c.style.transition = 'none';
+        c.innerHTML = HOOK; document.body.appendChild(c); document.body.classList.add('__carded'); }
       const c = document.getElementById('__cur');
       addEventListener('mousemove', e => { c.style.left = e.clientX + 'px'; c.style.top = e.clientY + 'px'; }, true);
       addEventListener('mousedown', e => { c.classList.add('dn'); const r = document.createElement('div'); r.className = '__rip'; r.style.left = e.clientX + 'px'; r.style.top = e.clientY + 'px'; document.body.appendChild(r); setTimeout(() => r.remove(), 700); }, true);
       addEventListener('mouseup', () => c.classList.remove('dn'), true); };
     if (document.body) add(); else addEventListener('DOMContentLoaded', add);
-  });
+  }, HOOK);
   const p = await ctx.newPage(); const T0 = Date.now(); const now = () => (Date.now() - T0) / 1000;
   const errs = [], dialogs = []; p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => { dialogs.push(d.message().slice(0, 90)); d.accept(); });
   const subs = [], scenes = [], timing = {}; let shotN = 0, busyUntil = 0;
@@ -94,10 +105,11 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   // 음성 맞춤용 동기 표시: 왼쪽 위에 0.4초 동안 자홍색 네모를 띄우고 그 시각을 남긴다(contest_demo_build.py가 영상에서 찾아 시각 차이를 잰다)
   await p.evaluate(() => { const d = document.createElement('div'); d.id = '__sync'; d.style.cssText = 'position:fixed;left:0;top:0;width:48px;height:48px;background:#ff00ff;z-index:2147483647'; document.body.appendChild(d); });
   const syncT = now(); await wait(400); await p.evaluate(() => document.getElementById('__sync').remove());
-  // ── 제목
+  // ── 제목(훅): 카드는 첫 프레임부터 떠 있다. 영상은 동기 표시가 사라진 이 시각(startT)부터 자른다(contest_demo_build.py)
+  timing.startT = now() + 0.05;
+  timing.hookBox = await p.evaluate(() => { const r = document.querySelector('#__card .hk').getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); });
   await scene('제목');
-  await card(`<h1>규정 제·개정 에이전트</h1><p>2026 공공 AI 대전환 챌린지 · 세션 2 지정과제 ③</p><p style="margin-top:28px;color:#93c5fd !important">AI 키 없이 · 외부망(법제처·알리오) 없이 · 실제 내규 126건</p>`);
-  await say('규정 제·개정 에이전트 시연입니다. AI 키와 외부망 없이,\n실제 내규 126건으로 보여 드립니다.', { ms: 5500, v: '규정 제·개정 에이전트 시연입니다. AI 키와 외부망 없이, 실제 내규 백이십육 건으로 보여 드립니다.' });
+  await say('한 문장이면 개정안과 신구조문대비표, 개정문 검증까지.\nAI 키 없이, 실제 내규 126건으로 보여 드립니다.', { v: '한 문장이면 개정안과 신구조문대비표, 개정문 검증까지. AI 키 없이, 실제 내규 백이십육 건으로 보여 드립니다.' });
   await quiet(); await uncard();
 
   // ── ① 문제 제기
@@ -118,8 +130,8 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   await hl('#raChkAll details.ra-det[open] summary', false);
 
   // ── ② 한 문장 요청
-  await scene('한 문장 요청 → 자료조사·보고서', '2');
   await click('.ra-tab[data-k="agent"]'); await p.waitForSelector('#raAgIn');
+  await scene('한 문장 요청 → 자료조사·보고서', '2');
   await say('담당자가 하는 말 그대로, 한 문장만 넣습니다.', { wait: false });
   timing.agentAmend = await agentRun('여비규정 제15조의 일비를 3만원으로 올려줘');
   const nSteps = await p.evaluate(() => RA.agent.steps.length);
@@ -131,13 +143,12 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   await say('이 조를 인용하는 곳을 확인하고,\n형식 점검·심의 사전검토·절차·문서 세트까지 준비했습니다.');
   await scrollTo('#raAgOut'); await click(p.locator('button', { hasText: '검토 보고서 열기' }).first()); await wait(1000); await shot('report');
   await say('상급자에게 올릴 검토 보고서 초안도 함께 나옵니다.');
-  await scrollBy(300);
-  await say('현황에는 “일비 25,000원 → 30,000원 조정 필요”,\n자료조사에는 「여비업무 처리지침」이 들어갑니다.', { v: '현황에는 일비 2만 5천 원에서 3만 원 조정 필요, 자료조사에는 여비업무 처리지침이 들어갑니다.' });
 
   // ── ③ 확인·검토 → 문서 받기
-  await scene('대비표·점검·개정문 검증 → 문서 받기', '3');
+  // 장면 표시는 화면이 그 장면으로 바뀐 뒤에 띄운다(표시와 화면이 어긋나지 않게)
   await p.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' })); await wait(700);
   await click(p.locator('#raWiz button', { hasText: '확인' }).first()); await wait(700);
+  await scene('대비표·점검·개정문 검증 → 문서 받기', '3');
   await click(p.locator('.ra-runbar .svc-btn.yes').first());
   await p.waitForFunction(() => !document.querySelector('.ra-runbar .svc-btn[disabled]') && RA.amend.rt, null, { timeout: 90000 }).catch(() => {}); timing.checkAll = since();
   timing.checkSum = await p.evaluate(() => ((document.getElementById('raChkSum') || {}).textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300));
@@ -155,8 +166,8 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   await say('한글 파일 하나로 받습니다.\n개정문·대비표·이유서·의견서까지 들어 있습니다.');
 
   // ── ④ 일괄 정비
-  await scene('모든 내규 일괄 정비', '4');
   await click('.ra-tab[data-k="agent"]'); await p.waitForSelector('#raAgIn');
+  await scene('모든 내규 일괄 정비', '4');
   await say('부서 이름이 바뀌면 사람은 내규 126건을 하나씩 열어\n찾아야 합니다. 저희 산정으로 약 9.6시간 일입니다.', { wait: false, v: '부서 이름이 바뀌면, 사람은 내규 백이십육 건을 하나씩 열어 찾아야 합니다. 저희 산정으로 약 구 점 육 시간 일입니다.' });
   timing.bulk = await agentRun('모든 내규에서 기획운영본부를 경영기획본부로 바꿔줘');
   const bsub = await p.evaluate(() => RA.agent.done.title + ' / ' + (RA.agent.done.sub || '')); timing.bulkSub = bsub;
@@ -170,8 +181,8 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
   await say('이름이 바뀌면 뒤에 붙는 조사도 맞춥니다.\n“윤리감사실을 둔다” → “감사부를 둔다”', { v: '이름이 바뀌면 뒤에 붙는 조사도 맞춥니다. 윤리감사실을 둔다를 바꾸면, 감사부를 둔다가 됩니다.' });
 
   // ── ⑤ 조 삭제
-  await scene('조 삭제 — 사람이 놓치는 인용', '5');
   await click('.ra-tab[data-k="agent"]'); await p.waitForSelector('#raAgIn');
+  await scene('조 삭제 — 사람이 놓치는 인용', '5');
   await say('조를 지울 때 가장 많이 놓치는 것이,\n그 조를 인용하던 다른 조입니다.', { wait: false });
   const dBefore = dialogs.length;
   timing.del = await agentRun('여비규정 제20조를 삭제해줘'); timing.delDialog = dialogs.slice(dBefore);
@@ -189,10 +200,9 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
     <div><b>0.4~1.4초</b><span>한 문장 요청 → 개정안·검토 보고서</span></div>
     <div><b>코드 수정 0줄</b><span>가상 기관 도입(기관 설정 파일만)</span></div></div>
     <p style="margin-top:32px">AI 모델은 바꿔 끼울 수 있고, AI 없이도 핵심 기능이 동작합니다</p>`);
-  await shot('summary');
+  timing.hero = now(); await shot('summary');
   await say('흔한 오류 10종을 1,243번 심었는데 모두 잡았고,\n개정문 검증은 619번 모두 일치했습니다.', { v: '흔한 오류 열 종을 천이백사십삼 번 심었는데 모두 잡았고, 개정문 검증은 육백십구 번 모두 일치했습니다.' });
   await say('다른 기관도 바로 쓸 수 있습니다. 가상 기관 내규를\n들여오는 데 코드는 한 줄도 고치지 않았습니다.');
-  await say('상위법이 바뀌면 이를 인용한 내규를 찾아 알려 줍니다.');
   await quiet();
   // MCP: 같은 엔진을 AI 도우미의 도구로 — 화면에서 실제로 /mcp 를 불러 받은 결과를 보여 준다
   const mcp = await p.evaluate(async () => {
@@ -215,10 +225,12 @@ const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
     { v: `AI 도우미에서도 씁니다. 배포 주소의 엠씨피를 커넥터로 넣으면, 클로드나 챗지피티가 도구 ${natN(mcp.tools)} 개로 부릅니다.` });
   await say(`같은 요청을 MCP로 보내면 같은 엔진이 ${f1(mcp.sec)}초 만에\n개정문·검증 결과·한글 문서 링크를 돌려줍니다.`,
     { v: `같은 요청을 엠씨피로 보내면, 같은 엔진이 ${sp(mcp.sec)}초 만에 개정문과 검증 결과, 한글 문서 링크를 돌려줍니다.` });
-  await say('다른 기관 사규를 알리오에서 찾아 견주는 도구도 있고,\n어떤 AI가 부르든 결과는 같은 규칙 엔진이 만듭니다.',
-    { v: '다른 기관 사규를 알리오에서 찾아 견주는 도구도 있고, 어떤 AI가 부르든 결과는 같은 규칙 엔진이 만듭니다.' });
+  // 끝 화면: 첫 화면과 짝(같은 이름·같은 약속, 아래 줄만 확산 조건으로). 포스터로 남도록 자막을 걷고 잠시 멈춘다
+  await quiet();
+  await card(HOOK.replace(/<div class="cond">[\s\S]*<\/div>/, `<div class="cond"><span>AI 모델 교체 가능</span><span>MCP 도구 ${mcp.tools}개</span><span>다른 기관: 설정 파일만</span></div>`));
+  timing.endCard = now(); await shot('end');
   await say('담당자가 틀리기 쉬운 일을 먼저 막는 에이전트를\n범정부 공공재로 내놓겠습니다. 감사합니다.');
-  await quiet(); await wait(600);
+  await quiet(); await wait(1500);
   const total = now();
   await p.close(); const vpath = await p.video().path(); await ctx.close(); await b.close();
   fs.renameSync(vpath, OUT + '/raw.webm');
