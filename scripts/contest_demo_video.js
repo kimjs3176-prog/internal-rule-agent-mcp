@@ -72,10 +72,12 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
     for (let i = 1; i < s.length - 1; i++) if (s[i] === ' ') { const w = /[.,:]/.test(s[i - 1]) ? 3 : /[다요고며서면]$/.test(s.slice(0, i)) ? 2 : 1; const sc = w * 40 - Math.abs(i - mid); if (best < 0 || sc > bw) { best = i; bw = sc; } }
     return best > 0 ? [s.slice(0, best), s.slice(best + 1)] : [s]; };
   const capHtml = s => lines(s).map(l => l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(\d[\d,.~]*\s?(?:초|건|곳|번|단계|원|줄|시간|종|개 내규))/g, '<em>$1</em>')).map(l => `<span>${l}</span>`).join('');
+  // 음성으로 읽을 글: 가운뎃점(·)과 따옴표에서는 음성 엔진이 쉬지 않아 앞뒤 낱말이 붙어 들린다(음성 인식으로 확인) → 쉼표로 바꾸고 따옴표는 뺀다
+  const speakable = s => s.replace(/\n/g, ' ').replace(/\s*·\s*/g, ', ').replace(/[“”「」"]/g, '').replace(/\s+/g, ' ').trim();
   // 자막 한 줄 + 음성: 앞 음성이 끝날 때까지 기다렸다가, 음성을 받아 자막을 띄운다. wait:false면 화면 조작과 겹쳐 말한다
   const say = async (text, opt = {}) => {
     const lead = busyUntil - Date.now(); if (lead > 0) await wait(lead);
-    const r = await (await fetch(TTS, { method: 'POST', body: JSON.stringify({ text: opt.v || text }) })).json();
+    const r = await (await fetch(TTS, { method: 'POST', body: JSON.stringify({ text: speakable(opt.v || text) }) })).json();
     const s = now(); await p.evaluate(h => { const c = document.getElementById('__cap'); c.innerHTML = h; c.classList.add('on'); }, capHtml(text));
     const hold = Math.max(opt.ms || 0, r.dur * 1000 + 450); busyUntil = Date.now() + hold;
     subs.push({ s, e: s + hold / 1000, text, audio: r.file, dur: r.dur });
@@ -114,14 +116,14 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
 
   // ── ① 문제 제기
   await scene('문제 제기 — 건강검진', '1');
-  await say('규정 하나를 고치려 해도, 고칠 곳을 찾고\n인용하는 다른 조와 다른 규정까지 확인해야 합니다.');
+  await say('규정 하나를 고치려 해도, 고칠 곳을 찾고\n인용하는 다른 조문과 다른 규정까지 확인해야 합니다.');
   await say('개정문, 신구조문대비표, 이유서도 직접 씁니다.\n그러다 보니 사람이 하면 틀립니다.', { wait: false });
   await click('.ra-tab[data-k="health"]'); await p.waitForFunction(() => document.querySelector('#raHealth .ra-sec'), null, { timeout: 60000 }); timing.health = since();
   const kpi = await p.evaluate(() => document.querySelector('#raHealth').innerText.replace(/\s+/g, ' ').slice(0, 260));
   const m20 = +(kpi.match(/인용·명칭·번호 문제 (\d+)/) || [])[1], m4 = +(kpi.match(/오류가 있는 내규 (\d+)건/) || [])[1]; timing.healthNums = [m20, m4];
   await shot('health');
   await say(`내규 126건 전체를 ${f1(timing.health)}초 만에 진단했습니다.\n인용·명칭·번호 문제 ${m20}곳, 오류가 있는 내규 ${m4}건입니다.`,
-    { v: `내규 126건 전체를 ${f1(timing.health)}초 만에 진단했습니다. 인용·명칭·번호 문제 ${m20}곳, 오류가 있는 내규 ${kr(m4)} 건입니다.` });
+    { v: `내규 126건 전체를 ${f1(timing.health)}초 만에 진단했습니다. 인용, 명칭, 번호 문제 ${m20}곳, 오류가 있는 내규 ${kr(m4)} 건입니다.` });
   await click(p.locator('#raHealth .ra-hseg button', { hasText: '오류 목록' }));
   await p.waitForFunction(() => RA.check && RA.check.res && document.querySelector('#raChkAll .ra-det'), null, { timeout: 60000 }); timing.errorsTab = since();
   await wait(400); await scrollTo('#raChkAll .ra-detg'); await shot('health-errors'); await hl('#raChkAll details.ra-det[open] summary');
@@ -138,9 +140,9 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
   await wait(300); await shot('agent-done');
   await say(`${f1(timing.agentAmend)}초 만에 에이전트가 ${nSteps}단계를 끝까지 처리했습니다.`, { v: `${sp(timing.agentAmend)}초 만에 에이전트가 ${nSteps}단계를 끝까지 처리했습니다.` });
   await scrollTo('#raAgOut'); await scrollBy(250);
-  await say('제15조를 불러오고, 별표 2 표에서 일비 칸만\n25,000원에서 30,000원으로 바꿨습니다.', { v: '제15조를 불러오고, 별표 2 표에서 일비 칸만 2만 5천 원에서 3만 원으로 바꿨습니다.' });
+  await say('제15조를 불러오고, 별표 2에서 일비 칸만\n25,000원에서 30,000원으로 바꿨습니다.', { v: '제15조를 불러오고, 별표 2에서 일비 칸만, 2만 5천 원에서 3만 원으로 바꿨습니다.' });
   await scrollBy(350);
-  await say('이 조를 인용하는 곳을 확인하고,\n형식 점검·심의 사전검토·절차·문서 세트까지 준비했습니다.');
+  await say('이 조문을 인용하는 곳을 확인하고,\n형식 점검·심의 사전검토·절차·문서 세트까지 준비했습니다.');
   await scrollTo('#raAgOut'); await click(p.locator('button', { hasText: '검토 보고서 열기' }).first()); await wait(1000); await shot('report');
   await say('상급자에게 올릴 검토 보고서 초안도 함께 나옵니다.');
 
@@ -157,13 +159,13 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
   await hl('#raChkSum', false);
   await say('가장 중요한 것은 개정문 검증입니다. 개정문을 현행에\n다시 적용해, 개정안과 글자 하나까지 같은지 봅니다.');
   await scrollBy(420);
-  await say('내규 125건에 조 신설·삭제·항 끼워 넣기 같은 수정을\n619번 해 봤고, 619번 모두 일치했습니다.', { v: '내규 125건에 조 신설, 삭제, 항 끼워 넣기 같은 수정을 육백십구 번 해 봤고, 육백십구 번 모두 일치했습니다.' });
+  await say('내규 125건에 조 신설·삭제·항 끼워 넣기 같은 수정을\n619번 해 봤고, 619번 모두 일치했습니다.', { v: '내규 125건에, 조를 새로 만들고, 지우고, 항을 끼워 넣는 수정을 육백십구 번 해 봤고, 육백십구 번 모두 일치했습니다.' });
   await p.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' })); await wait(700);
   await click(p.locator('#raWiz button', { hasText: '문서' }).first()); await wait(900); await shot('amend-docs');
   await say('검토 보고서·심의안건서·개정문·이유서·사전예고문 등\n심의에 올릴 문서 11종이 준비돼 있습니다.', { v: '검토 보고서, 심의안건서, 개정문, 이유서, 사전예고문 등 심의에 올릴 문서 열한 종이 준비돼 있습니다.' });
   const dlb = p.locator('button', { hasText: '한글' }).first();
   if (await dlb.count()) { await Promise.all([p.waitForEvent('download', { timeout: 60000 }), click(dlb)]); timing.hwpx = since(); }
-  await say('한글 파일 하나로 받습니다.\n개정문·대비표·이유서·의견서까지 들어 있습니다.');
+  await say('한글 파일 하나로 받습니다.\n개정문·대비표·이유서·의견서까지 들어 있습니다.', { v: '한글 파일 하나로 내려받습니다. 개정문, 대비표, 이유서, 의견서까지 들어 있습니다.' });
 
   // ── ④ 일괄 정비
   await click('.ra-tab[data-k="agent"]'); await p.waitForSelector('#raAgIn');
@@ -176,14 +178,14 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
   await say(`에이전트는 ${f1(timing.bulk)}초 만에 ${nb}개 내규에서 ${np}곳을 찾았습니다.`, { v: `에이전트는 ${sp(timing.bulk)}초 만에 ${nb}개 내규에서 ${np} 곳을 찾았습니다.` });
   const bo = p.locator('#raBody button', { hasText: '일괄 정비' }).filter({ hasText: '열기' }).first();
   if (await bo.count()) { await click(bo); await wait(1000); await shot('bulk-view'); }
-  await say('내규별 개정문, “다른 내규의 개정” 부칙,\n통합 신구조문대비표까지 만들었습니다.');
+  await say('내규별 개정문, “다른 내규의 개정” 부칙,\n통합 신구조문대비표까지 만들었습니다.', { v: '내규별 개정문과, 다른 내규의 개정이라는 부칙, 통합 신구조문대비표까지 만들었습니다.' });
   await scrollBy(400);
   await say('이름이 바뀌면 뒤에 붙는 조사도 맞춥니다.\n“윤리감사실을 둔다” → “감사부를 둔다”', { v: '이름이 바뀌면 뒤에 붙는 조사도 맞춥니다. 윤리감사실을 둔다를 바꾸면, 감사부를 둔다가 됩니다.' });
 
   // ── ⑤ 조 삭제
   await click('.ra-tab[data-k="agent"]'); await p.waitForSelector('#raAgIn');
   await scene('조 삭제 — 사람이 놓치는 인용', '5');
-  await say('조를 지울 때 가장 많이 놓치는 것이,\n그 조를 인용하던 다른 조입니다.', { wait: false });
+  await say('조를 지울 때 가장 많이 놓치는 것이,\n그 조를 인용하던 다른 조입니다.', { wait: false, v: '조문을 지울 때 가장 많이 놓치는 것이, 그 조문을 인용하던 다른 조문입니다.' });
   const dBefore = dialogs.length;
   timing.del = await agentRun('여비규정 제20조를 삭제해줘'); timing.delDialog = dialogs.slice(dBefore);
   timing.delSteps = await p.evaluate(() => RA.agent.steps.filter(s => /삭제|점검/.test(s.t)).map(s => s.t + ': ' + String(s.d || '').replace(/<[^>]+>/g, '').slice(0, 120)));
@@ -229,7 +231,7 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
   await quiet();
   await card(HOOK.replace(/<div class="cond">[\s\S]*<\/div>/, `<div class="cond"><span>AI 모델 교체 가능</span><span>MCP 도구 ${mcp.tools}개</span><span>다른 기관: 설정 파일만</span></div>`));
   timing.endCard = now(); await shot('end');
-  await say('담당자가 틀리기 쉬운 일을 먼저 막는 에이전트를\n범정부 공공재로 내놓겠습니다. 감사합니다.');
+  await say('담당자가 틀리기 쉬운 일을 먼저 막는 에이전트입니다.\n감사합니다.');
   await quiet(); await wait(1500);
   const total = now();
   await p.close(); const vpath = await p.video().path(); await ctx.close(); await b.close();

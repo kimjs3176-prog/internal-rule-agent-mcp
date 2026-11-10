@@ -2730,7 +2730,7 @@ function raReportBlocks(c, mode){
   A.push('1. 추진 배경 및 목적');
   if(bg) A.push(`  ○ 추진 배경: ${bg}${/기$/.test(bg)?'':raJosa(bg,['을','를'])} 위함`);   // “출장비 현실화를 위함”·“…운영하기 위함"
   A.push(`  ○ 목적: ${c.purpose||`${c.title}에 필요한 사항을 정하려는 것임.`}`);
-  if(req&&req!==c.purpose) A.push(`  ○ 요청 내용: ${req}`);
+  // 담당자가 에이전트에 넣은 요청 문장은 보고서에 그대로 옮기지 않는다(목적·추진 배경으로 다듬은 문장만 쓴다)
   A.push('','2. 현황 및 문제점');
   if(isA){ const ch=raEffChanges(), xs=raEffAppx();
     const vq=(id,isX,body)=>raArr(S.vqLog).find(v=>v.id===id&&v.isX===isX&&String(body||'').replace(/\s/g,'').includes(String(v.neu).replace(/[^\d,.]/g,'')));   // 지금 수정안에 그 값이 그대로 있을 때만
