@@ -14,7 +14,7 @@ const URL = process.env.DEMO_URL || 'http://localhost:5100/';
 const TTS = process.env.DEMO_TTS || 'http://127.0.0.1:5200/tts';
 // 첫 화면과 끝 화면(서로 짝): 도구 이름 + 한 줄 약속 + 시연 조건. 약속 문구는 화면에서 실제로 보여 주는 것만 쓴다
 const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한 문장으로<br><em>개정안·대비표·검증</em>까지</p>
-  <div class="cond"><span>AI 키 없이</span><span>외부망 없이</span><span>실제 내규 126건</span></div>`;
+  <div class="cond"><span>외부망 없이</span><span>실제 내규 126건</span></div>`;
 
 (async () => {
   const b = await chromium.launch();
@@ -111,7 +111,7 @@ const HOOK = `<p class="eb">규정 제·개정 에이전트</p><p class="hk">한
   timing.startT = now() + 0.05;
   timing.hookBox = await p.evaluate(() => { const r = document.querySelector('#__card .hk').getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); });
   await scene('제목');
-  await say('한 문장이면 개정안과 신구조문대비표, 개정문 검증까지.\nAI 키 없이, 실제 내규 126건으로 보여 드립니다.', { v: '한 문장이면 개정안과 신구조문대비표, 개정문 검증까지. AI 키 없이, 실제 내규 백이십육 건으로 보여 드립니다.' });
+  await say('한 문장이면 개정안과 신구조문대비표, 개정문 검증까지.\n실제 내규 126건으로 보여 드립니다.', { v: '한 문장이면 개정안과 신구조문대비표, 개정문 검증까지. 실제 내규 백이십육 건으로 보여 드립니다.' });
   await quiet(); await uncard();
 
   // ── ① 문제 제기
