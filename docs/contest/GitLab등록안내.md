@@ -9,7 +9,8 @@
 | 항목 | 값 |
 |---|---|
 | 플랫폼 | 공공 GitLab `gitlab.aigov.go.kr` |
-| 공개 범위 | **비공개(Private)** |
+| 공개 범위 | **비공개(Private)** — 공고문: “프로젝트 공개 범위를 비공개로 설정(심사위원 열람용)” |
+| 등록 주소 | https://gitlab.aigov.go.kr/kimjs1408/koat-workplace |
 | 주제(Topic) | `2026 공공 AI 대전환 챌린지 세션2` |
 | 프로젝트 이름(예) | `koat-reg-agent` 또는 「규정 제·개정 에이전트」 |
 | 설명(예) | 규정 제·개정 에이전트 — 한 문장 지시로 개정안·신구조문대비표·개정문·검증·문서까지(한국농업기술진흥원) |
@@ -37,7 +38,7 @@ mkdir koat-reg-agent && cd koat-reg-agent
 python -m zipfile -e ../koat-reg-agent.zip .
 git init -b main
 git add . && git commit -m "규정 제·개정 에이전트 — 2026 공공 AI 대전환 챌린지 세션2 제출본"
-git remote add origin https://gitlab.aigov.go.kr/<그룹>/<프로젝트>.git
+git remote add origin https://gitlab.aigov.go.kr/kimjs1408/koat-workplace.git
 git push -u origin main
 ```
 
