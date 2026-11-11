@@ -173,7 +173,7 @@ claude mcp add reg-agent -- python /경로/mcp_server/server.py
 - **공식 SDK로 확인(원격):** 로컬 서버의 `/mcp`에 MCP 공식 클라이언트로 연결했다. 초기화(2025-06-18) → 도구 목록 17개 → 도구 호출이 정상으로 오갔다.
   - Python SDK(mcp 2.3.0): `run_agent`, `search`, `enact_regulation`
   - TypeScript SDK(@modelcontextprotocol/sdk 1.32.2): `amend_regulation`, `fetch`
-- **처리 시간:** 엔진 도구는 한 번에 0.2~0.6초다(첫 호출은 데이터 적재로 약 2초, AI 키·외부망 없이).
+- **처리 시간:** 엔진 도구는 한 번에 0.2~0.6초다(첫 호출은 데이터 적재로 약 2초, 규칙 기반·외부망 없이).
 - **독립 검토(11/8):** 검토자 4명(프로토콜·보안·기능·배포)이 따로 보고, 지적마다 다른 검토자가 재현했다. 재현된 결함은 모두 고쳤고 `tests/test_mcp_review_fixes.py`로 묶었다.
   - 엔진 정규식이 아주 긴 입력에서 오래 도는 것: 입력 길이 상한
   - 수치 비교가 60초를 넘길 수 있던 것: 45초 상한
