@@ -1003,6 +1003,9 @@ def _instructions():
          "한 문장 요청(예: “여비규정 제15조의 일비를 3만원으로 올려줘”)은 run_agent 가 규칙으로 끝까지 처리합니다. "
          "다른 공공기관 사례가 필요하면 alio_search_regulations → alio_get_regulation 으로 알리오 공시 규정을 읽고, 수치는 alio_compare_values 로 견주세요. "
          "참고한 다른 기관 조문은 amend_regulation·enact_regulation 의 references 로 넘기면 검토 보고서·심의 사전검토의 근거로 남습니다(기관명·규정명·조를 밝혀 인용). "
+         "이 서버에 등록되지 않은 다른 기관 사규도 됩니다: 알리오 공시 규정이면 alio_search_regulations 의 id 를 alio_id 로, 아니면 현행 원문 전체를 source_text 로 "
+         "amend_regulation·check_regulation 에 넣고, org 에 그 기관 이름(org_name·head·reg_word 등)을 주세요. 이때는 등록 내규와 대조하지 않습니다. "
+         "run_agent·health_check·bulk_rename 은 등록 기관 내규 전체가 필요해 등록 내규에만 씁니다. "
          "검증 결과(verification.ok=false)나 점검 오류가 있으면 사용자에게 그대로 알리세요.")
     if _mode() == "http":
         s += " 결과에 download 링크가 있으면 사용자에게 한글(hwpx)·Word(docx) 문서 세트 내려받기 링크로 보여 주세요. 원문 링크(url)도 함께 주세요."
