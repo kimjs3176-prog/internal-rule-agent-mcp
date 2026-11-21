@@ -14,7 +14,10 @@ function loadEngine() {
   const ctx = {
     console: { log() {}, info() {}, warn() {}, error: (...a) => process.stderr.write(a.join(' ') + '\n') },
     Date, Math, JSON, setTimeout, clearTimeout, setInterval, clearInterval, AbortController, URLSearchParams, encodeURIComponent, decodeURIComponent, Blob,
-    fetch: (u, o) => ALLOWED(String(u)) ? fetch(BASE + u, o) : Promise.reject(new TypeError('허용되지 않은 주소: ' + String(u).slice(0, 80))),
+    // 다른 기관 규정 작업이면(ra_ctx) 서버가 그 요청에서만 그 기관 이름을 쓰고 우리 내규와 대조하지 않게 X-RA-Ctx 를 붙인다
+    fetch: (u, o) => ALLOWED(String(u))
+      ? fetch(BASE + u, inp.ra_ctx ? Object.assign({}, o, { headers: Object.assign({}, (o && o.headers) || {}, { 'X-RA-Ctx': String(inp.ra_ctx) }) }) : o)
+      : Promise.reject(new TypeError('허용되지 않은 주소: ' + String(u).slice(0, 80))),
     localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } },
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     document: { getElementById: none, querySelector: none, querySelectorAll: () => [], title: '', body: {}, addEventListener() {},
