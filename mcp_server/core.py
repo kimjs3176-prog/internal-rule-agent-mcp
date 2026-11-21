@@ -417,17 +417,17 @@ def t_alio_get_regulation(id, query="", articles=None, limit=12):
     rule = _alio_rule(id)
     if not rule:
         return {"error": "id 는 alio_search_regulations 결과의 id 를 그대로 넣으세요(예: C0105|21892|K1100|COMM_RULE|RULE_NO|…)."}
+    try:
+        D = _alio_orgs()                                # 알리오에 닿지 않으면 규정 파일을 기다리지 않고 바로 알린다(기관명도 여기서)
+    except _AlioDown as e:
+        return {"error": str(e), "url": _alio_url(rule)}
     nos = [_art_no(a) for a in _list(articles) if _art_no(a)]
     d = _post("/api/regagent/alio/rule", {**rule, "q": str(query or "")[:300], "kw": str(query or "")[:40], "nos": nos,
                                           "limit": max(1, min(int(limit or 12), 80))})
     if not d.get("success"):
         return {"error": d.get("error") or "알리오 규정을 읽지 못했습니다.", "url": _alio_url(rule)}
     name = (d.get("file") or {}).get("fileName") or ""
-    agency = ""
-    try:
-        agency = next((o["name"] for o in _alio_orgs()["orgs"] if o["id"] == rule["orgId"]), "")
-    except _AlioDown:
-        pass
+    agency = next((o["name"] for o in D.get("orgs", []) if o["id"] == rule["orgId"]), "")
     out = {"id": id, "agency": agency, "regulation": _alio_base(os.path.splitext(name)[0]) if name else "", "file": name,
            "article_count": d.get("count"), "toc": d.get("toc", []),
            "articles": [{"article": _lbl(a['no']), "title": a.get("title", ""), "body": a.get("body", ""), "relevant": bool(a.get("rel"))}
