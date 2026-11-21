@@ -423,7 +423,7 @@ function raNextModel(){
     if(!_raHealth) return {crumb:[lbl,'진단 중'], hint:`${RA_ORG.reg_word} 전체를 진단하고 있습니다.`, busy:true};
     if((RA.health||{}).v&&RA.health.v!=='diag') return {crumb:[lbl,'세부 보기'], hint:'진단 요약으로 돌아가 정비 우선순위를 확인하세요.', next:{l:'진단 요약 보기',js:"raNextHealthDiag()"}};
     const top=raArr(_raHealth.rows).find(r=>raArr(r.reasons).length);
-    if(top) return {crumb:[lbl,'우선순위 확인'], hint:`가장 먼저 볼 ${RA_ORG.reg_word}: 「${top.title}」 ${top.grade}등급 — 문제를 열어 고칠 곳을 고르면 개정으로 이어집니다.`,
+    if(top) return {crumb:[lbl,'우선순위 확인'], hint:`가장 먼저 볼 ${RA_ORG.reg_word}: 「${top.title}」 ${RA_GRADE[top.grade]?top.grade+'등급':'(원문을 읽지 못해 점수 없음)'} — 문제를 열어 고칠 곳을 고르면 개정으로 이어집니다.`,
       next:{l:'1순위 문제 보기',js:`raNextHealth('${_a(top.slug)}')`}, alt:{l:'개정 열기',js:"raTab('amend')"}};
     return {crumb:[lbl,'정비할 곳 없음'], hint:`정비가 필요한 ${RA_ORG.reg_word}가 없습니다.`, next:{l:'새 작업 맡기기',js:"raTab('agent')"}};
   }
