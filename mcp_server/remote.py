@@ -112,6 +112,8 @@ def mcp_endpoint():
         r.headers["Access-Control-Allow-Headers"] = _HEADERS
         r.headers["Access-Control-Max-Age"] = "600"
         return _cors(r, origin)
+    if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):   # 브라우저로 주소를 열면 연결 안내
+        return _guide_page()
     if not _auth_ok():
         return _rpc_error(401, -32001, "Unauthorized: Authorization: Bearer <MCP_TOKEN> 이 필요합니다.", origin,
                           {"WWW-Authenticate": 'Bearer realm="reg-agent"'})
@@ -172,4 +174,45 @@ def mcp_doc(fmt, token):
         ascii_name = f"reg-agent.{fmt}"                     # 한글만 있는 이름은 filename* 이 쓰이고, 옛 브라우저용 이름은 영문으로
     r.headers["Content-Disposition"] = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     r.headers["Cache-Control"] = "no-store"
+    return r
+
+
+def _guide_page():
+    """브라우저로 MCP 주소를 열었을 때의 안내 — 이 주소를 AI 도우미에 넣는 방법과 도구 목록. MCP 클라이언트는 POST 라 영향이 없다."""
+    from html import escape as _h
+    url = (_public_base() or request.host_url.rstrip("/")) + "/mcp"
+    only = core.mcp_only()
+    title = "범용 규정 제·개정 에이전트 MCP" if only else "규정 제·개정 에이전트 MCP"
+    lead = ("어느 기관의 사규·내규·자치법규든, 알리오 공시 규정이나 원문만 있으면 개정문·신구조문대비표·개정문 검증·조문 점검·제출 문서를 만듭니다."
+            if only else "이 기관에 등록된 내규로 개정·제정·점검·건강검진을 하고, 다른 기관 사규도 원문·알리오로 다룹니다.")
+    tools = "".join(f"<li><code>{_h(t['name'])}</code> {_h(t['title'])}</li>" for t in core.tool_list())
+    ex = ("<li>한국○○공사 여비규정을 알리오에서 찾아 일비를 3만원으로 올리는 개정안 만들어 줘.</li>"
+          "<li>(규정 원문을 붙여 넣고) 이 규정 형식 점검해 줘. 우리는 ○○재단이고 기관장은 이사장이야.</li>"
+          + ("<li>공공기관들의 경조휴가 일수를 비교해 줘.</li>" if only else "<li>유관 기관들의 경조휴가 일수를 비교해 줘.</li>"))
+    html = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_h(title)}</title><style>
+:root{{color-scheme:light dark;--bg:#f6f7f9;--card:#fff;--ink:#1d2126;--mu:#575e68;--rule:#e3e6e9;--acc:#256ef4}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#0b0d11;--card:#121519;--ink:#eceff1;--mu:#a5acb2;--rule:#2c3136;--acc:#6d9df5}}}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 Pretendard,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;word-break:keep-all}}
+main{{max-width:760px;margin:0 auto;padding:56px 20px 64px}} h1{{font-size:clamp(26px,4vw,36px);letter-spacing:-.03em;line-height:1.25;margin:0 0 12px;text-wrap:balance}}
+p.lead{{color:var(--mu);margin:0 0 28px;text-wrap:balance}} section{{background:var(--card);border:1px solid var(--rule);border-radius:14px;padding:20px 22px;margin:0 0 16px}}
+h2{{font-size:16px;margin:0 0 10px}} code{{font:14px ui-monospace,SFMono-Regular,Menlo,monospace}} .url{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+.url code{{flex:1;min-width:0;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--rule);overflow-wrap:anywhere}}
+button{{font:600 14px inherit;padding:10px 16px;border-radius:999px;border:0;background:var(--ink);color:var(--card);cursor:pointer}}
+ol,ul{{margin:0;padding-left:20px}} li{{margin:4px 0}} .mu{{color:var(--mu);font-size:14px}}
+</style></head><body><main>
+<h1>{_h(title)}</h1><p class="lead">{_h(lead)}</p>
+<section><h2>연결 주소</h2><div class="url"><code id="u">{_h(url)}</code><button onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('u').textContent).then(()=>{{this.textContent='복사됨'}})">복사</button></div>
+<p class="mu">이 주소는 AI 도우미에 넣는 주소입니다. 브라우저로 여는 화면이 아닙니다.</p></section>
+<section><h2>AI 도우미에 등록</h2><ol>
+<li><b>claude.ai</b>: 설정 → 커넥터 → 사용자 지정 커넥터 추가 → 이 주소 입력(인증 비움) → 대화창 도구 메뉴에서 켜기</li>
+<li><b>ChatGPT</b>: 설정 → 앱·커넥터 → 고급에서 개발자 모드 → 만들기 → 이 주소, 인증 “없음”</li>
+<li><b>Claude Code</b>: <code>claude mcp add --transport http reg-agent {_h(url)}</code></li></ol></section>
+<section><h2>이렇게 물어보세요</h2><ul>{ex}</ul></section>
+<section><h2>도구 {len(core.tool_list())}개</h2><ul>{tools}</ul>
+<p class="mu">개정문·대비표·검증·점검·문서는 이 서버의 규칙 엔진이 만듭니다. 받은 원문과 결과는 서버에 저장하지 않습니다.</p></section>
+</main></body></html>"""
+    r = Response(html, mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    r.headers["X-Content-Type-Options"] = "nosniff"
     return r

@@ -133,7 +133,14 @@ _ORG_DEFAULT = {
 }
 
 
+# 범용 MCP 전용 배포(MCP_ONLY=1): 이 저장소의 기관 프로필·내규(한국농업기술진흥원)를 싣지 않고, 다른 기관 사규를
+# 원문·알리오로 받아 다루는 도구만 연다(mcp_server/core.py GENERIC_TOOLS). ORG_CONFIG 를 따로 주면 그 프로필을 쓴다.
+MCP_ONLY = (os.environ.get("MCP_ONLY") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def load_org() -> dict:
+    if MCP_ONLY and not os.environ.get("ORG_CONFIG"):
+        return _check_org(dict(_ORG_DEFAULT))
     path = os.environ.get("ORG_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "org_config.json")
     org = dict(_ORG_DEFAULT)
     try:
@@ -462,7 +469,7 @@ def _reg_raw_text(slug: str) -> str:
 def all_regs() -> list:
     """[{slug,title,category,revision,articles,addenda,appendix,body}] — 매니페스트 변경 시 재구성.
     다른 기관 규정을 다루는 요청(X-RA-Ctx external)에서는 빈 목록 — 우리 내규와 대조하지 않는다."""
-    if req_external():
+    if MCP_ONLY or req_external():
         return []
     try:
         key = os.path.getmtime(reg_chunks.MANIFEST)
@@ -2394,7 +2401,7 @@ def law_ready() -> bool:
 @bp.route("/api/regagent/config")
 def ra_config():
     regs = all_regs()
-    return jsonify({"success": True, "org": _deep_fmt(ORG), "reg_count": len(regs),
+    return jsonify({"success": True, "org": _deep_fmt(ORG), "reg_count": len(regs), "mcp_only": MCP_ONLY,
                     "semantic": bool(_CTX.get("vec_ready") and _CTX["vec_ready"]()), "ledger": ledger_enabled(),
                     "law": law_ready(),
                     "compat": {"ready": bool(_CTX.get("compat_ready") and _CTX["compat_ready"]()),

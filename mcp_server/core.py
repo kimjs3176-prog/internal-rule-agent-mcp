@@ -332,7 +332,10 @@ def _alio_scope(D, scope, agencies):
         ids = [o["id"] for o in orgs if o["id"] != me]
     else:
         ids = list(D.get("peers") or [])
-        if not ids:
+        if not ids and mcp_only():                     # 범용 서버에는 ‘우리 기관’이 없어 유관 기관도 없다 → 전체에서
+            ids = [o["id"] for o in orgs if o["id"] != me]
+            note = "범용 서버라 유관 기관이 없어 전체 공공기관에서 찾았습니다. agencies 로 기관을 고르면 그 기관만 봅니다."
+        elif not ids:
             note = "유관 기관이 설정되어 있지 않습니다(org_config.json alio.peer_depts). scope 를 type 이나 all 로 넓히거나 agencies 로 기관을 고르세요."
     if len(ids) > ALIO_MAX_ORGS:
         note = (note + " " if note else "") + f"범위가 넓어 {len(ids)}곳 중 앞의 {ALIO_MAX_ORGS}곳만 조회했습니다. agencies 로 기관을 고르면 그 기관을 조회합니다."
@@ -962,9 +965,21 @@ def _schema(name, schema):
     return {**schema, "properties": props}
 
 
+# 범용 MCP 전용 배포(MCP_ONLY=1)에서 여는 도구 — 등록 내규 없이 원문·알리오로 다른 기관 사규를 다루는 것만
+GENERIC_TOOLS = ("amend_regulation", "enact_regulation", "check_regulation",
+                 "alio_search_regulations", "alio_get_regulation", "alio_compare_values")
+
+
+def mcp_only() -> bool:
+    import reg_agent
+    return bool(getattr(reg_agent, "MCP_ONLY", False))
+
+
 def tool_list():
     out = []
     for n, ti, _, desc, schema in TOOLS:
+        if mcp_only() and n not in GENERIC_TOOLS:
+            continue
         writes = _mode() == "stdio" and n in _ENGINE_TOOLS              # stdio 에서 output_dir 를 주면 파일을 쓴다
         out.append({"name": n, "title": ti, "description": desc, "inputSchema": _schema(n, schema),
                     "annotations": {"title": ti, "readOnlyHint": not writes, "destructiveHint": False, "idempotentHint": True,
@@ -974,6 +989,10 @@ def tool_list():
 
 def _call(name, args):
     t = _BY.get(name)
+    if t and mcp_only() and name not in GENERIC_TOOLS:
+        return {"content": [{"type": "text", "text": f"{name}: 이 범용 서버에는 등록된 내규가 없어 쓸 수 없습니다. "
+                                                     "다른 기관 사규는 amend_regulation·check_regulation 에 source_text(원문)나 alio_id 를 주세요."}],
+                "isError": True}
     if not t:
         return {"content": [{"type": "text", "text": f"모르는 도구: {name}"}], "isError": True}
     props = _schema(name, t[4]).get("properties", {})
@@ -997,6 +1016,17 @@ def _call(name, args):
 
 
 def _instructions():
+    if mcp_only():
+        s = ("이 서버는 어느 기관의 규정(사규·내규·자치법규)이든 개정·제정·점검을 돕는 범용 ‘규정 제·개정 에이전트’입니다. 등록된 내규는 없습니다. "
+             "개정은 ① 알리오 공시 규정이면 alio_search_regulations(agencies=[기관명]) → alio_get_regulation 으로 현행 조문을 읽고, 아니면 사용자에게 현행 원문을 받아 "
+             "② AI 가 고친 조문 전문을 amend_regulation 에 넣으세요(alio_id 또는 source_text, org 에 그 기관명·기관장 직위·규정 이름). "
+             "개정문·신구조문대비표·개정문 검증·조문 점검·문서는 서버가 규칙으로 만듭니다. 형식 점검만이면 check_regulation(text 또는 alio_id, org). "
+             "새 규정은 enact_regulation(title, text, org). 다른 기관 수치는 alio_compare_values 로 견주고, 참고한 조문은 references 로 넘겨 근거로 남기세요. "
+             "금액·기한은 원문에서 확인한 값만 쓰고, 근거는 「규정명」 제N조로 밝히세요. "
+             "검증 결과(verification.ok=false)나 점검 오류가 있으면 사용자에게 그대로 알리세요.")
+        if _mode() == "http":
+            s += " 결과에 download 링크가 있으면 사용자에게 한글(hwpx)·Word(docx) 문서 세트 내려받기 링크로 보여 주세요."
+        return s
     s = ("이 서버는 기관 내규(규정·규칙·지침)의 제·개정을 돕는 ‘규정 제·개정 에이전트’입니다. "
          "답에는 근거를 「내규명」 제N조 형태로 밝히고, 금액·기한은 조문·별표 원문에서 확인한 값만 쓰세요. "
          "개정은 ① get_regulation 으로 현행 조문을 읽고 ② 고친 조문 전문을 amend_regulation 에 넣어 개정문·신구조문대비표·개정문 검증·조문 점검·인용 영향을 받으세요. "
@@ -1040,7 +1070,8 @@ def _handle(msg):
     if method == "initialize":
         want = params.get("protocolVersion")
         res = {"protocolVersion": want if want in PROTOCOLS else PROTOCOLS[0], "capabilities": {"tools": {"listChanged": False}},
-               "serverInfo": {"name": "reg-agent", "title": "규정 제·개정 에이전트", "version": VERSION}, "instructions": _instructions()}
+               "serverInfo": {"name": "reg-agent", "title": "범용 규정 제·개정 에이전트" if mcp_only() else "규정 제·개정 에이전트", "version": VERSION},
+               "instructions": _instructions()}
     elif method == "ping":
         res = {}
     elif method == "tools/list":

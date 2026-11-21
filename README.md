@@ -23,6 +23,7 @@ Claude·ChatGPT 같은 AI 도우미에 연결해 쓰는 **공공기관 규정 �
 - [보안과 운영](#보안과-운영)
 - [웹 화면](#웹-화면)
 - [검증 결과](#검증-결과)
+- [범용 MCP 전용 배포](#범용-mcp-전용-배포)
 - [기관 전용으로 배포하기](#기관-전용으로-배포하기)
 - [관리자 안내](#관리자-안내)
 - [구조 · 문서 · 라이선스](#구조--문서--라이선스)
@@ -31,9 +32,10 @@ Claude·ChatGPT 같은 AI 도우미에 연결해 쓰는 **공공기관 규정 �
 
 ### A. MCP로 연결하기 — 설치 없음
 
-**1. 주소** — `https://<배포 주소>/mcp` (같은 주소: `/api/mcp`)
+**1. 주소** — `https://<MCP 배포 주소>/mcp` (같은 주소: `/api/mcp`)
 
 - 온라인 시연 주소: (등록 후 기재)
+- 범용 MCP는 웹 화면과 **다른 주소**로 둡니다([범용 MCP 전용 배포](#범용-mcp-전용-배포)). 그 주소를 브라우저로 열면 연결 안내가 나옵니다. 기관 웹 화면 주소의 `/mcp`는 그 기관 내규까지 쓰는 MCP입니다.
 
 **2. AI 도우미에 등록**
 
@@ -96,7 +98,7 @@ Claude Desktop 설정 파일과 그 밖의 클라이언트는 [`docs/MCP.md`](do
 
 ```bash
 pip install pytest
-python -m pytest -q tests            # 430건
+python -m pytest -q tests            # 433건
 node --test tests/js/*.test.mjs      # 91건, Node.js 18 이상
 ```
 
@@ -254,6 +256,30 @@ MCP와 같은 엔진으로 브라우저에서도 씁니다. PC와 휴대폰 모�
 
 측정 방법과 한계는 [`docs/contest/성과측정.md`](docs/contest/성과측정.md)에 있습니다.
 
+## 범용 MCP 전용 배포
+
+같은 저장소를 **두 번** 배포합니다. 코드는 같고 환경변수 하나만 다릅니다.
+
+| 배포 | 환경변수 | 주소를 열면 | MCP 도구 |
+|---|---|---|---|
+| 기관 웹 화면 (예: 한국농업기술진흥원) | (없음) | 그 기관의 웹 화면, 등록 내규 126건 | 17개(등록 내규 + 범용) |
+| **범용 MCP** | `MCP_ONLY=1` | 연결 안내 화면(`/` → `/mcp`) | 6개: `amend_regulation`·`enact_regulation`·`check_regulation`·`alio_*` |
+
+`MCP_ONLY=1`이면 이렇게 동작합니다.
+- 이 저장소의 기관 프로필·내규를 싣지 않습니다. 기관명은 “○○기관”이고 등록 내규는 0건이며, 기관 이름은 요청마다 `org`로 받습니다.
+- 등록 내규가 필요한 도구(`run_agent`·`health_check` 등)는 목록에서 빠지고, 불러도 쓸 수 없다고 답합니다.
+- 내규 등록(`/upload` API)이 꺼집니다.
+- 알리오 검색의 기본 범위가 ‘유관 기관’ 대신 전체 공공기관입니다(`agencies`로 기관을 고르면 그 기관만).
+- 서버 안내문(instructions)도 범용 사용법으로 바뀝니다.
+
+**Vercel에서 만드는 법**
+1. Vercel → Add New → Project → 같은 저장소를 고릅니다.
+2. 프로젝트 이름을 정합니다. 그 이름이 주소가 됩니다(예: `reg-agent-mcp` → `https://reg-agent-mcp.vercel.app/mcp`).
+3. Environment Variables에 `MCP_ONLY` = `1`을 넣습니다. 알리오·문서 기능은 다른 값 없이 됩니다. 필요하면 `MCP_TOKEN`, `MCP_PUBLIC_URL`도 넣습니다.
+4. Deploy 후 주소를 브라우저로 열어 “범용 규정 제·개정 에이전트 MCP” 안내가 보이면 정상입니다. 그 주소의 `/mcp`를 AI 도우미에 등록합니다.
+
+내 컴퓨터에서 확인: `MCP_ONLY=1 python run_local.py` → `http://localhost:5100`
+
 ## 기관 전용으로 배포하기
 
 범용 MCP만으로 부족하면(건강검진·한 문장 처리·일괄 정비를 우리 내규 전체에 쓰려면) 기관마다 배포를 하나 띄웁니다. 코드는 고치지 않습니다.
@@ -280,6 +306,7 @@ MCP와 같은 엔진으로 브라우저에서도 씁니다. PC와 휴대폰 모�
 | `GITHUB_TOKEN`, `GITHUB_REPO` | 읽기 전용 배포에서 내규 등록·작업 실적을 저장소에 커밋 |
 | `LEDGER_ENABLED`, `LEDGER_DIR`, `LEDGER_BRANCH` | 작업 실적 기관 대장(기본 꺼짐)과 그 위치 |
 | `ORG_CONFIG`, `REG_DIR`, `REG_MANIFEST` | 기관 프로필·규정 원문 위치 |
+| `MCP_ONLY` | `1`이면 범용 MCP 전용 배포(기관 내규 없이 범용 도구 6개만, [위 절](#범용-mcp-전용-배포)) |
 
 **내규 원문 등록**
 

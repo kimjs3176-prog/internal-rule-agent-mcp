@@ -257,7 +257,7 @@ function toggleDark(){
 })();
 // 서버 상태는 좌측 기관 카드에 표시(reg_agent.js raOrgCard)
 let _srvOk=null;
-fetch('/api/ping').then(r=>r.json()).then(d=>{ _srvOk=!!d.ok; if(typeof raOrgCard==='function') raOrgCard(); }).catch(()=>{ _srvOk=false; if(typeof raOrgCard==='function') raOrgCard(); });
+fetch('/api/ping').then(r=>r.json()).then(d=>{ if(d.mcp_only){ location.replace('/mcp'); return; } _srvOk=!!d.ok; if(typeof raOrgCard==='function') raOrgCard(); }).catch(()=>{ _srvOk=false; if(typeof raOrgCard==='function') raOrgCard(); });
 </script>
 <script src="/assets/reg_agent.js"></script>
 <script>openRegAgent();</script>
