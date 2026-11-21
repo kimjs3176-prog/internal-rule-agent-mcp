@@ -1498,7 +1498,7 @@ def _user_gemini_key():
 @app.route("/api/ping")
 def ping():
     """서버 생존 확인 - 빠른 응답 (법제처 API 호출 없음)"""
-    return jsonify({"server": True, "ok": True})
+    return jsonify({"server": True, "ok": True, "mcp_only": _MCP_ONLY})
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1549,7 +1549,9 @@ def serve_asset_file(subpath):
 
 
 import reg_upload as _reg_upload  # noqa: E402
-_reg_upload.register(app)            # 내규 원문 등록(/upload) + 저장소 자동 커밋
+_MCP_ONLY = (os.environ.get("MCP_ONLY") or "").strip().lower() in ("1", "true", "yes", "on")
+if not _MCP_ONLY:                     # 범용 MCP 전용 배포에는 내규 등록이 없다(등록 내규를 두지 않음)
+    _reg_upload.register(app)        # 내규 원문 등록(/upload) + 저장소 자동 커밋
 
 import reg_agent as _reg_agent  # noqa: E402
 _reg_agent.register(
