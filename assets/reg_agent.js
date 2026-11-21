@@ -390,9 +390,76 @@ function openRegAgent(tab){
   const ai=raHasAi()?`<button class="ra-pill ok ra-ai-pill" onclick="openAiModal()" title="AI 모델·키를 바꾸려면 누르세요">${raIc('spark')}AI 연결됨</button>`:`<button class="ra-pill ra-ai-pill" onclick="openAiModal()" title="AI 키를 넣으면 초안·수정안·검토의견을 AI가 씁니다">${raIc('spark')}AI 미설정</button>`;   // 키 발급 링크는 AI 설정 창 안에
   p.innerHTML=(nav?'':`<nav class="ra-tabs" aria-label="에이전트 기능">${tabs}</nav>`)+
     `<header class="ra-page"><div class="ra-page-t"><h1 title="${_e(ph)}">${_e(pt)}</h1></div><div class="ra-page-a"><button class="ra-pill ra-help-btn" onclick="raHelpOpen()" aria-haspopup="dialog">${raIc('info')}도움말</button>${ai}</div></header>`+
-    `<div id="raBody" class="ra-body"></div>`;
+    `<div id="raBody" class="ra-body"></div><div id="raNext" class="ra-next-wrap"></div>`;
   raOrgCard();
   raRender();
+  raNextWatch();
+}
+// ── 다음 할 일 안내(화면 아래에 붙어 따라오는 막대) ──────────────────────────
+// 어디까지 왔는지(메뉴 › 단계 n/N), 다음에 무엇을 하는지, 왜 아직 못 넘어가는지를 늘 보여 주고 이전·다음 단추를 둔다.
+// 제정·개정은 단계(RA_WIZ), 에이전트는 실행 결과의 다음 동작(RA.agent.done.acts), 건강검진은 가장 먼저 볼 내규,
+// 그 밖의 메뉴는 이어서 할 만한 작업을 안내한다. 막대가 가리키는 단추·입력칸이 이미 화면에 보이면 겹치지 않게 숨긴다.
+const RA_NEXT_TAB={regs:['amend','개정하기'],advise:['amend','개정으로 이어 가기'],terms:['bulk','일괄 정비로 바꾸기'],org:['proc','절차 안내 보기'],
+  bulk:['ledger','작업 실적 보기'],upper:['amend','개정 후보 고치기'],graph:['amend','개정하기'],proc:['amend','개정 시작하기'],ledger:['agent','새 작업 맡기기']};
+function raNextModel(){
+  const t=RA.tab, lbl=(RA_TABS.find(x=>x[0]===t)||[])[1]||'';
+  if(t==='amend'||t==='enact'){
+    const W=RA_WIZ[t], i=raWizStep(t), nx=W[i+1], gate=nx?raWizGate(t,i+1):'';
+    return {dock:'.ra-wiz-nav', crumb:[lbl,`${i+1}/${W.length} ${W[i].t}`], dots:W.map((w,k)=>({t:w.t,on:k===i,done:raWizDone(t,k)})),
+      hint:nx?(gate?gate:`다음은 “${nx.t}” — ${nx.d}`):`마지막 단계입니다. ${W[i].d}`, lock:!!gate,
+      prev:i>0?{l:'이전',js:`raWizGo('${t}',${i-1})`,title:`이전: ${W[i-1].t}`}:null,
+      next:nx?{l:`다음: ${nx.t}`,js:`raWizGo('${t}',${i+1})`,off:!!gate}:null};
+  }
+  if(t==='agent'){
+    const G=RA.agent||{};
+    if(G.running) return {crumb:[lbl,'실행 중'], hint:'에이전트가 단계를 차례로 진행하고 있습니다. 끝나면 다음 할 일을 여기에 알려 드립니다.', busy:true};
+    const acts=raArr((G.done||{}).acts);
+    if(acts.length){ const p=acts.find(a=>a[2])||acts[0], q=acts.find(a=>a!==p);
+      return {dock:'.ra-ag-done', crumb:[lbl,'결과 확인'], hint:(G.done.title||'')+(q?' — 결과를 열어 바뀐 곳을 확인하세요.':''), alt:q?{l:q[0],js:q[1]}:null, next:{l:p[0],js:p[1]}}; }
+    return {dock:'.ra-ag-box', crumb:[lbl,'지시하기'], hint:'고칠 내용을 한 문장으로 적고 “에이전트 실행”을 누르세요. 대상 찾기부터 수정안·점검·문서까지 이어서 합니다.',
+      next:{l:'지시 적으러 가기',js:"raNextFocus('raAgIn')"}};
+  }
+  if(t==='health'){
+    if(!_raHealth) return {crumb:[lbl,'진단 중'], hint:`${RA_ORG.reg_word} 전체를 진단하고 있습니다.`, busy:true};
+    if((RA.health||{}).v&&RA.health.v!=='diag') return {crumb:[lbl,'세부 보기'], hint:'진단 요약으로 돌아가 정비 우선순위를 확인하세요.', next:{l:'진단 요약 보기',js:"raNextHealthDiag()"}};
+    const top=raArr(_raHealth.rows).find(r=>raArr(r.reasons).length);
+    if(top) return {crumb:[lbl,'우선순위 확인'], hint:`가장 먼저 볼 ${RA_ORG.reg_word}: 「${top.title}」 ${top.grade}등급 — 문제를 열어 고칠 곳을 고르면 개정으로 이어집니다.`,
+      next:{l:'1순위 문제 보기',js:`raNextHealth('${_a(top.slug)}')`}, alt:{l:'개정 열기',js:"raTab('amend')"}};
+    return {crumb:[lbl,'정비할 곳 없음'], hint:`정비가 필요한 ${RA_ORG.reg_word}가 없습니다.`, next:{l:'새 작업 맡기기',js:"raTab('agent')"}};
+  }
+  const n=RA_NEXT_TAB[t], d=(RA_TABS.find(x=>x[0]===t)||[])[2]||'';
+  return {crumb:[lbl], hint:d, next:n?{l:n[1],js:`raTab('${n[0]}')`}:null};
+}
+function raNextHealthDiag(){ RA.health.v='diag'; _raSave(); raRerender('health'); window.scrollTo({top:0}); }
+function raNextFocus(id){ const el=document.getElementById(id); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'center'}); el.focus({preventScroll:true}); }
+function raNextHealth(slug){ if(!((RA.health||{}).open||{})[slug]) raHealthOpen(slug,'all'); const el=document.getElementById('raHp-'+slug); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); }
+function raNextBtn(b, cls){ return b?`<button class="svc-btn ${cls}" ${b.off?'disabled aria-disabled="true"':''} ${b.title?`title="${_e(b.title)}"`:''} onclick="${_e(b.js)}">${_e(b.l)}</button>`:''; }
+function raNextHtml(){
+  const m=raNextModel(); if(!m||(!m.next&&!m.prev&&!m.hint)) return '';
+  const crumb=m.crumb.filter(Boolean).map((c,k,a)=>k===a.length-1?`<b>${_e(c)}</b>`:`<span>${_e(c)}</span>`).join('<i aria-hidden="true">›</i>');
+  const dots=m.dots?`<span class="ra-next-dots" aria-hidden="true">`+m.dots.map(d=>`<i class="${d.on?'on':d.done?'done':''}" title="${_e(d.t)}"></i>`).join('')+`</span>`:'';
+  return `<div class="ra-next${m.lock?' lock':''}${m.busy?' busy':''}" role="region" aria-label="다음 할 일">`+
+    `<div class="ra-next-where"><span class="ra-next-crumb">${crumb}</span>${dots}</div>`+
+    `<p class="ra-next-hint" aria-live="polite">${m.lock?raIc('info'):''}${_e(m.hint||'')}</p>`+
+    `<div class="ra-next-acts">${raNextBtn(m.prev,'ghost')}${raNextBtn(m.alt,'')}${raNextBtn(m.next,m.next&&!m.next.off?'yes':'')}</div></div>`;
+}
+let _raNextT=0, _raNextIO=null, _raNextMO=null;
+function raNextSync(){
+  clearTimeout(_raNextT);
+  _raNextT=setTimeout(()=>{
+    const w=document.getElementById('raNext'); if(!w) return;
+    const h=raNextHtml(); if(w.dataset.h!==h){ w.innerHTML=h; w.dataset.h=h; }
+    // 막대가 가리키는 것(단계 카드의 이전·다음 단추, 지시 입력칸, 실행 결과 카드)이 화면에 보이면 잠시 숨긴다(같은 단추가 두 번 보이지 않게)
+    if(_raNextIO) _raNextIO.disconnect();
+    const m=raNextModel()||{}, inl=m.dock&&document.querySelector(m.dock); w.classList.remove('dock');
+    if(inl&&'IntersectionObserver' in window){ _raNextIO=new IntersectionObserver(es=>es.forEach(e=>w.classList.toggle('dock',e.isIntersecting)),{threshold:0.6}); _raNextIO.observe(inl); }
+  },60);
+}
+// 에이전트 실행 단계·건강검진 결과처럼 화면이 스스로 바뀌는 때도 막대를 맞춘다
+function raNextWatch(){
+  const b=document.getElementById('raBody'); if(!b||!('MutationObserver' in window)) return;
+  if(_raNextMO) _raNextMO.disconnect();
+  _raNextMO=new MutationObserver(()=>raNextSync()); _raNextMO.observe(b,{childList:true,subtree:true});
 }
 function raTab(k){ if(k==='check'){ RA.health=RA.health||{}; RA.health.v=RA.check&&RA.check.reg?'one':'errors'; k='health'; }   // 전체 점검은 건강검진 안의 보기
   const kb=!!(document.activeElement&&document.activeElement.classList&&document.activeElement.classList.contains('ra-tab'));
@@ -449,6 +516,7 @@ function raRender(){
   else b.innerHTML=raProcView();
   if(t==='amend'||t==='upper'||t==='check'||t==='enact'||t==='advise'||(t==='health'&&RA.health.v==='one')) raFillCatalog();
   if(t==='enact'||t==='amend') setTimeout(()=>raWizAuto(t),0);
+  raNextSync();
 }
 // ── 단계에 들어서면 그 단계의 일을 먼저 해 둔다(사용자는 결과를 확인하고 고친다) ──
 // 같은 입력으로는 한 번만(실패해도 되풀이하지 않는다). 다시 하려면 화면의 단추를 누른다.
@@ -633,7 +701,7 @@ function raWizNav(mode, i){
 }
 // 입력·체크로 조건이 바뀌면 단계 표시와 아래 이동 버튼만 고쳐 그린다(입력 중인 칸은 그대로)
 function raWizSync(mode){
-  if(RA.tab!==mode) return; const i=raWizStep(mode);
+  if(RA.tab!==mode) return; const i=raWizStep(mode); setTimeout(raNextSync,0);
   const b=document.getElementById('raWiz'); if(b) b.outerHTML=raWizBar(mode,i);
   const n=document.querySelector('.ra-wiz-nav'); if(n) n.outerHTML=raWizNav(mode,i);
   const h=document.getElementById('raSelHint'); if(h) h.innerHTML=raSelHint();
