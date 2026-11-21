@@ -44,8 +44,8 @@ def _get(path, **q):
     return r.get_json(silent=True) or {"success": False, "error": f"응답 오류({r.status_code})"}
 
 
-def _post(path, body):
-    r = _client().post(path, json=body)
+def _post(path, body, headers=None):
+    r = _client().post(path, json=body, headers=headers)
     return r.get_json(silent=True) or {"success": False, "error": f"응답 오류({r.status_code})"}
 
 
@@ -176,9 +176,16 @@ def t_get_regulation(regulation, articles=None, include_appendix=False, appendic
     return out
 
 
-def t_check_regulation(regulation="", text="", title=""):
+def t_check_regulation(regulation="", text="", title="", alio_id="", org=None):
+    if alio_id and not text:
+        src, err = resolve_source("amend", {"alio_id": alio_id, "title": title, "org": org})
+        if err:
+            return err
+        text, title, org = src["source_text"], src["title"], src.get("org") or org
     if text:
-        d = _post("/api/regagent/lint", {"text": text, "title": title or "검토안"})
+        ext = bool(alio_id) or isinstance(org, dict) and any(str(org.get(k) or "").strip() for k in ORG_KEYS)
+        hdr = engine.ra_ctx(ext, org if isinstance(org, dict) else None)
+        d = _post("/api/regagent/lint", {"text": text, "title": title or "검토안"}, headers={"X-RA-Ctx": hdr} if hdr else None)
     else:
         if not regulation:
             return {"error": "regulation(내규명)이나 text(조문 글) 중 하나를 주세요."}
@@ -618,9 +625,13 @@ def _secret():
 
 # 엔진에 넘기는 입력: 작업별로 허용한 키만, 글 길이 상한을 둔다. 엔진(JS 정규식)은 서버에서 돌고 QuickJS 는 정규식 계산을 중간에 끊지 못하므로
 # 입력 크기로 계산량을 묶는다(내려받기 링크도 같은 정리를 거친다).
-_KEYS = {"agent": ("request",), "amend": ("slug", "changes", "appendix_changes", "addenda", "reason", "effective", "references"),
-         "enact": ("title", "text", "purpose", "addenda", "effective", "references")}
-_CAP = {"request": 500, "slug": 200, "title": 120, "text": 30000, "purpose": 3000, "reason": 3000, "addenda": 3000, "effective": 40}
+_KEYS = {"agent": ("request",), "amend": ("slug", "changes", "appendix_changes", "addenda", "reason", "effective", "references",
+                                          "source_text", "title", "alio_id", "org"),
+         "enact": ("title", "text", "purpose", "addenda", "effective", "references", "org")}
+_CAP = {"request": 500, "slug": 200, "title": 120, "text": 30000, "purpose": 3000, "reason": 3000, "addenda": 3000, "effective": 40,
+        "source_text": 200000, "alio_id": 200}
+# 범용(다른 기관) 작업에서 넘겨받는 기관 이름 항목 — 개정문·대비표·검토 보고서·문서의 기관명·직위에 쓰인다
+ORG_KEYS = ("org_name", "org_short", "head", "deputy", "reg_word", "rules_name")
 MAX_CHANGE_CHARS = 60000                                # 고친 조문 본문의 합
 
 
@@ -684,7 +695,35 @@ def clean_input(op, inp):
         refs = _refs_in(inp.get("references"))
         if refs:
             out["references"] = refs
+    if "org" in _KEYS[op] and isinstance(inp.get("org"), dict):
+        org = {k: re.sub(r"[\r\n\t<>]", " ", str(inp["org"][k]).strip())[:60] for k in ORG_KEYS if str(inp["org"].get(k) or "").strip()}
+        if org:
+            out["org"] = org
     return out, warn
+
+
+def resolve_source(op, inp):
+    """알리오 규정(alio_id)을 개정 대상으로 받았으면 그 공시 현행본 전문을 읽어 source_text 로 채운다.
+    내려받기 링크에는 alio_id 만 담고(링크가 짧게), 링크를 열 때 다시 읽는다. 기관명은 알리오 기관명을 기본으로 쓴다."""
+    if op != "amend" or not inp.get("alio_id") or inp.get("source_text"):
+        return inp, None
+    rule = _alio_rule(inp["alio_id"])
+    if not rule:
+        return inp, {"error": "alio_id 는 alio_search_regulations 결과의 id 를 그대로 넣으세요."}
+    try:
+        D = _alio_orgs()
+    except _AlioDown as e:
+        return inp, {"error": str(e), "url": _alio_url(rule)}
+    d = _post("/api/regagent/alio/rule", {**rule, "full": 1, "limit": 1})
+    if not d.get("success") or not str(d.get("text") or "").strip():
+        return inp, {"error": d.get("error") or "알리오 규정 원문을 읽지 못했습니다.", "url": _alio_url(rule)}
+    name = (d.get("file") or {}).get("fileName") or ""
+    agency = next((o["name"] for o in D.get("orgs", []) if o["id"] == rule["orgId"]), "")
+    out = {**inp, "source_text": str(d["text"])[:_CAP["source_text"]],
+           "title": inp.get("title") or (_alio_base(os.path.splitext(name)[0]) if name else "알리오 규정")}
+    if agency and not (inp.get("org") or {}).get("org_name"):
+        out["org"] = {**(inp.get("org") or {}), "org_name": agency}
+    return out, None
 
 
 def make_token(op, inp):
@@ -722,6 +761,9 @@ def read_token(tok):
 
 def doc_file(op, inp, fmt):
     """링크로 받은 요청을 다시 실행해 문서 세트 파일을 만든다 → (bytes, 파일 이름, 오류)."""
+    inp, err = resolve_source(op, inp)
+    if err:
+        return None, "", err.get("error") or "규정 원문을 읽지 못했습니다."
     res = engine.run(op, {**inp, "docs": True}, timeout=engine.HTTP_TIMEOUT)
     doc = res.get("doc") if isinstance(res, dict) else None
     if not doc:
@@ -736,12 +778,16 @@ def _with_docs(op, inp, out_dir, fmt, documents):
     inp, warn = clean_input(op, inp)
     if op == "amend" and not inp["changes"] and not inp["appendix_changes"]:
         return {"error": "changes 에 고칠 조문을 하나 이상 주세요(예: [{\"article\": \"제15조\", \"body\": \"…\"}]).", "warnings": warn}
+    link_inp = {k: v for k, v in inp.items() if not (k == "source_text" and inp.get("alio_id"))}   # 알리오면 링크에는 id 만
+    inp, err = resolve_source(op, inp)
+    if err:
+        return {**err, "warnings": warn}
     if _mode() == "http":
         res = engine.run(op, inp, timeout=engine.HTTP_TIMEOUT)
         if warn:
             res["warnings"] = warn + list(res.get("warnings") or [])
         if documents is not False and not res.get("error") and res.get("doc_ready"):
-            tok = make_token(op, inp)
+            tok = make_token(op, link_inp)
             if len(tok) <= MAX_LINK and _base_url():
                 res["download"] = {"hwpx": f"{_base_url()}/api/mcp/doc/hwpx/{tok}", "docx": f"{_base_url()}/api/mcp/doc/docx/{tok}",
                                    "note": "심의안건서·개정문·신구조문대비표·이유서 등 문서 세트. 링크를 열면 그때 만들어 내려받는다."}
@@ -761,22 +807,29 @@ def t_run_agent(request, output_dir="", format="hwpx", documents=True):
     return _with_docs("agent", {"request": request}, output_dir, format, documents)
 
 
-def t_amend_regulation(regulation, changes, appendix_changes=None, addenda="", reason="", effective="", references=None,
-                       output_dir="", format="hwpx", documents=True):
-    r, cand = _find(regulation)
-    if not r:
-        return _not_found(regulation, cand)
-    inp = {"slug": r["slug"], "changes": changes, "appendix_changes": appendix_changes, "addenda": addenda, "reason": reason, "effective": effective,
-           "references": references}
+def t_amend_regulation(regulation="", changes=None, appendix_changes=None, addenda="", reason="", effective="", references=None,
+                       source_text="", alio_id="", org=None, output_dir="", format="hwpx", documents=True):
+    base = {"changes": changes, "appendix_changes": appendix_changes, "addenda": addenda, "reason": reason, "effective": effective,
+            "references": references, "org": org}
+    if str(source_text or "").strip() or str(alio_id or "").strip():      # 범용: 다른 기관 규정(붙여 넣은 원문·알리오 공시본)
+        inp = {**base, "source_text": source_text, "alio_id": alio_id, "title": regulation}
+    else:
+        if not regulation:
+            return {"error": "regulation(등록 내규명), source_text(현행 원문), alio_id(알리오 규정) 중 하나를 주세요."}
+        r, cand = _find(regulation)
+        if not r:
+            return {**_not_found(regulation, cand),
+                    "hint": "다른 기관 규정이면 source_text 에 현행 원문을 넣거나 alio_search_regulations 의 id 를 alio_id 로 주세요."}
+        inp = {**base, "slug": r["slug"]}
     return _with_docs("amend", inp, output_dir, format, documents)
 
 
-def t_enact_regulation(title, text, purpose="", addenda="", effective="", references=None, output_dir="", format="hwpx", documents=True):
+def t_enact_regulation(title, text, purpose="", addenda="", effective="", references=None, org=None, output_dir="", format="hwpx", documents=True):
     if not str(text or "").strip():
         return {"error": "text 에 내규안 조문 전체(제1조(목적) …)를 주세요."}
     if len(str(text)) > _CAP["text"]:
         return {"error": f"내규안이 너무 깁니다({len(str(text)):,}자). {_CAP['text']:,}자 이하로 나눠 점검하세요."}
-    inp = {"title": title, "text": text, "purpose": purpose, "addenda": addenda, "effective": effective, "references": references}
+    inp = {"title": title, "text": text, "purpose": purpose, "addenda": addenda, "effective": effective, "references": references, "org": org}
     return _with_docs("enact", inp, output_dir, format, documents)
 
 
@@ -786,6 +839,11 @@ _ARTS = {"type": "array", "items": _STR}
 _SAVE = {"output_dir": {"type": "string", "description": "문서 세트(심의안건서·개정문·신구조문대비표·이유서 등)를 저장할 폴더. 비우면 저장하지 않는다."},
          "format": {"type": "string", "enum": ["hwpx", "docx"], "description": "저장 형식: 한글(hwpx, 기본) 또는 Word(docx)"}}
 _LINK = {"documents": {"type": "boolean", "description": "문서 세트(한글·Word) 내려받기 링크를 함께 줄지(기본 true)"}}
+_ORG = {"org": {"type": "object", "description": "다른 기관 규정을 다룰 때 그 기관 이름(문서·개정문의 기관명·직위에 쓰임). 주면 이 서버에 등록된 내규와는 대조하지 않는다",
+                "properties": {"org_name": {"type": "string", "description": "기관명(예: 한국○○공단)"}, "org_short": {"type": "string", "description": "약칭"},
+                               "head": {"type": "string", "description": "기관장 직위(예: 이사장)"}, "deputy": {"type": "string", "description": "부기관장 직위"},
+                               "reg_word": {"type": "string", "description": "규정을 부르는 말(예: 사규, 내규, 자치법규)"},
+                               "rules_name": {"type": "string", "description": "규정 관리 규정 이름(예: 사규관리규정)"}}}}
 _REFS = {"references": {"type": "array", "description": "참고한 다른 기관 조문(alio_get_regulation 결과에서). 검토 보고서 ‘자료조사 결과’와 심의 사전검토 ‘다른 공공기관 운영 사례’에 들어간다",
                         "items": {"type": "object", "properties": {"agency": {"type": "string", "description": "기관명"}, "regulation": {"type": "string", "description": "규정명"},
                                                                    "article": {"type": "string", "description": "조(예: 제5조)"}, "title": {"type": "string", "description": "조 제목"},
@@ -800,9 +858,13 @@ TOOLS = [
      {"type": "object", "properties": {"request": {"type": "string", "description": "하고 싶은 일을 한 문장으로"}, **_SAVE, **_LINK}, "required": ["request"]}),
     ("amend_regulation", "개정안 → 개정문·대비표·검증", t_amend_regulation,
      "고친 조문(전문)을 받아 개정문(“○○ 일부를 다음과 같이 개정한다.”), 신구조문대비표, 개정문 검증(개정문을 현행에 다시 적용해 수정안과 같은지), "
-     "조문 점검(인용 오류·항 번호·표기), 인용 영향(이 조를 인용하는 다른 조·내규)을 돌려준다. 먼저 get_regulation 으로 현행 조문을 읽고, 바꿀 조의 본문 전체를 적는다.",
+     "조문 점검(인용 오류·항 번호·표기), 인용 영향(이 조를 인용하는 다른 조·내규)을 돌려준다. 먼저 get_regulation 으로 현행 조문을 읽고, 바꿀 조의 본문 전체를 적는다. "
+     "범용: 이 서버에 등록되지 않은 규정도 된다 — 다른 기관 사규는 source_text(현행 원문)나 alio_id(알리오 공시 규정)와 org(그 기관 이름)를 주면 "
+     "그 원문을 현행으로 같은 개정문·대비표·검증·문서를 만든다(이때 다른 규정과의 인용 영향은 같은 규정 안만 본다).",
      {"type": "object", "properties": {
-         "regulation": {"type": "string", "description": "내규명(예: 여비규정)"},
+         "regulation": {"type": "string", "description": "내규명(예: 여비규정). 이 서버에 등록된 내규면 이름만, source_text·alio_id 를 줄 때는 그 규정의 이름"},
+         "source_text": {"type": "string", "description": "범용: 등록되지 않은 규정(다른 기관 사규 등)의 현행 원문 전체(제1조(목적) … 형식). 주면 이 원문을 현행으로 개정한다"},
+         "alio_id": {"type": "string", "description": "범용: 알리오에 공시된 공공기관 규정을 현행으로 개정(alio_search_regulations 결과의 id). 기관명은 알리오 기관명을 쓴다"},
          "changes": {"type": "array", "description": "고칠 조문들", "items": {"type": "object", "properties": {
              "article": {"type": "string", "description": "조 번호(예: 제15조, 15, 3의2)"},
              "type": {"type": "string", "enum": ["modify", "insert", "delete"], "description": "개정(기본)·신설·삭제"},
@@ -814,7 +876,7 @@ TOOLS = [
          "addenda": {"type": "string", "description": "부칙 문장(선택, 비우면 “이 규정은 발령한 날부터 시행한다.”)"},
          "reason": {"type": "string", "description": "개정 이유(선택, 이유서·검토 보고서에 씀)"},
          "effective": {"type": "string", "description": "시행일(선택, 예: 2027. 1. 1.)"},
-         **_REFS, **_SAVE, **_LINK}, "required": ["regulation", "changes"]}),
+         **_ORG, **_REFS, **_SAVE, **_LINK}, "required": ["changes"]}),
     ("enact_regulation", "제정안 → 점검·사전검토·문서", t_enact_regulation,
      "새 내규안(AI 가 다른 기관 사례 등을 참고해 쓴 조문 전체)을 받아 조문 점검(인용 오류·항 번호·표기), 심의 사전검토(기관 심의기준), 제정 문서 세트(검토 보고서·내규안·제정 이유서·사전예고문 등)를 만든다. "
      "다른 기관 조문을 참고했으면 references 로 넘겨 근거로 남긴다. 처음부터 규칙으로 초안을 만들려면 run_agent(“○○ 지침을 새로 만들어줘”)를 쓴다.",
@@ -824,7 +886,7 @@ TOOLS = [
          "purpose": {"type": "string", "description": "제정 이유(선택, ~하려는 것임 체)"},
          "addenda": {"type": "string", "description": "부칙(선택, 비우면 시행일 조만)"},
          "effective": {"type": "string", "description": "시행일(선택)"},
-         **_REFS, **_SAVE, **_LINK}, "required": ["title", "text"]}),
+         **_ORG, **_REFS, **_SAVE, **_LINK}, "required": ["title", "text"]}),
     ("search_regulations", "내규 검색", t_search_regulations,
      "낱말로 내규 조문을 찾는다. 낱말이 많이 나온 내규 순으로 조 번호·제목·발췌를 돌려준다.",
      {"type": "object", "properties": {"query": {"type": "string", "description": "찾을 낱말(예: 일비, 연차휴가)"}, "limit": {"type": "integer", "description": "최대 내규 수(기본 10)"}}, "required": ["query"]}),
@@ -837,9 +899,11 @@ TOOLS = [
                                        "include_appendix": {"type": "boolean", "description": "별표 본문 전체도 함께"},
                                        "appendices": {"type": "array", "items": _STR, "description": "본문을 읽을 별표만(예: [\"별표 2\"])"}}, "required": ["regulation"]}),
     ("check_regulation", "조문 점검", t_check_regulation,
-     "내규 하나(또는 붙여 넣은 조문 글)의 형식 오류를 점검한다: 없는·삭제된 조문 인용, 항·호 번호, 현행 목록에 없는 내규명, 옛 명칭, 표기.",
+     "내규 하나(또는 붙여 넣은 조문 글)의 형식 오류를 점검한다: 없는·삭제된 조문 인용, 항·호 번호, 현행 목록에 없는 내규명, 옛 명칭, 표기. "
+     "범용: 다른 기관 사규는 text(원문)나 alio_id(알리오 공시 규정)와 org 를 주면 이 서버의 등록 내규와 대조하지 않고 그 규정만 점검한다.",
      {"type": "object", "properties": {"regulation": {"type": "string", "description": "점검할 내규명"}, "text": {"type": "string", "description": "또는 점검할 조문 글(제1조(목적) …)"},
-                                       "title": {"type": "string", "description": "text 의 내규명(선택)"}}}),
+                                       "title": {"type": "string", "description": "text 의 내규명(선택)"},
+                                       "alio_id": {"type": "string", "description": "또는 알리오 공시 규정(alio_search_regulations 결과의 id)"}, **_ORG}}),
     ("health_check", "내규 건강검진", t_health_check, "기관 내규 전체를 진단해 평균 점수·등급 분포·문제가 있는 내규 수와 점수가 낮은 내규(이유 포함)를 돌려준다.",
      {"type": "object", "properties": {"top": {"type": "integer", "description": "점수가 낮은 내규 몇 개를 보일지(기본 10)"}}}),
     ("citation_impact", "인용 영향", t_citation_impact, "어떤 조를 고치거나 지울 때 그 조를 인용하는 같은 내규의 조·다른 내규·별표를 찾는다.",

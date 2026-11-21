@@ -15,6 +15,8 @@ api_server.register 시 공통 헬퍼(AI 호출·의미 검색·HWPX 베이스)�
 """
 from __future__ import annotations
 
+import base64
+import contextvars
 import difflib
 import io
 import json
@@ -102,6 +104,22 @@ def register(app, **ctx):
     app.register_blueprint(bp)
 
 
+@bp.before_request
+def _ctx_in():
+    c = parse_ctx(request.headers.get("X-RA-Ctx", ""))
+    request.environ["ra.ctx_token"] = _REQ_CTX.set(c)
+
+
+@bp.teardown_request
+def _ctx_out(_exc=None):
+    tok = request.environ.pop("ra.ctx_token", None)
+    if tok is not None:
+        try:
+            _REQ_CTX.reset(tok)
+        except ValueError:                                # 다른 컨텍스트에서 끝나면(드묾) 값만 지운다
+            _REQ_CTX.set(None)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 0. 기관 프로필(org_config.json) — 기관명·기관장·내규관리 규칙·절차·심의기준
 # ══════════════════════════════════════════════════════════════════════════
@@ -167,7 +185,80 @@ def _check_org(org: dict) -> dict:
     return org
 
 
-ORG = load_org()
+# ── 요청별 기관 프로필(범용 MCP) ────────────────────────────────────────────
+# MCP 도구가 등록 내규가 아닌 다른 기관의 규정(붙여 넣은 원문·알리오 공시본)을 다룰 때, 엔진은 서버를 부를 때마다
+# X-RA-Ctx 머리(base64url JSON: {"external":true, "org":{org_name,…}})를 붙인다. 그 요청에서만
+#  · ORG 의 이름 항목(기관명·약칭·기관장·부기관장·내규 이름·내규관리 규정)은 넘겨받은 값으로,
+#  · 우리 기관에만 맞는 항목(구 명칭·심의기준·작성 기준·절차·근거 조항·알리오 설정)은 비워 일반 기준으로,
+#  · 등록 내규 목록(all_regs)은 빈 목록으로 본다 — 다른 기관 규정을 우리 내규와 대조해 엉뚱한 경고를 내지 않게.
+# contextvars 라 동시에 들어온 다른 요청에는 번지지 않는다.
+_REQ_CTX: contextvars.ContextVar = contextvars.ContextVar("ra_req_ctx", default=None)
+_CTX_NAME_KEYS = ("org_name", "org_short", "head", "deputy", "reg_word", "rules_name")
+_CTX_GENERIC_KEYS = ("stale_terms", "stale_words", "review_criteria", "drafting_rules", "rules_summary", "procedure", "lint_refs",
+                     "doc_refs", "synonyms", "alio", "email_domain")
+
+
+def parse_ctx(raw: str):
+    """X-RA-Ctx 머리 → {"external": bool, "org": {이름 항목}} (잘못됐으면 None)."""
+    raw = str(raw or "").strip()
+    if not raw or len(raw) > 4000:
+        return None
+    try:
+        d = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    org = {}
+    for k in _CTX_NAME_KEYS:
+        v = (d.get("org") or {}).get(k) if isinstance(d.get("org"), dict) else None
+        if isinstance(v, str) and v.strip():
+            org[k] = re.sub(r"[\r\n\t<>]", " ", v.strip())[:60]
+    return {"external": bool(d.get("external")), "org": org}
+
+
+def make_ctx(external: bool = False, org: dict | None = None) -> str:
+    """parse_ctx 의 반대 — MCP 엔진이 붙일 머리 값."""
+    body = {"external": bool(external), "org": {k: v for k, v in (org or {}).items() if k in _CTX_NAME_KEYS and isinstance(v, str) and v.strip()}}
+    return base64.urlsafe_b64encode(json.dumps(body, ensure_ascii=False).encode("utf-8")).decode().rstrip("=")
+
+
+def req_external() -> bool:
+    c = _REQ_CTX.get()
+    return bool(c and c.get("external"))
+
+
+class _OrgView(dict):
+    """기관 프로필 — 요청에 X-RA-Ctx 가 있으면 그 요청에서만 이름 항목을 바꾸고, 다른 기관이면 우리 기관 전용 항목을 비운다."""
+
+    def _ovr(self, k):
+        c = _REQ_CTX.get()
+        if not c:
+            return False, None
+        if k in c["org"]:
+            return True, c["org"][k]
+        if c["external"] and k in _CTX_GENERIC_KEYS:
+            return True, _ORG_DEFAULT.get(k)
+        if c["external"] and k == "org_short" and "org_name" in c["org"]:
+            return True, c["org"]["org_name"]
+        return False, None
+
+    def __getitem__(self, k):
+        hit, v = self._ovr(k)
+        return v if hit else dict.__getitem__(self, k)
+
+    def get(self, k, default=None):
+        hit, v = self._ovr(k)
+        return v if hit else dict.get(self, k, default)
+
+    def items(self):                                   # 화면 엔진에 주는 프로필(/api/regagent/config)도 같은 값을
+        return [(k, self[k]) for k in dict.keys(self)]
+
+    def values(self):
+        return [self[k] for k in dict.keys(self)]
+
+
+ORG = _OrgView(load_org())
 
 
 def ofmt(s: str) -> str:
@@ -200,8 +291,12 @@ _MOK_CH = "가나다라마바사아자차카타파하"
 _REG_SUFFIX = ("정관", "규정", "규칙", "세칙", "지침", "요령", "기준", "매뉴얼",
                "강령", "헌장", "수칙", "예규", "조례", "훈령", "고시")       # 지자체 자치법규·중앙부처 행정규칙도 같은 틀로 다룬다
 # 기관명·직위 변경 전 구 명칭(기관 프로필 stale_terms·stale_words)
-_STALE_TERMS = [tuple(x) for x in ORG.get("stale_terms") or []]
-_STALE_WORDS = [tuple(x) for x in ORG.get("stale_words") or []]   # 단어 경계로만 찾는 짧은 말
+def _stale_terms() -> list:
+    return [tuple(x) for x in ORG.get("stale_terms") or []]
+
+
+def _stale_words() -> list:                                          # 단어 경계로만 찾는 짧은 말
+    return [tuple(x) for x in ORG.get("stale_words") or []]
 # 이름이 내규처럼 보이지만 국가 법령·정부 규정인 것(인용 관계·명칭 점검에서 외부 규범으로 본다)
 _EXTERNAL_REGS = {re.sub(r"\s+", "", str(x)) for x in ORG.get("external_regs") or [] if str(x).strip()}
 # 알기 쉬운 표기(법제처 「알기 쉬운 법령 정비기준」 중 내규에 자주 나오는 것)
@@ -365,7 +460,10 @@ def _reg_raw_text(slug: str) -> str:
 
 
 def all_regs() -> list:
-    """[{slug,title,category,revision,articles,addenda,appendix,body}] — 매니페스트 변경 시 재구성."""
+    """[{slug,title,category,revision,articles,addenda,appendix,body}] — 매니페스트 변경 시 재구성.
+    다른 기관 규정을 다루는 요청(X-RA-Ctx external)에서는 빈 목록 — 우리 내규와 대조하지 않는다."""
+    if req_external():
+        return []
     try:
         key = os.path.getmtime(reg_chunks.MANIFEST)
     except OSError:
@@ -867,12 +965,12 @@ def lint_articles(arts: list, addenda: str = "", appendix: str = "", title: str 
                 continue
             if _nk(nm) in regnames or _nk(nm) == _nk(title) or nm == "정관" or re.sub(r"\s+", "", nm) in _EXTERNAL_REGS:
                 continue
-            ownp = [t for t in [ORG["org_short"], ORG["org_name"]] + [o for o, _ in _STALE_TERMS + _STALE_WORDS] if t]
+            ownp = [t for t in [ORG["org_short"], ORG["org_name"]] + [o for o, _ in _stale_terms() + _stale_words()] if t]
             if re.sub(r"^(?:" + "|".join(map(re.escape, ownp)) + r")\s*", "", nm) == "정관":
                 continue                  # 「농진원 정관」 등 우리 기관 정관(인용 관계와 같은 기준)
             near = [regnames[k] for k in difflib.get_close_matches(_nk(nm), list(regnames), n=3, cutoff=0.8)
                     if k != _nk(title)][:2]               # 자기 자신을 “유사 내규”로 권하지 않는다
-            own = any(t and t in nm for t in [ORG["org_short"], ORG["org_name"]] + [o for o, _ in _STALE_TERMS + _STALE_WORDS])
+            own = any(t and t in nm for t in [ORG["org_short"], ORG["org_name"]] + [o for o, _ in _stale_terms() + _stale_words()])
             if not near and not own:
                 continue                  # 정부 규정·지침 등 외부 규범으로 본다
             add("warn", "regname", no,
@@ -882,10 +980,10 @@ def lint_articles(arts: list, addenda: str = "", appendix: str = "", title: str 
         # (6) 구 명칭
         # 법령 조문 제목 인용(“농촌진흥법 부칙<…> 제2조(실용화재단 직원의 임용등에 관한 특례)”)은 법령의 글이라 고칠 수 없다
         sbody = re.sub(r"(?:법|령|규칙)\s*」?\s*(?:부\s*칙\s*(?:<[^>]{0,40}>)?\s*)?제\s*\d+\s*조(?:\s*의\s*\d+)?\s*\([^)]{0,60}\)", " ", body)
-        for old, new in _STALE_TERMS:
+        for old, new in _stale_terms():
             if old in sbody:
                 add("warn", "stale", no, f"{lbl}에 구 명칭 “{old}”{_josa(old, ('이', '가'))} 있습니다.", f"“{old}” → “{new}”", term=old, new=new)
-        for old, new in _STALE_WORDS:
+        for old, new in _stale_words():
             if re.search(r"(?<![가-힣])" + re.escape(old) + r"(?:은|는|이|가|의|에|에서|과|와|을|를)?(?![가-힣])", sbody):
                 add("warn", "stale", no, f"{lbl}에 구 명칭 “{old}”{_josa(old, ('이', '가'))} 있습니다.", f"“{old}” → “{new}”", term=old, new=new, word=True)
         # (7) 알기 쉬운 표기
@@ -914,7 +1012,7 @@ def lint_articles(arts: list, addenda: str = "", appendix: str = "", title: str 
 
     # (6-1) 별표·서식의 구 명칭 — 결재란·제출처(“이사장 귀하”)에 옛 직위·기관명이 남기 쉽다.
     # 별표 자리에 섞여 들어온 부칙(“해당조항 중 “이사장”을 “원장”으로 한다”)과 옛 이름임을 밝힌 표기(“구. ○○재단”)는 뺀다
-    for old, new, word in [(o, n, False) for o, n in _STALE_TERMS] + [(o, n, True) for o, n in _STALE_WORDS]:
+    for old, new, word in [(o, n, False) for o, n in _stale_terms()] + [(o, n, True) for o, n in _stale_words()]:
         for ln in (appendix or "").split("\n"):
             if re.search(r"부\s*칙|다른\s*내규의\s*개정|해당\s*조항\s*중|종전의|시행\s*당시", ln):
                 continue
@@ -2543,7 +2641,7 @@ def ra_bulk():
     n_arts = sum(len(g["articles"]) for g in regs_out)
     # “한다”·“따라”처럼 흔한 말은 명칭 정비 대상이 아니다(응답도 수 MB 로 커짐). 기관장·부기관장·옛 명칭처럼
     # 기관이 명칭으로 등록한 말은 직제 개편 때 실제로 모든 내규를 고쳐야 하므로 상한을 넓힌다
-    named = old in {ORG["head"], ORG["deputy"], ORG["org_name"], ORG["org_short"]} | {o_ for o_, _ in _STALE_TERMS + _STALE_WORDS}
+    named = old in {ORG["head"], ORG["deputy"], ORG["org_name"], ORG["org_short"]} | {o_ for o_, _ in _stale_terms() + _stale_words()}
     if n_arts > (_BULK_MAX_ARTS * 4 if named else _BULK_MAX_ARTS):
         return jsonify({"success": False, "error": f"“{old}”{_josa(old, ('이', '가'))} {len(regs_out)}개 내규 {n_arts}개 조문에 있어 일괄 정비 범위를 넘습니다. "
                                                    f"더 구체적인 명칭(예: 부서명·직위명 전체)으로 찾으세요."}), 400
@@ -2900,7 +2998,7 @@ def cited_rules(reg: dict) -> list:
     우리 내규(등록된 이름·우리 기관명이 붙은 이름·등록된 내규와 이름이 거의 같은 것)와 기관 설정의 외부 규정 목록 밖의 이름은 뺀다.
     「기타공공기관 계약사무 운영규정(기획재정부훈령)」처럼 끝에 붙은 괄호는 떼고 센다(법제처 조회용)."""
     regnames = _reg_names()
-    own = [t for t in [ORG["org_short"], ORG["org_name"]] + [o for o, _ in _STALE_TERMS + _STALE_WORDS] if t]
+    own = [t for t in [ORG["org_short"], ORG["org_name"]] + [o for o, _ in _stale_terms() + _stale_words()] if t]
     names, seen = [], {_nk(reg["title"])}
     for a in reg["articles"]:
         if a["deleted"]:
@@ -3589,7 +3687,7 @@ def citation_graph() -> dict:
         return _GRAPH_CACHE["v"]
     idx = {_nk(r["title"]): i for i, r in enumerate(regs)}
     names = list(idx)
-    own = [t for t in [ORG["org_short"], ORG["org_name"]] if t] + [o for o, _ in _STALE_TERMS + _STALE_WORDS]
+    own = [t for t in [ORG["org_short"], ORG["org_name"]] if t] + [o for o, _ in _stale_terms() + _stale_words()]
     edges, broken, memo = {}, {}, {}
     alts = sorted({r["title"] for r in regs if len(_nk(r["title"])) >= 3}, key=lambda x: -len(x))
     title_re = re.compile(r"(?<![가-힣「])(?:" + "|".join(re.escape(x).replace(r"\ ", r"\s*") for x in alts) + r")"
@@ -3604,7 +3702,7 @@ def citation_graph() -> dict:
             res = (idx[k], False, "")
         else:
             cur = nm
-            for old, new in _STALE_TERMS:
+            for old, new in _stale_terms():
                 cur = cur.replace(old, new)
             kc = _nk(cur)
             if kc != k and kc in idx:
@@ -3956,7 +4054,8 @@ def ra_alio_rule():
                     "toc": [f"{art_label(a['no'])}({a['title']})" for a in p["articles"] if not a["deleted"]][:80],
                     "articles": ranked[:lim], "url": alio.BASE + alio.detail_url(rule), "warning": warn,
                     "missing": [n for n in want if n not in {a["no"] for a in ranked}],
-                    "excerpt": "" if p["articles"] else r["text"][:3000]})
+                    "excerpt": "" if p["articles"] else r["text"][:3000],
+                    **({"text": r["text"]} if b.get("full") else {})})
 
 
 @bp.route("/api/regagent/graph")

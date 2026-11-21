@@ -79,8 +79,17 @@
   }
 
   async function opAmend(inp, RA) {
-    const d = await getJ('/api/regagent/articles?' + (inp.slug ? 'slug=' + encodeURIComponent(inp.slug) : 'title=' + encodeURIComponent(inp.regulation || '')));
-    if (!d.success) return { error: d.error || '내규를 찾을 수 없습니다.' };
+    let d;
+    const src = String(inp.source_text || '').replace(/\r/g, '');
+    if (src.trim()) {
+      // 등록 내규가 아닌 규정(다른 기관 원문·알리오 공시본): 화면의 “원문 붙여넣기”와 같은 읽기
+      const p = await postJ('/api/regagent/parse', { text: src });
+      if (!p.success || !(p.articles || []).length) return { error: '현행 원문(source_text)에서 “제1조(목적) …” 형식의 조문을 찾지 못했습니다.' };
+      d = { success: true, slug: '', title: String(inp.title || '').trim() || '붙여넣은 규정', revision: '붙여넣은 원문', articles: p.articles, appendix: [], pasted: true };
+    } else {
+      d = await getJ('/api/regagent/articles?' + (inp.slug ? 'slug=' + encodeURIComponent(inp.slug) : 'title=' + encodeURIComponent(inp.regulation || '')));
+      if (!d.success) return { error: d.error || '내규를 찾을 수 없습니다.' };
+    }
     _raArts = d;
     const norm = x => String(x || '').replace(/^제\s*/, '').replace(/\s*조$/, '').replace(/\s+/g, '');
     const changes = [], errors = [];
@@ -97,11 +106,12 @@
     for (const x of inp.appendix_changes || []) {
       const key = String(x.id || '').replace(/\s+/g, '');                  // “별표2”·“별표 2” 모두
       const ox = raArr(_raArts && _raArts.appendix).find(y => String(y.id || '').replace(/\s+/g, '') === key);
-      if (!ox) { errors.push(`${x.id}가 「${d.title}」에 없습니다.`); continue; }
+      if (!ox) { errors.push(d.pasted ? `${x.id}: 원문으로 받은 규정은 별표·서식 개정을 아직 지원하지 않습니다(조문만).` : `${x.id}가 「${d.title}」에 없습니다.`); continue; }
       appx.push({ type: 'modify', id: ox.id, head: x.head != null ? String(x.head) : ox.head, body: String(x.body || '') });
     }
     if (errors.length && !changes.length && !appx.length) return { error: errors.join(' ') };
-    Object.assign(RA.amend, { src: 'reg', slug: d.slug, title: d.title, lawStyle: 'fine', fullRev: false, abbr: true, sel: {}, selx: {}, mv: {},
+    Object.assign(RA.amend, { src: d.pasted ? 'paste' : 'reg', pasted: !!d.pasted, pasteText: d.pasted ? src : '', pasteLoaded: d.pasted ? src : '',
+      slug: d.slug, title: d.title, lawStyle: 'fine', fullRev: false, abbr: true, sel: {}, selx: {}, mv: {},
       changes, appx, addenda: String(inp.addenda || ''), purpose: String(inp.reason || ''), main: [], effective: String(inp.effective || ''), intent: String(inp.reason || ''),
       alioRefs: refsIn(inp.references, 'amend') });
     const out = Object.assign({ warnings: errors }, amendResult());
@@ -121,7 +131,7 @@
     if (refsOut('amend').length) out.references = refsOut('amend');
     const nos = changes.filter(c => c.type !== 'insert').map(c => c.no);
     if (nos.length) {
-      const im = await postJ('/api/regagent/impact', { slug: d.slug, nos, moves: {} });
+      const im = await postJ('/api/regagent/impact', d.pasted ? { text: src, reg: d.title, nos, moves: {} } : { slug: d.slug, nos, moves: {} });
       if (im.success) out.citation_impact = { summary: im.summary,
         same_regulation: (im.inner || []).slice(0, 10).map(h => `제${h.no}조(${h.title})에서 “${h.text}” 인용${h.suggest ? ' — 제안: ' + h.suggest : ''}`),
         other_regulations: (im.outer || []).slice(0, 10).map(h => `「${h.reg || h.title || ''}」 제${h.no}조에서 “${h.text}” 인용`),

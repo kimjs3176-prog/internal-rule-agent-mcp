@@ -74,11 +74,12 @@ def app():
 _app = app
 
 
-def local_fetch(method: str, url: str, body=None):
-    """같은 프로세스의 Flask 앱에 요청(네트워크 없음) → (상태, 본문 글, Content-Type)."""
+def local_fetch(method: str, url: str, body=None, ctx: str = ""):
+    """같은 프로세스의 Flask 앱에 요청(네트워크 없음) → (상태, 본문 글, Content-Type). ctx: X-RA-Ctx 머리(다른 기관 규정 작업)."""
     if not allowed(method, url):
         return 403, json.dumps({"success": False, "error": "엔진이 부를 수 없는 주소입니다."}, ensure_ascii=False), "application/json"
-    r = _app().test_client().open(url, method=method, data=body, content_type="application/json" if body is not None else None)
+    r = _app().test_client().open(url, method=method, data=body, content_type="application/json" if body is not None else None,
+                                  headers={"X-RA-Ctx": ctx} if ctx else None)
     return r.status_code, r.get_data(as_text=True), r.headers.get("Content-Type", "")
 
 
@@ -90,7 +91,8 @@ var __out = null, __fq = [], __fseq = 0, __fwait = {}, __now = 0, __tseq = 0, __
 globalThis.fetch = function (u, o) {
   return new Promise(function (res, rej) {
     var id = ++__fseq; __fwait[id] = { res: res, rej: rej };
-    __fq.push({ id: id, url: String(u), method: String((o && o.method) || 'GET').toUpperCase(), body: (o && o.body != null) ? String(o.body) : null });
+    __fq.push({ id: id, url: String(u), method: String((o && o.method) || 'GET').toUpperCase(), body: (o && o.body != null) ? String(o.body) : null,
+                ctx: String(globalThis.__RA_CTX || '') });
   });
 };
 globalThis.__ftake = function () { var q = __fq; __fq = []; return JSON.stringify(q); };
@@ -156,6 +158,7 @@ def _run_quickjs(inp: dict, fetch=local_fetch, deadline=None, script=None, timeo
     ctx.set_time_limit(EVAL_LIMIT)
     try:
         ctx.eval(_PRELUDE)
+        ctx.set("__RA_CTX", str(inp.get("ra_ctx") or ""))   # 다른 기관 규정 작업이면 엔진의 모든 요청에 X-RA-Ctx 를 붙인다
         if script is None:
             reg, core = _src()
             ctx.eval(reg)
@@ -180,7 +183,8 @@ def _run_quickjs(inp: dict, fetch=local_fetch, deadline=None, script=None, timeo
             if q:
                 for req in q:
                     try:
-                        st, text, ctype = fetch(req["method"], req["url"], req.get("body"))
+                        st, text, ctype = (fetch(req["method"], req["url"], req.get("body"), req["ctx"]) if req.get("ctx")
+                                           else fetch(req["method"], req["url"], req.get("body")))
                     except Exception as e:                # 연결 실패는 브라우저처럼 fetch 가 거부되게
                         st, text, ctype = -1, f"요청 실패: {type(e).__name__}", ""
                     ctx.set("__fx", text)
@@ -250,10 +254,24 @@ def backend() -> str:
     return "node"
 
 
+_CTX_NAMES = ("org_name", "org_short", "head", "deputy", "reg_word", "rules_name")
+
+
+def ra_ctx(external: bool, org: dict | None) -> str:
+    """X-RA-Ctx 머리 값(reg_agent.parse_ctx 가 읽는다) — 다른 기관 규정이면 그 기관 이름으로, 우리 내규 목록과는 대조하지 않게."""
+    body = {"external": bool(external), "org": {k: str(v)[:60] for k, v in (org or {}).items() if k in _CTX_NAMES and str(v or "").strip()}}
+    if not body["external"] and not body["org"]:
+        return ""
+    import base64
+    return base64.urlsafe_b64encode(json.dumps(body, ensure_ascii=False).encode("utf-8")).decode().rstrip("=")
+
+
 def run(op: str, inp: dict | None = None, timeout=None, **kw) -> dict:
     """엔진 작업 하나(op: agent|amend|enact) → 결과 dict. 오류도 {"error": …} 로 돌려준다. timeout: 이번 실행의 전체 제한(초)."""
     inp = {**(inp or {}), **kw}
     inp.pop("base", None)                               # 내부 주소는 실행기만 정한다
+    # 다른 기관(원문을 받았거나 기관 이름을 준 요청)이면 우리 내규와 대조하지 않는다. 바깥에서 준 ra_ctx 는 쓰지 않고 여기서 만든다
+    inp["ra_ctx"] = ra_ctx(bool(inp.get("source_text")) or bool(inp.get("org")), inp.get("org"))
     inp["op"] = op
     timeout = min(timeout or TIMEOUT, TIMEOUT)
     if backend() == "quickjs":

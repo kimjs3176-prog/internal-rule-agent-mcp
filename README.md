@@ -121,6 +121,7 @@ MCP를 지원하는 AI 도우미가 대화 중에 이 에이전트를 도구 17�
 - **원격(URL):** 배포 주소의 `https://<배포 주소>/mcp`를 claude.ai·ChatGPT 커넥터, Claude Code(`--transport http`), VS Code·Cursor에 넣습니다. 설치가 필요 없습니다.
 - **내 컴퓨터:** `python mcp_server/server.py`를 Claude Desktop·Claude Code에 등록합니다.
 - 등록 방법과 환경변수는 [`docs/MCP.md`](docs/MCP.md)에 있습니다.
+- **범용(다른 기관 사규):** 등록하지 않은 기관의 사규도 현행 원문(`source_text`)이나 알리오 공시 규정(`alio_id`)과 기관 이름(`org`)을 주면 `amend_regulation`·`check_regulation`·`enact_regulation`이 그 기관 기준으로 개정문·대비표·검증·문서를 만듭니다. 등록된 내규와는 대조하지 않습니다([`docs/MCP.md`](docs/MCP.md) 4-1절).
 
 ## 관리자 안내
 
