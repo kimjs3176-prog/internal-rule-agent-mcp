@@ -97,6 +97,12 @@ def test_alio_down_is_reported(client, monkeypatch, ra):
     monkeypatch.setattr(alio, "reachable", lambda force=False: False)
     r = call(client, "alio_search_regulations", {"keyword": "여비"})
     assert r["isError"] and "알리오에 연결하지 못했습니다" in r["content"][0]["text"]
+    # 규정 읽기도 규정 파일을 받으러 가지 않고 바로 알린다(전에는 파일 요청이 시간 초과될 때까지 기다렸다)
+    asked = []
+    monkeypatch.setattr(alio, "_request", lambda *a, **k: asked.append(a[1]) or (_ for _ in ()).throw(alio.AlioError("NETWORK", "x")))
+    r = call(client, "alio_get_regulation", {"id": "C0105|21892|K1100|COMM_RULE|RULE_NO|"})
+    t = r["content"][0]["text"]
+    assert r["isError"] and "알리오에 연결하지 못했습니다" in t and "alio.go.kr" in t and asked == []
 
 
 @needs_engine
