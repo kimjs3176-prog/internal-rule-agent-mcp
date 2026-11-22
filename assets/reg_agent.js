@@ -3532,9 +3532,11 @@ async function _raHealthLoad(){
   const H=RA.health; const box=document.getElementById('raHealth'); if(box) box.innerHTML=raSpin(`${RA_ORG.reg_word} ${RA_ORG._count||''}건을 진단하는 중…`);
   const d=await raPost('/api/regagent/health',{law_info:H.law||{}});
   if(!d.success){ if(box) box.innerHTML=raErr(d.error||'진단 실패'); return; }
-  _raHealth=d; raRerender('health');
+  _raHealth=d; _raHealthAt=Date.now(); raRerender('health');
 }
-let _raHealth=null;
+let _raHealth=null, _raHealthAt=0;
+// 다시 진단하기 — 내규를 새로 올렸거나 고친 뒤 점수를 새로 매긴다(상위법 확인 결과는 그대로 둔다)
+function raHealthReload(){ if(_raBusy.health) return; _raHealth=null; raRerender('health'); }
 function raHealthLaws(){ return raOnce('healthLaws', _raHealthLaws); }
 async function _raHealthLaws(opt){
   const H=RA.health; if(!_raHealth) return; const quiet=!!(opt&&opt.quiet);
@@ -3642,12 +3644,16 @@ function raHealthView(){
     raSec(4,'정비 우선순위 Top 10','점수 낮은 순',prio)+
     raSec(4,`전체 ${_e(RA_ORG.reg_word)} 진단표`,'',table)+
     raSec(5,'유관 기관 규정 체계 비교',raTip('알리오에 공시된 유관 기관(같은 주무부처 등)의 내부규정 목록과 우리 기관 내규를 견줍니다. 여러 기관이 두고 있는데 우리에게 없는 규정은 제정을 검토할 만합니다.'),`<div id="raBench">${raBenchView()}</div>`)+
-    `<div class="ra-foot"><button class="svc-btn ghost sm" onclick="_raHealth=null;raHealthLoad()">다시 진단</button></div></div>`;
+    `</div>`;
 }
 // 건강검진 보기 전환 — 점수 요약 / 조문 오류 전체 목록(옛 ‘전체 점검’) / 내규 하나 자세히. 오류 목록은 처음 열 때 전체 점검을 바로 돌린다(단추 한 번 덜 누르기)
 function raHealthSeg(v){
   const items=[['diag','진단 요약','점수·등급·우선순위·상위법 최신성'],['errors','오류 목록','없는 조문 인용·내규명·옛 명칭·조 번호와 같은 문장 다른 수치를 내규별로'],['one','내규 하나 점검','항·호 순서, 표기, 부칙, 별표 인용까지 자세히']];
-  return `<div class="ra-seg ra-hseg" role="tablist">`+items.map(([k,l,h])=>`<button role="tab" aria-selected="${v===k}" class="${v===k?'on':''}" title="${_e(h)}" onclick="RA.health.v='${k}';_raSave();raRerender('health')${k==='errors'?";if(!RA.check.res)raCheckAll()":''}">${_e(l)}</button>`).join('')+`</div>`;
+  const tabs=`<div class="ra-seg ra-hseg" role="tablist">`+items.map(([k,l,h])=>`<button role="tab" aria-selected="${v===k}" class="${v===k?'on':''}" title="${_e(h)}" onclick="RA.health.v='${k}';_raSave();raRerender('health')${k==='errors'?";if(!RA.check.res)raCheckAll()":''}">${_e(l)}</button>`).join('')+`</div>`;
+  if(v!=='diag'||!_raHealth) return tabs;                     // 오류 목록은 자기 ‘전체 점검’ 단추가 있다
+  const at=_raHealthAt?new Date(_raHealthAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  return `<div class="ra-hseg-row">${tabs}<div class="ra-hseg-a">${at?`<span class="ra-meta">진단 ${_e(at)}</span>`:''}`+
+    `<button class="svc-btn sm" onclick="raHealthReload()" ${_raBusy.health?'disabled':''} title="내규를 새로 올렸거나 고친 뒤 점수를 새로 매깁니다">${raIc('check')}다시 진단하기</button></div></div>`;
 }
 function raHealthErrorsView(){
   const all=`<div class="ra-row"><button class="svc-btn yes" onclick="raCheckAll()">${raIc('check')}기관 ${_e(RA_ORG.reg_word)} 전체 점검</button>${raTip(`모든 내규에서 없는 조문 인용·현행 목록에 없는 내규명·구 명칭(재단·이사장 등)·조 번호 중복을 찾아 내규별로 보여 줍니다. 진단 요약의 점수는 같은 결과로 매깁니다.`)}</div><div id="raChkAll">${raCheckAllView()}</div>`;
