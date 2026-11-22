@@ -200,21 +200,44 @@ def _xml_blocks(root: ET.Element, para_tag: str, table_tag: str,
                 cs = _int(vals[0])
         return max(cs, 1), max(rs, 1)
 
+    def vmerge(tc: ET.Element):
+        """DOCX 세로 병합: 'restart'(병합 시작) · 'continue'(위 칸에 이어짐, 값 없는 <w:vMerge/>) · None."""
+        for sub in own(tc, "vMerge"):
+            vals = list(sub.attrib.values())
+            return "restart" if vals and vals[0] == "restart" else "continue"
+        return None
+
     def table_block(tbl: ET.Element):
         rows, el_of = [], {}
+        vtop = {}                                    # DOCX 세로 병합: 격자 열 → 병합을 시작한 셀
         for tr in own(tbl, row_tag):
-            cells = []
+            cells, col, grown = [], 0, []
+            for sub in own(tr, "gridBefore"):        # 행 앞에 비워 둔 격자 칸
+                col += _int(next(iter(sub.attrib.values()), 1))
             for tc in tr:
                 if _local(tc.tag) != cell_tag:
                     continue
                 cs, rs = cell_span(tc)
+                vm, at = vmerge(tc), col
+                col += cs
+                if vm == "continue" and at in vtop:  # 이어진 칸은 버리고 시작 셀의 rowspan 을 늘린다(colspan 처럼)
+                    vtop[at]["rs"] += 1
+                    grown.append(vtop[at])
+                    continue
                 cells.append({"t": cell_text(tc), "cs": cs, "rs": rs})
+                for k in range(at, at + cs):
+                    vtop.pop(k, None)
+                if vm == "restart":
+                    vtop[at] = cells[-1]
                 if next(own(tc, table_tag), None) is not None:   # 표 안의 표: 열람 화면에서 그 셀 안에 표로 한 번만
                     cells[-1]["blocks"] = _xml_blocks(tc, para_tag, table_tag, row_tag, cell_tag,
                                                       text_tags, break_tags)
                 el_of[id(cells[-1])] = tc
             if cells:
                 rows.append(cells)
+            else:                                    # 칸이 모두 위에 이어진 행은 행 자체가 없어지므로 늘린 rowspan 을 되돌린다
+                for c in grown:
+                    c["rs"] -= 1
         _merge_char_cells(rows)      # 세로쓰기로 글자마다 쪼개진 셀 복원
         while rows and not any(c["t"] for c in rows[0]):   # 앞뒤 빈 행 제거
             rows.pop(0)
@@ -222,6 +245,9 @@ def _xml_blocks(root: ET.Element, para_tag: str, table_tag: str,
             rows.pop()
         if not rows:
             return None
+        for i, r in enumerate(rows):                 # 지운 빈 행·통째로 이어진 행 몫만큼 rowspan 을 줄인다
+            for c in r:
+                c["rs"] = max(1, min(c["rs"], len(rows) - i))
         # 1열 표는 제목·안내 박스로 쓰인 레이아웃 표 → 표 대신 단락으로
         if max(sum(c["cs"] for c in r) for r in rows) <= 1:
             for r in rows:
@@ -451,9 +477,16 @@ def _esc(s: str) -> str:
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
-_ART_HEAD_RE = re.compile(r"^제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:\(|$|\s)")
-_CHAP_HEAD_RE = re.compile(r"^제\s*\d+\s*(?:편|장|절|관)\b")
-_APX_HEAD_RE = re.compile(r"^[\[［〔【<＜]?\s*(?:별표|별지|붙임|서식)")
+# 조 제목은 '제N조(제목)'·'제N조의M(제목)'·'제N조 삭제' 꼴만 — '제3조 및 제4조의 개정규정은 …' 같은 인용 문장은 본문
+_ART_HEAD_RE = re.compile(r"^제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:[(（]|삭\s*제|$)")
+# 한글은 \b 경계가 없어 '제1장총칙'을 놓친다 — 바로 뒤가 조사이거나 '및·또는…'으로 이어지는 인용만 뺀다
+_CHAP_HEAD_RE = re.compile(r"^제\s*\d+\s*(?:편|장|절|관)(?:\s*의\s*\d+)?"
+                           r"(?![0-9A-Za-z]|(?:에서|에|의|을|를|은|는|이|가|과|와|으로|로|부터|까지)(?![가-힣])"
+                           r"|\s*(?:및|또는|내지|부터|[,·ㆍ~]))")
+# 별표·별지·서식 제목은 괄호 꼴('[별표 1]', '<별지 제2호 서식>')이나 번호 꼴('별지 제1호서식', '서식 1')만
+_APX_HEAD_RE = re.compile(r"^(?:[\[［〔【<＜〈《]\s*(?:별표|별지|붙임|서식)"
+                          r"|(?:별표|별지|붙임|서식)\s*(?:제\s*)?\d|(?:별표|별지|붙임|서식)\s*$)")
+_ADD_HEAD_RE = re.compile(r"^부\s*칙\s*(?:[<〈(（\[]|$)")
 
 
 def _table_html(rows: list) -> str:
@@ -496,18 +529,33 @@ def _blocks_to_view_html(title: str, meta: dict, blocks: list,
                          orig_name: str = "") -> str:
     """열람용 HTML 생성 — 조·장 제목을 구분해 기존 원본 뷰어와 동일하게 읽히도록."""
     body = []
+    # 조 앵커 id: 본문은 a-N, 부칙·별표/별지 뒤의 조는 구역 접두어(b1-, x1-)를 붙여 겹치지 않게
+    sec, n_add, n_apx, seen = "", 0, 0, set()
     for b in blocks:
         if b["type"] == "table":
             body.append(_table_html(b["rows"]))
             continue
         t = (b.get("text") or "").strip()
+        if t and _ADD_HEAD_RE.match(t):
+            n_add += 1
+            sec = f"b{n_add}"
         if not t:
             body.append('<p class="blank"></p>')
         elif _CHAP_HEAD_RE.match(t):
             body.append(f'<h2 class="chap">{_esc(t)}</h2>')
         elif _ART_HEAD_RE.match(t):
-            body.append(f'<h3 class="art">{_esc(t)}</h3>')
+            m = _ART_HEAD_RE.match(t)
+            aid = (f"{sec}-" if sec else "") + f"a-{m.group(1)}" + (f"-{m.group(2)}" if m.group(2) else "")
+            if aid in seen:                       # 같은 구역에 같은 조 번호가 또 나오면 꼬리표로 구분
+                k = 2
+                while f"{aid}-{k}" in seen:
+                    k += 1
+                aid = f"{aid}-{k}"
+            seen.add(aid)
+            body.append(f'<h3 class="art" id="{aid}">{_esc(t)}</h3>')
         elif _APX_HEAD_RE.match(t):
+            n_apx += 1
+            sec = f"x{n_apx}"                     # 별지 계약서 등의 제1조는 본문 조가 아니다
             body.append(f'<h3 class="apx">{_esc(t)}</h3>')
         else:
             body.append(f"<p>{_esc(t)}</p>")
