@@ -1058,6 +1058,19 @@ test('별표 표 모양: 줄 수가 맞으면 표로, 다르면 null(글로 둠)
   assert.equal(c.raXTable({ ...x, layout: undefined }), null);                    // 모양이 없으면 글로
 });
 
+test('건강검진: 진단 요약 탭 줄에 ‘다시 진단하기’(진단 시각과 함께), 다른 탭에는 없음', () => {
+  const c = load();
+  vm.runInContext(`_raSave=()=>{}; RA.health={v:'diag'}; _raHealth={avg:90}; _raHealthAt=Date.now();`, c);
+  const diag = c.raHealthSeg('diag');
+  assert.ok(diag.includes('raHealthReload()') && diag.includes('다시 진단하기') && diag.includes('진단 '));
+  assert.ok(!c.raHealthSeg('errors').includes('다시 진단하기') && !c.raHealthSeg('one').includes('다시 진단하기'));
+  let rerendered = 0; c.raRerender = () => { rerendered++; };
+  c.raHealthReload();
+  assert.equal(vm.runInContext('_raHealth', c), null);                 // 다시 불러오도록 비운다
+  assert.equal(rerendered, 1);
+  assert.ok(!c.raHealthSeg('diag').includes('다시 진단하기'));          // 진단 중(결과 없음)에는 단추를 두지 않는다
+});
+
 test('고치기 색 표시: 지운 말·넣은 말과 사람이 고친 수정안 판별', () => {
   const c = load();
   const [L, R] = c.raBodyDiff('① 일비는 25,000원으로 한다.\n② 그대로 둔다.', '① 일비는 30,000원으로 한다.\n② 그대로 둔다.\n③ 새 항');
