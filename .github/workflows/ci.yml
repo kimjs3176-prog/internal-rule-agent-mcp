@@ -29,3 +29,9 @@ jobs:
         run: node --check assets/reg_agent.js
       - name: 엔진 로직 테스트
         run: node --test tests/js/*.test.mjs
+      # 내규똑똑(agro-law)은 이 코드를 Python 3.11 로 돌린다 — 3.12 전용 문법(f-string 안 \ 등)이 들어오지 않게
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python 3.11 문법 검사(내규똑똑 호환)
+        run: python -m compileall -q -x '(^|/)(regulations|\.git)/' .
