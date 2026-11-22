@@ -60,6 +60,9 @@ const RA_NAV=[
   {id:'more',t:'더 보기',fold:true,tabs:['regs','advise','terms','org','bulk','upper','graph','proc','ledger'],
    parts:[['찾아보기',['regs','advise','terms','org']],['정비 도구',['bulk','upper','graph']],['관리',['proc','ledger']]]},
 ];
+// 이 화면을 싣는 호스트(예: 내규똑똑)가 메뉴를 나눠 보일 때: window.raHostNav(RA_NAV) 가 이번에 보일 묶음을 돌려준다.
+// 없거나 잘못된 값이면 RA_NAV 그대로. 메뉴에서 뺀 화면도 raTab 으로는 그대로 열린다(어느 화면에 둘지는 호스트가 정한다)
+function raNavGroups(){ const f=typeof window!=='undefined'&&window.raHostNav; if(typeof f==='function'){ try{ const g=f(RA_NAV); if(Array.isArray(g)) return g; }catch(e){} } return RA_NAV; }
 // 처음 보는 사람이 메뉴 이름만으로 고르기 어려운 ‘작업’ 넷은 한 줄 설명을 늘 보여 준다
 const RA_NAV_SUB={agent:'한 문장으로 맡기기',health:'우리 내규 상태 보기',amend:'있는 내규 고치기',enact:'새 내규 만들기'};
 function raNavTab(k){ const t=RA_TABS.find(x=>x[0]===k); if(!t) return ''; const [,l,h]=t; return `<button class="ra-tab${RA.tab===k?' on':''}" data-k="${k}" ${RA.tab===k?'aria-current="page"':''} title="${_e(h)}" onclick="raTab('${k}')">${raIc(k)}<span class="ra-tab-t"><b>${l}${k==='health'&&raWatchNew().length?` <span class="ra-badge" aria-label="상위법 변경 ${raWatchNew().length}건">${raWatchNew().length}</span>`:''}</b>${RA_NAV_SUB[k]?`<small class="on">${_e(RA_NAV_SUB[k])}</small>`:`<small>${_e(h)}</small>`}</span></button>`; }
@@ -69,12 +72,12 @@ function raNavShowOn(nav){ if(!nav||innerWidth>=1024) return; const on=nav.query
 function raNavHtml(grouped){
   if(!grouped) return RA_TABS.map(t=>raNavTab(t[0])).join('');
   const open=(RA.ui&&RA.ui.nav)||{};
-  return RA_NAV.map(g=>{ const on=!g.fold||open[g.id]||g.tabs.includes(RA.tab);     // 지금 보는 화면이 든 묶음은 펼친다
+  return raNavGroups().map(g=>{ const on=!g.fold||open[g.id]||g.tabs.includes(RA.tab);     // 지금 보는 화면이 든 묶음은 펼친다
     // 항상 펼친 첫 묶음은 머리말을 두지 않는다(사이드바의 ‘작업’ 표시와 겹친다)
     return `<div class="ra-nav-g${on?'':' fold'}${g.small?' small':''}">`+(g.fold?`<button class="ra-nav-gh" onclick="raNavToggle('${g.id}')" aria-expanded="${on}">${_e(g.t)}<span class="ra-nav-chev" aria-hidden="true">${on?'▾':'▸'}</span></button>`:'')+
       `<div class="ra-nav-gb">${g.parts?g.parts.map(([t,ks])=>`<div class="ra-nav-sub">${_e(t)}</div>`+ks.map(raNavTab).join('')).join(''):g.tabs.map(raNavTab).join('')}</div></div>`; }).join('');
 }
-function raNavToggle(id){ RA.ui=RA.ui||{}; RA.ui.nav=RA.ui.nav||{}; const g=RA_NAV.find(x=>x.id===id); const on=RA.ui.nav[id]||(g&&g.tabs.includes(RA.tab)); RA.ui.nav[id]=!on; _raSave(); const nav=document.getElementById('raNav'); if(nav) nav.innerHTML=raNavHtml(true); }
+function raNavToggle(id){ RA.ui=RA.ui||{}; RA.ui.nav=RA.ui.nav||{}; const g=raNavGroups().find(x=>x.id===id); const on=RA.ui.nav[id]||(g&&g.tabs.includes(RA.tab)); RA.ui.nav[id]=!on; _raSave(); const nav=document.getElementById('raNav'); if(nav) nav.innerHTML=raNavHtml(true); }
 const RA_PAGE={
   agent:['에이전트에게 맡기기',[['spark','한 문장 지시'],['search','대상 찾기'],['amend','초안'],['bulk','인용 영향'],['check','점검·심의'],['doc','문서 세트']]],
   regs:['내규 목록',[['search','찾기'],['doc','원문·조문'],['amend','개정'],['check','점검']]],
@@ -3178,7 +3181,7 @@ const RA_GLOSS=[
 function raHelpOpen(sec){
   let bg=document.getElementById('raHelpBg');
   if(!bg){ bg=document.createElement('div'); bg.id='raHelpBg'; bg.className='modal-bg'; bg.addEventListener('click',e=>{ if(e.target===bg) raHelpClose(); }); document.body.appendChild(bg); }
-  const menu=RA_NAV.flatMap(g=>g.parts?g.parts.map(([t,ks])=>({t:`${g.t} › ${t}`,tabs:ks})):[g]).map(g=>`<dt>${_e(g.t)}</dt>`+g.tabs.map(k=>{ const t=RA_TABS.find(x=>x[0]===k); return t?`<dd><button class="ra-link" onclick="raHelpClose();raTab('${k}')">${_e(t[1])}</button> ${_e(RA_NAV_SUB[k]||t[2])}</dd>`:''; }).join('')).join('');
+  const menu=raNavGroups().flatMap(g=>g.parts?g.parts.map(([t,ks])=>({t:`${g.t} › ${t}`,tabs:ks})):[g]).map(g=>`<dt>${_e(g.t)}</dt>`+g.tabs.map(k=>{ const t=RA_TABS.find(x=>x[0]===k); return t?`<dd><button class="ra-link" onclick="raHelpClose();raTab('${k}')">${_e(t[1])}</button> ${_e(RA_NAV_SUB[k]||t[2])}</dd>`:''; }).join('')).join('');
   bg.innerHTML=`<div class="modal ra-help" role="dialog" aria-modal="true" aria-labelledby="raHelpT"><div class="ra-intro-top"><h2 id="raHelpT" tabindex="-1">도움말</h2><button class="ra-x" aria-label="닫기" onclick="raHelpClose()">${raIc('x')}</button></div>`+
     `<h3>어떻게 시작하나요?</h3>`+raIntroCards(true)+
     `<div class="ra-row"><button class="svc-btn sm" onclick="raTourStart()">${raIc('info')}30초 둘러보기</button><span class="ra-hint">화면의 주요 부분을 차례로 짚어 드립니다.</span></div>`+
