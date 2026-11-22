@@ -620,7 +620,11 @@ def _save(doc, out_dir, fmt):
     path = os.path.join(d, re.sub(r'[\\/:*?"<>|]', "_", doc["filename"]) + "." + fmt)
     with open(path, "wb") as f:
         f.write(data)
-    return {"file": path, "documents": doc.get("documents", [])}
+    out = {"file": path, "documents": doc.get("documents", [])}
+    if doc.get("omitted"):
+        out["omitted"] = doc["omitted"]
+        out["note"] = "빈 서식으로만 나올 문서는 뺐습니다(의견수렴 결과는 제출 의견이 있을 때, 사전검토 의견서는 검토 항목이 있을 때 넣습니다)."
+    return out
 
 
 def _secret():
@@ -809,7 +813,7 @@ def _with_docs(op, inp, out_dir, fmt, documents):
                                    "note": "심의안건서·개정문·신구조문대비표·이유서 등 문서 세트. 링크를 열면 그때 만들어 내려받는다. "
                                            "사용자에게는 markdown 을 그대로 보여 주고 긴 주소를 글로 풀어 쓰지 않는다."}
             else:
-                res["download"] = {"note": "요청이 길어 내려받기 링크를 만들지 못했습니다. 웹 화면에서 같은 작업을 하고 ‘문서 받기’를 쓰세요."}
+                res["download"] = {"note": "요청이 길어 내려받기 링크를 만들지 못했습니다. 내 컴퓨터 연결(stdio)의 output_dir 로 파일을 받거나, 웹 화면(내규똑똑 /agent)에서 같은 작업을 하고 ‘문서 받기’를 쓰세요."}
         return res
     res = engine.run(op, {**inp, "docs": bool(out_dir)})
     if warn:

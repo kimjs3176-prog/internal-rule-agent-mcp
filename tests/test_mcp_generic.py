@@ -64,6 +64,23 @@ def test_amend_pasted_text_other_org(core, tmp_path):
 
 
 @needs_engine
+def test_doc_set_drops_empty_forms(core, tmp_path):
+    """MCP 문서 세트: 채울 입력이 없어 빈 서식뿐인 문서(의견수렴 결과, 항목 없는 사전검토 의견서)는 빼고 붙임 목록도 맞춘다."""
+    import zipfile
+    r = core.t_amend_regulation(regulation="출장규정", source_text=TXT, org=ORG, reason="일비 현실화", changes=CHG,
+                                output_dir=str(tmp_path), format="docx")
+    sv = r["saved"]
+    assert sv["documents"] == ["심의안건서", "개정문", "신구조문대비표", "개정 이유서"]
+    assert sv["omitted"] == ["의견수렴 결과", "사전검토 의견서"] and "빈 서식" in sv["note"]
+    xml = "".join(zipfile.ZipFile(sv["file"]).read(n).decode("utf-8", "ignore") for n in zipfile.ZipFile(sv["file"]).namelist() if n.endswith(".xml"))
+    assert "의견수렴 결과" not in xml and "사전검토 의견서" not in xml and "제출된 의견 없음" not in xml
+    assert "개정 이유서 1부." in xml
+    # 등록 내규(우리 기관)는 심의기준 검토 항목이 있어 사전검토 의견서를 넣는다 — 의견수렴 결과만 뺀다
+    r2 = core.t_run_agent(request="여비규정 제15조의 일비를 3만원으로 올려줘", output_dir=str(tmp_path), format="docx")
+    assert r2["saved"]["documents"][-1] == "사전검토 의견서" and r2["saved"]["omitted"] == ["의견수렴 결과"]
+
+
+@needs_engine
 def test_amend_needs_some_source(core):
     assert "regulation" in core.t_amend_regulation(changes=CHG)["error"]
     r = core.t_amend_regulation(regulation="없는출장규정", changes=CHG)
