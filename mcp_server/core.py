@@ -17,7 +17,7 @@ from urllib.parse import quote
 from . import engine
 
 VERSION = "1.1.0"
-PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
+PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 MAX_TEXT = 200000
 MAX_LINK = 12000                                        # 내려받기 링크(요청을 담은 토큰) 최대 길이 — 주소 길이 제한(약 14KB) 안
 

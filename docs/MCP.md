@@ -54,7 +54,7 @@ claude mcp add --transport http reg-agent https://<배포 주소>/mcp
 | `MCP_ENGINE`, `MCP_ENGINE_TIMEOUT` | 엔진 실행 방식(`quickjs`·`node`, 6절)과 한 번의 제한 시간(초, 기본 90) |
 
 **방식**
-- MCP 2025-06-18·2025-03-26 판의 Streamable HTTP를 따른다. 한 주소에 JSON-RPC를 POST하고, JSON으로 답한다(SSE만 받는 클라이언트에는 SSE 한 건).
+- MCP 2025-11-25·2025-06-18·2025-03-26 판의 Streamable HTTP를 따른다. 한 주소에 JSON-RPC를 POST하고, JSON으로 답한다(SSE만 받는 클라이언트에는 SSE 한 건).
 - 세션을 두지 않는다. 요청마다 독립이라 서버리스(Vercel)에서도 된다. 서버가 먼저 보내는 알림 흐름(GET)은 없다(405).
 - **막는 것**
   - 다른 웹사이트의 브라우저 호출: 허용 목록에 없는 Origin은 403이다. 요청의 Host와 같은지로는 판단하지 않는다(DNS 재바인딩 대비).

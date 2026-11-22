@@ -165,13 +165,10 @@ def mcp_endpoint():
     if not _auth_ok():
         return _rpc_error(401, -32001, "Unauthorized: Authorization: Bearer <MCP_TOKEN> 이 필요합니다.", origin,
                           {"WWW-Authenticate": 'Bearer realm="reg-agent"'})
-    if request.method in ("GET", "DELETE"):                 # 서버 알림 흐름(SSE)·세션이 없다
+    if request.method in ("GET", "HEAD", "DELETE"):         # 서버 알림 흐름(SSE)·세션이 없다(HEAD 로 살펴보는 확인도 같은 답)
         r = _rpc_error(405, -32000, "Method Not Allowed: 이 서버는 POST 만 받습니다(세션·알림 흐름 없음).", origin)
         r.headers["Allow"] = "POST, OPTIONS"
         return r
-    ver = request.headers.get("MCP-Protocol-Version", "").strip()
-    if ver and ver not in core.PROTOCOLS:
-        return _rpc_error(400, -32600, f"Bad Request: 지원하지 않는 MCP-Protocol-Version({ver[:20]}). 지원: {', '.join(core.PROTOCOLS)}", origin)
     if (request.content_length or 0) > MAX_BODY:
         return _rpc_error(413, -32600, "요청이 너무 큽니다(1MB 이하).", origin)
     raw = request.get_data(cache=False)
@@ -181,6 +178,12 @@ def mcp_endpoint():
         msg = json.loads(raw.decode("utf-8"))
     except Exception:
         return _rpc_error(400, -32700, "Parse error", origin)
+    # 판 머리글은 연결(initialize) 뒤의 요청에만 따진다 — 연결할 때는 본문의 protocolVersion 으로 판을 맞춘다.
+    # (claude.ai 커넥터는 첫 연결에 더 새 판 머리글을 실어 보내므로, 여기서 막으면 '서버에 연결 중 400'으로 붙지 못한다)
+    ver = request.headers.get("MCP-Protocol-Version", "").strip()
+    first = isinstance(msg, dict) and msg.get("method") == "initialize"
+    if ver and not first and ver not in core.PROTOCOLS:
+        return _rpc_error(400, -32600, f"Bad Request: 지원하지 않는 MCP-Protocol-Version({ver[:20]}). 지원: {', '.join(core.PROTOCOLS)}", origin)
     base = _public_base()
     if isinstance(msg, list):                               # 묶음(2025-03-26 판까지)
         if not msg or len(msg) > MAX_BATCH:

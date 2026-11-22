@@ -49,6 +49,15 @@ def test_initialize_list_and_lifecycle(client):
 def test_transport_rules(client):
     assert client.get("/mcp").status_code == 405 and client.delete("/mcp").status_code == 405     # 세션·서버 알림 흐름 없음
     assert rpc(client, "ping", headers={"MCP-Protocol-Version": "2099-01-01"}).status_code == 400
+    assert client.head("/mcp").status_code == 405                                                 # HEAD 로 살펴봐도 400 이 아니다
+    # 첫 연결(initialize)은 판 머리글이 더 새 판이어도 받아 본문 판으로 맞춘다(claude.ai 커넥터 확인 단계)
+    r = rpc(client, "initialize", {"protocolVersion": "2099-01-01", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}},
+            headers={"MCP-Protocol-Version": "2099-01-01"})
+    assert r.status_code == 200 and r.get_json()["result"]["protocolVersion"] == "2025-11-25"
+    r = rpc(client, "initialize", {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}},
+            headers={"MCP-Protocol-Version": "2025-11-25"})
+    assert r.status_code == 200 and r.get_json()["result"]["protocolVersion"] == "2025-11-25"
+    assert rpc(client, "ping", headers={"MCP-Protocol-Version": "2025-11-25"}).status_code == 200
     r = client.post("/mcp", data="{bad", headers=H)
     assert r.status_code == 400 and r.get_json()["error"]["code"] == -32700
     r = client.post("/mcp", data=json.dumps([{"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/x"}]), headers=H)
