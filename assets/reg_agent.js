@@ -2091,10 +2091,11 @@ function raSubst(o, n){
   let s=0; while(s<o.length-p&&s<n.length-p&&o[o.length-1-s]===n[n.length-1-s]) s++;
   let l=p, rO=o.length-s, rN=n.length-s;
   const sp=c=>/\s/.test(c||' ');
+  const stop=(t,i)=>/[,.]/.test(t[i])&&!(/\d/.test(t[i-1]||'')&&/\d/.test(t[i+1]||''));   // 쉼표·마침표에서 끊되, 숫자 사이(20,000·1.5)는 수의 일부
   while(l>0&&!sp(o[l-1])) l--;                                   // 어절 머리까지
-  if(!(rO>l&&sp(o[rO-1]))) while(rO<o.length&&!sp(o[rO])&&!/[,.]/.test(o[rO])){ rO++; rN++; }   // 어절 끝까지(쉼표·마침표 앞) — 이미 어절 경계면 그대로(“예산의 범위에서 ”를 삭제)
+  if(!(rO>l&&sp(o[rO-1]))) while(rO<o.length&&!sp(o[rO])&&!stop(o,rO)){ rO++; rN++; }   // 어절 끝까지(쉼표·마침표 앞) — 이미 어절 경계면 그대로(“예산의 범위에서 ”를 삭제)
   // “2분의 1”처럼 ‘의’ 뒤에 수가 오면 그 수까지
-  if(/의$/.test(o.slice(l,rO))&&/^\s\d/.test(o.slice(rO))){ let e=rO+1; while(e<o.length&&!sp(o[e])&&!/[,.]/.test(o[e])) e++; rN+=e-rO; rO=e; }
+  if(/의$/.test(o.slice(l,rO))&&/^\s\d/.test(o.slice(rO))){ let e=rO+1; while(e<o.length&&!sp(o[e])&&!stop(o,e)) e++; rN+=e-rO; rO=e; }
   // 공통 조사는 따옴표 밖으로 뺀다: “3만원”을 → “5만원”으로
   const JS=/(으로|에서|에게|까지|부터|이나|이며|이고|과|와|을|를|이|가|은|는|에|로|도|만)$/;   // ‘의’는 빼지 않는다(“2분의 1”)
   // 받침에 따라 모양이 바뀌는 조사(이↔가·을↔를)는 모양이 같을 때만 따옴표 밖으로 뺀다 — 다르면 “입주기업이”를 “신규위원회가”로 처럼 조사까지 쓴다
