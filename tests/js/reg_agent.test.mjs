@@ -1025,6 +1025,25 @@ test('구성 단순화: 메뉴는 작업+더 보기 둘, 예시는 넷만 먼저
   assert.ok((c.raAgentView().match(/class="ra-ag-ex"/g) || []).length > 4, '더 보기 후 전부');
 });
 
+test('호스트 메뉴 나누기: window.raHostNav 가 보일 묶음을 정한다', () => {
+  const c = load();
+  vm.runInContext(`_raSave=()=>{}; RA.ui={}; RA.tab='agent';`, c);
+  const all = c.raNavHtml(true);
+  assert.ok(all.includes('data-k="advise"') && all.includes('data-k="terms"'));
+  // 호스트가 조회 성격 메뉴(자문·용어·조직)를 뺀다
+  c.window.raHostNav = N => N.map(g => ({ ...g, tabs: g.tabs.filter(k => !['advise', 'terms', 'org'].includes(k)),
+    parts: g.parts && g.parts.map(([t, ks]) => [t, ks.filter(k => !['advise', 'terms', 'org'].includes(k))]).filter(([, ks]) => ks.length) }));
+  const cut = c.raNavHtml(true);
+  assert.ok(!cut.includes('data-k="advise"') && !cut.includes('data-k="terms"') && !cut.includes('data-k="org"'));
+  assert.ok(cut.includes('data-k="amend"') && cut.includes('data-k="regs"'));
+  c.raNavToggle('more');                                         // 접기·펴기도 호스트 묶음으로
+  // 잘못된 값이면 원래 메뉴
+  c.window.raHostNav = () => 'x';
+  assert.ok(c.raNavHtml(true).includes('data-k="advise"'));
+  c.window.raHostNav = () => { throw new Error('x'); };
+  assert.ok(c.raNavHtml(true).includes('data-k="advise"'));
+});
+
 test('고치기 색 표시: 지운 말·넣은 말과 사람이 고친 수정안 판별', () => {
   const c = load();
   const [L, R] = c.raBodyDiff('① 일비는 25,000원으로 한다.\n② 그대로 둔다.', '① 일비는 30,000원으로 한다.\n② 그대로 둔다.\n③ 새 항');
