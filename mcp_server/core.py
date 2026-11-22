@@ -51,8 +51,19 @@ def _get(path, **q):
     return r.get_json(silent=True) or {"success": False, "error": f"응답 오류({r.status_code})"}
 
 
+def _scrub(v):
+    """입력 글의 짝 없는 서로게이트(U+D800 등)를 U+FFFD 로 — UTF-8 로 못 바꿔 요청이 깨지지 않게(짝 맞는 것은 한 글자로 합친다)."""
+    if isinstance(v, str):
+        return v.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if isinstance(v, dict):
+        return {_scrub(k): _scrub(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_scrub(x) for x in v]
+    return v
+
+
 def _post(path, body, headers=None):
-    r = _client().post(path, json=body, headers=headers)
+    r = _client().post(path, json=_scrub(body), headers=headers)
     return r.get_json(silent=True) or {"success": False, "error": f"응답 오류({r.status_code})"}
 
 
@@ -623,7 +634,8 @@ def _save(doc, out_dir, fmt):
         return {"error": err}
     d = os.path.abspath(os.path.expanduser(str(out_dir)))
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, re.sub(r'[\\/:*?"<>|]', "_", doc["filename"]) + "." + fmt)
+    name = re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f]", " ", str(doc["filename"]))).strip()   # 줄바꿈·탭 같은 제어 문자는 파일 이름에 넣지 않는다
+    path = os.path.join(d, re.sub(r'[\\/:*?"<>|]', "_", name) + "." + fmt)
     with open(path, "wb") as f:
         f.write(data)
     out = {"file": path, "documents": doc.get("documents", [])}
@@ -698,6 +710,7 @@ def clean_input(op, inp):
     """작업 입력 정리 → (inp, 알림). 도구 호출과 내려받기 링크가 같은 규칙을 쓴다."""
     if op not in _KEYS or not isinstance(inp, dict):
         raise ValueError("알 수 없는 작업입니다.")
+    inp = _scrub(inp)
     out, warn = {}, []
     for k in _KEYS[op]:
         if k in _CAP and inp.get(k) is not None:

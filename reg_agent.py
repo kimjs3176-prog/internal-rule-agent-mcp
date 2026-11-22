@@ -292,6 +292,13 @@ _ART_LINE = re.compile(
 _ANNOT_ONLY = re.compile(r"[<＜〈〔\[【［(（][^\n]{0,60}?[>＞〉〕\]】］)）]|\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?")   # “제3조(삭제) <2020. 1. 1.>”의 개정 표기
 _ADDENDA_LINE = re.compile(r"^[<＜【〔\[［]?\s*부\s*칙(?![가-힣])")          # 부칙 · 부 칙2023. 3. 15. · <부칙> · 【부칙】
 _APPX_LINE = re.compile(r"^[\[［〔【<＜]\s*(별표|별지)")
+# “[별표 1]을 참조한다”처럼 닫는 괄호 뒤에 조사가 붙으면 별표 머리가 아니라 본문 속 인용이다
+_APPX_CITE = re.compile(r"^[\[［〔【<＜]\s*(?:별표|별지)[^\]］〕】>＞\n]{0,30}[\]］〕】>＞]\s*"
+                        r"(?:을|를|에서|에|과|와|의|은|는|이|가|및|으로|로|에\s*따른|에\s*따라)(?![가-힣])")
+
+
+def _appx_head(ln: str) -> bool:
+    return bool(_APPX_LINE.match(ln)) and not _APPX_CITE.match(ln)
 _HANG_CH = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 _MOK_CH = "가나다라마바사아자차카타파하"
 
@@ -349,6 +356,18 @@ def art_label(no: str) -> str:
     return f"제{a}조" + (f"의{b}" if b else "")
 
 
+def _later_main_art(lines: list, i: int, no: str) -> bool:
+    """lines[i] 뒤(부칙 머리 전)에 번호가 더 큰 본문 조가 이어지는가 — 본문 속 ‘제2조(시행일)’를 부칙으로 잘못 보지 않게."""
+    for ln in lines[i + 1:]:
+        if _ADDENDA_LINE.match(ln) or _appx_head(ln):
+            return False
+        ma = _ART_LINE.match(ln)
+        if ma:
+            nx = ma.group(1) + (("의" + ma.group(2)) if ma.group(2) else "")
+            return art_key(nx) > art_key(no)
+    return False
+
+
 def parse_text(text: str, clean: bool = True) -> dict:
     """평문(규정 본문 또는 사용자가 쓴 초안) → 조문 구조.
 
@@ -383,13 +402,13 @@ def parse_text(text: str, clean: bool = True) -> dict:
     zone = "pre"            # pre → body → addenda → appendix
     cur = None
     chapter = ""
-    for ln in split_lines:
+    for li, ln in enumerate(split_lines):
         if zone in ("pre", "body"):
             if _ADDENDA_LINE.match(ln):
                 zone = "addenda"
                 add.append(ln)
                 continue
-            if _APPX_LINE.match(ln) and arts:
+            if _appx_head(ln) and arts:
                 zone = "appendix"
                 appx.append(ln)
                 continue
@@ -407,7 +426,8 @@ def parse_text(text: str, clean: bool = True) -> dict:
                 # 번호가 제1조로 되돌아가거나 '시행일' 조가 나오면 부칙(조 형식)으로 본다
                 ttl = (ma.group(3) or "").strip()
                 if arts and (art_key(no) == (1, 0) and art_key(arts[-1]["no"]) >= (2, 0)
-                             or ttl in ("시행일", "경과조치", "다른 내규의 개정", "적용례")):
+                             or ttl in ("시행일", "경과조치", "다른 내규의 개정", "적용례")
+                             and (art_key(no) <= art_key(arts[-1]["no"]) or not _later_main_art(split_lines, li, no))):
                     zone = "addenda"
                     add.append(ln)
                     continue
@@ -424,7 +444,7 @@ def parse_text(text: str, clean: bool = True) -> dict:
             elif cur is not None:
                 cur["lines"].append(ln)
         elif zone == "addenda":
-            if _APPX_LINE.match(ln):
+            if _appx_head(ln):
                 zone = "appendix"
                 appx.append(ln)
             else:
@@ -448,8 +468,28 @@ def parse_text(text: str, clean: bool = True) -> dict:
 
 
 # ── 번들 내규 전체 캐시 ────────────────────────────────────────────────────
-_REG_CACHE = {"key": None, "regs": None}
+_REG_CACHE = {"key": None, "regs": None, "cur": None}      # cur: (regs, 세대) — 다시 읽을 때마다 세대가 오른다
 _REG_LOCK = threading.Lock()
+
+
+def _regs_key(regs):
+    """파생 캐시의 열쇠: 번들 내규 목록이면 (세대, 개수), 그 밖의 목록(외부 요청의 []·임시 목록)이면 None — 공유 캐시를 쓰지 않는다.
+    목록의 id 는 목록이 버려진 뒤 다른 목록에 다시 쓰일 수 있어 열쇠로 쓰지 않는다."""
+    cur = _REG_CACHE.get("cur")
+    return (cur[1], len(regs)) if cur and cur[0] is regs else None
+
+
+def _cache_get(cache: dict, k, field: str = "v", keyf: str = "key"):
+    """(맞음, 값) — 캐시를 한 번에 떠서 읽는다(확인과 읽기 사이에 다른 요청이 바꿔도 다른 세대 값을 돌려주지 않게)."""
+    snap = dict(cache)
+    if k is not None and snap.get(keyf) == k:
+        return True, snap.get(field)
+    return False, None
+
+
+def _cache_put(cache: dict, k, keyf: str = "key", **vals):
+    if k is not None:
+        cache.update({keyf: k, **vals})
 
 
 def _manifest():
@@ -494,7 +534,8 @@ def all_regs() -> list:
                          "category": m.get("category", ""), "revision": m.get("revision", ""),
                          "articles": p["articles"], "chapters": p["chapters"],
                          "addenda": p["addenda"], "appendix": p["appendix"]})
-        _REG_CACHE.update({"key": key, "regs": regs})
+        gen = (_REG_CACHE["cur"] or (None, 0))[1] + 1
+        _REG_CACHE.update({"key": key, "regs": regs, "cur": (regs, gen)})
         return regs
 
 
@@ -882,6 +923,8 @@ def lint_articles(arts: list, addenda: str = "", appendix: str = "", title: str 
         k = art_key(a["no"])
         if len(names.get(k, [])) > 1 and names[k][0] is a:
             add("error", "dup", a["no"], f"{art_label(a['no'])}가 {len(names[k])}번 나옵니다.")
+        if re.fullmatch(r"\d+의0+", str(a["no"] or "")):          # “제1조의0”은 제1조로 읽히지 않게 따로 알린다
+            add("error", "branch0", a["no"], f"제{k[0]}조의0은 없는 가지 번호입니다. 가지 조는 ‘의2’부터 붙입니다.")
         if prev and k <= prev:
             add("error", "order", a["no"], f"{art_label(a['no'])}가 앞 조문보다 번호가 작거나 같습니다(순서 확인).")
         if prev and k[1] == 0 and k[0] > prev[0] + 1:
@@ -2170,7 +2213,7 @@ def ra_upper():
                     "candidates": cands[:120], "truncated": len(cands) > 120})
 
 
-_ADD_DATE = re.compile(r"(\d{4})\s*(?:년\s*|\.\s*)(\d{1,2})\s*(?:월\s*|\.\s*)(\d{1,2})\s*(?:일|\.)?\s*(?:부터|에)\s*시행")
+_ADD_DATE = re.compile(r"(\d{4})\s*(?:년\s*|\.\s*|-)(\d{1,2})\s*(?:월\s*|\.\s*|-)(\d{1,2})\s*(?:일|\.)?\s*(?:부터|에)\s*시행")   # 2027. 3. 1. · 2027-03-01
 
 
 def _addenda_date_issues(addenda: str, today=None) -> list:
@@ -2583,7 +2626,8 @@ def _norm_blocks(blocks) -> list:
                 for c in r:
                     c["rs"] = 1
             cols, ncol = table_grid(rows)
-        if cols is None:
+        ragged = cols is None
+        if ragged:
             cols = []
             for r in rows:
                 acc, rc = 0, []
@@ -2596,6 +2640,13 @@ def _norm_blocks(blocks) -> list:
             for c, col in zip(r, rc):
                 c["col"] = col
         ncol = min(40, ncol)
+        for i, r in enumerate(rows):            # 열 상한(40) 밖의 칸은 버리고 걸친 칸은 상한까지 줄인다(폭 0·colCnt 불일치 방지)
+            r[:] = [c for c in r if c["col"] < ncol]
+            for c in r:
+                c["cs"] = min(c["cs"], ncol - c["col"])
+            end = r[-1]["col"] + r[-1]["cs"] if r else 0
+            if ragged and end < ncol:           # 열 수가 모자란 행은 빈 칸으로 채운다(한글 표는 행마다 열 수가 같아야 한다)
+                r.append({"t": "", "hd": False, "cs": ncol - end, "rs": 1, "r": [], "col": end})
         cw = blk.get("colWidths")
         ok = isinstance(cw, list) and len(cw) == ncol and all(isinstance(x, (int, float)) and 0 < x < 1e6 for x in cw)
         out.append({"t": "table", "rows": rows, "ncol": ncol, "colWidths": [int(x) for x in cw] if ok else None})
@@ -2788,7 +2839,13 @@ def replace_term(text: str, old: str, new: str, whole: bool = True):
         if part and after and "가" <= after <= "힣":
             # “와의·과는·로부터·으로서”처럼 조사가 겹친 경우만 조사로 보고 고친다(“이사이며”의 “이”는 그대로)
             tail = text[m.end():m.end() + 2]
-            part_fixed = _rjosa(new, part) if part in ("과", "와", "로", "으로") and re.match(r"(의|는|도|만|부터|서|써)", tail) else part
+            stacked = part in ("과", "와", "로", "으로") and re.match(r"(의|는|도|만|부터|서|써)", tail)
+            # 짧은 용어는 조사처럼 보이는 글자 뒤에 한글이 더 붙으면 다른 낱말이다(“부서이동”·“이사가족”).
+            # 겹친 조사와 서술격 조사(“이사이며”·“부서이고”)만 받는다.
+            if (whole and len(old) <= 3 and not stacked
+                    and not (part == "이" and re.match(r"(?:며|고|다|면|나|므로|지만|어야|어서|었)(?![가-힣])", text[m.end():]))):
+                continue
+            part_fixed = _rjosa(new, part) if stacked else part
         else:
             part_fixed = _rjosa(new, part) if part else ""
         out.append(text[last:m.start()] + new + part_fixed)
@@ -3278,6 +3335,11 @@ def rev_date(rev: str) -> str:
     m = _REV_DATE.search(rev or "")
     if not m:
         return ""
+    import datetime as _dt
+    try:                                     # “2023년 13월”·“2월 30일”처럼 달력에 없는 날은 모르는 것으로
+        _dt.date(int(m.group(1)), int(m.group(2) or 1), int(m.group(3) or 1))
+    except ValueError:
+        return ""
     return f"{m.group(1)}{int(m.group(2) or 1):02d}{int(m.group(3) or 1):02d}"
 
 
@@ -3309,8 +3371,10 @@ def _law_unbreak(nm: str) -> str:
 def law_spelling() -> dict:
     """같은 법령의 여러 표기 → 정식에 가까운 하나. 전체 내규에서 가장 많이 쓴 표기(같으면 빈칸이 적은 것)를 고른다."""
     regs = all_regs()
-    if _LAW_SPELL["key"] == id(regs):
-        return _LAW_SPELL["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_LAW_SPELL, rk)
+    if hit:
+        return v
     cnt = {}
     for r in regs:
         for a in r["articles"]:
@@ -3322,7 +3386,7 @@ def law_spelling() -> dict:
                     cnt.setdefault(_nk(nm), {}).setdefault(nm, 0)
                     cnt[_nk(nm)][nm] += 1
     v = {k: max(c, key=lambda t: (c[t], -t.count(" "))) for k, c in cnt.items()}
-    _LAW_SPELL.update(key=id(regs), v=v)
+    _cache_put(_LAW_SPELL, rk, v=v)
     return v
 
 
@@ -3379,8 +3443,10 @@ def dup_regs() -> dict:
     """본문이 거의 같은 내규 — 파일명 오타 등으로 같은 내규가 두 번 등록된 경우(“직업창업규칙” ↔ 「직원창업규칙」).
     → {slug: [{"slug","title","revision","ratio"}]}"""
     regs = all_regs()
-    if _DUPREG["key"] == id(regs):
-        return _DUPREG["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_DUPREG, rk)
+    if hit:
+        return v
     sig = []
     for r in regs:
         live = [a for a in r["articles"] if not a["deleted"]]
@@ -3397,7 +3463,7 @@ def dup_regs() -> dict:
                 for x, y in ((ra_, rb), (rb, ra_)):
                     out.setdefault(x["slug"], []).append({"slug": y["slug"], "title": y["title"],
                                                           "revision": y.get("revision", ""), "ratio": round(ratio, 3)})
-    _DUPREG.update(key=id(regs), v=out)
+    _cache_put(_DUPREG, rk, v=out)
     return out
 
 
@@ -3471,8 +3537,10 @@ def _cf_same(t1: str, t2: str) -> float:
 def _cf_index():
     """전체 내규의 수치 문장 색인(내규 목록이 바뀌면 다시 만든다)."""
     regs = all_regs()
-    if _CF.get("ikey") == id(regs):
-        return _CF["idx"]
+    rk = _regs_key(regs)
+    hit, idx = _cache_get(_CF, rk, "idx", "ikey")
+    if hit:
+        return idx
     items = []
     for r in regs:
         for c in _cf_clauses(r):
@@ -3483,8 +3551,8 @@ def _cf_index():
         grams.append(g)
         for x in g:
             inv.setdefault(x, []).append(i)
-    _CF.update(ikey=id(regs), idx=(items, grams, inv))
-    return _CF["idx"]
+    _cache_put(_CF, rk, "ikey", idx=(items, grams, inv))
+    return items, grams, inv
 
 
 def _cf_find(tpl: str, g: set, skip=None) -> list:
@@ -3527,8 +3595,10 @@ def conflicts() -> dict:
     · differ: 관계없는 내규 사이 — 오류는 아닐 수 있으나 기관 안 기준이 다른 곳(통일 검토)
     대응 쪽 같은 자리에 같은 수치의 문장이 따로 있으면(본문 두 경우를 별표가 둘 다 적은 경우 등) 불일치로 보지 않는다."""
     regs = all_regs()
-    if _CF["key"] == id(regs):
-        return _CF["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_CF, rk)
+    if hit:
+        return v
     items, grams, _ = _cf_index()
     dup = {k: {d["slug"] for d in v} for k, v in dup_regs().items()}
     rel = _cf_rel()
@@ -3550,7 +3620,7 @@ def conflicts() -> dict:
         row = {"a": _cf_side(it), "b": _cf_side(jt), "same_reg": it["slug"] == jt["slug"], "related": (it["slug"], jt["slug"]) in rel}
         (mism if row["same_reg"] or row["related"] else diff).append(row)
     v = {"mismatch": mism, "differ": diff}
-    _CF.update(key=id(regs), v=v)
+    _cache_put(_CF, rk, v=v)
     return v
 
 
@@ -3973,8 +4043,10 @@ def jun_relations(r: dict, regnames: dict = None) -> list:
 def jun_index() -> dict:
     """전체 내규 준용 관계 캐시: {slug: [준용 조문…]}, 피준용 {대상 이름: [(slug, title, no, arts)]}"""
     regs = all_regs()
-    if _JUN_CACHE["key"] == id(regs):
-        return _JUN_CACHE["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_JUN_CACHE, rk)
+    if hit:
+        return v
     names = _reg_names()
     by, inv = {}, {}
     for r in regs:
@@ -3987,7 +4059,7 @@ def jun_index() -> dict:
                 inv.setdefault(_nk(t["name"]), []).append({"slug": r["slug"], "reg": r["title"], "no": j["no"],
                                                           "title": j["title"], "arts": t["arts"], "text": j["text"]})
     v = {"by": by, "inv": inv}
-    _JUN_CACHE.update(key=id(regs), v=v)
+    _cache_put(_JUN_CACHE, rk, v=v)
     return v
 
 
@@ -4046,9 +4118,10 @@ def ra_relations():
 def citation_graph() -> dict:
     """노드=내규, 간선=A가 B를 「B」로 인용(인용 횟수). 현행 목록에 없는 내규명 인용은 broken."""
     regs = all_regs()
-    key = id(regs)
-    if _GRAPH_CACHE["key"] == key:
-        return _GRAPH_CACHE["v"]
+    key = _regs_key(regs)
+    hit, v = _cache_get(_GRAPH_CACHE, key)
+    if hit:
+        return v
     idx = {_nk(r["title"]): i for i, r in enumerate(regs)}
     names = list(idx)
     own = [t for t in [ORG["org_short"], ORG["org_name"]] if t] + [o for o, _ in _stale_terms() + _stale_words()]
@@ -4123,7 +4196,7 @@ def citation_graph() -> dict:
          "stats": {"regs": len(regs), "edges": len(edges), "linked": sum(1 for i in range(len(regs)) if indeg[i] or outdeg[i]),
                    "isolated": sum(1 for i in range(len(regs)) if not indeg[i] and not outdeg[i]),
                    "broken": len(broken)}}
-    _GRAPH_CACHE.update({"key": key, "v": v})
+    _cache_put(_GRAPH_CACHE, key, v=v)
     return v
 
 
@@ -4531,14 +4604,18 @@ _CORPUS_LAWS_C = {"key": None, "set": frozenset()}
 def _CORPUS_LAWS():
     """내규가 「」로 인용한 법령명(띄어쓰기 없앤 꼴) 모음."""
     regs = all_regs()
-    if _CORPUS_LAWS_C["key"] != id(regs):
-        ws = set()
-        for r in regs:
-            for a in r["articles"]:
-                for mm in re.finditer(r"「([^」]{2,60}(?:법|법률|시행령|시행규칙))」", a["body"]):
-                    ws.add(_nk(mm.group(1)))
-        _CORPUS_LAWS_C.update(key=id(regs), set=frozenset(ws))
-    return _CORPUS_LAWS_C["set"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_CORPUS_LAWS_C, rk, "set")
+    if hit:
+        return v
+    ws = set()
+    for r in regs:
+        for a in r["articles"]:
+            for mm in re.finditer(r"「([^」]{2,60}(?:법|법률|시행령|시행규칙))」", a["body"]):
+                ws.add(_nk(mm.group(1)))
+    v = frozenset(ws)
+    _cache_put(_CORPUS_LAWS_C, rk, set=v)
+    return v
 
 
 def heuristic_plan(req: str) -> dict:
@@ -4786,24 +4863,29 @@ _EOJ = {"key": None, "set": frozenset()}
 def _verbal_stem(st: str) -> bool:
     """“포함”·“계산”·“결재”처럼 원문에 “포함하/포함되…”로 시작하는 낱말이 있는 어간인지(권·기·제한 같은 명사 조각은 아니다)."""
     regs = all_regs()
-    if _EOJ["key"] != id(regs):
+    rk = _regs_key(regs)
+    hit, ws = _cache_get(_EOJ, rk, "set")
+    if not hit:
         ws = set()
         for r in regs:
             for a in r["articles"]:
                 if not a["deleted"]:
                     ws.update(re.findall(r"[가-힣]{2,}", a["title"] + " " + a["body"]))
-        _EOJ.update(key=id(regs), set=frozenset(ws))
-    return any(w.startswith((st + "하", st + "되")) for w in _EOJ["set"])
+        ws = frozenset(ws)
+        _cache_put(_EOJ, rk, set=ws)
+    return any(w.startswith((st + "하", st + "되")) for w in ws)
 _ADV_AMT = re.compile(r"\d[\d,]*(?:\.\d+)?(?:만|천)?(?:원|일|개월|년|시간|회|명|퍼센트)?")
 _CORPUS = {"key": None, "txt": ""}
 
 
 def _corpus_text() -> str:
     regs = all_regs()
-    if _CORPUS["key"] != id(regs):
-        _CORPUS.update(key=id(regs), txt="\n".join(re.sub(r"\s+", "", a["title"] + a["body"])
-                                                    for r in regs for a in r["articles"] if not a["deleted"]))
-    return _CORPUS["txt"]
+    rk = _regs_key(regs)
+    hit, txt = _cache_get(_CORPUS, rk, "txt")
+    if not hit:
+        txt = "\n".join(re.sub(r"\s+", "", a["title"] + a["body"]) for r in regs for a in r["articles"] if not a["deleted"])
+        _cache_put(_CORPUS, rk, txt=txt)
+    return txt
 
 
 # 질의에 흔히 붙는 말 — 이 말이 들어간 조문이 없다고 “함께 다룬 조문 없음”으로 보지는 않는다
@@ -5605,8 +5687,10 @@ def _user_syn(extra) -> dict:
 def glossary() -> dict:
     """{terms: {용어: {term, defs:[{reg, slug, no, title, kind, text, key}], full:[정식 명칭], conflict, groups}}}"""
     regs = all_regs()
-    if _GLOSS["key"] == id(regs):
-        return _GLOSS["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_GLOSS, rk)
+    if hit:
+        return v
     terms = {}
 
     def put(t, d):
@@ -5649,8 +5733,9 @@ def glossary() -> dict:
         e["variants"] = len(reps)
         e["regs"] = sorted({d["reg"] for d in e["defs"]})
         e["conflict"] = len(reps) > 1 and len({d["reg"] for d in dd}) > 1 and t not in _GLOSS_GENERIC
-    _GLOSS.update(key=id(regs), v={"terms": terms})
-    return _GLOSS["v"]
+    v = {"terms": terms}
+    _cache_put(_GLOSS, rk, v=v)
+    return v
 
 
 def synonyms(word: str, extra=None) -> list:
@@ -5898,18 +5983,28 @@ def _count_in(regs: list, pat) -> list:
     return sorted(out, key=lambda x: -x["n"])
 
 
-_LIVE = {"key": None, "v": {}}
+_LIVE = {"key": None, "v": ({}, {})}
 
 
 def _live_text(r: dict) -> str:
     """본칙의 살아 있는 조문을 한 글로(내규 목록이 바뀌면 다시 만든다)."""
-    regs = all_regs()
-    if _LIVE["key"] != id(regs):
-        _LIVE.update(key=id(regs), v={}, ns={})
-    v = _LIVE["v"].get(r["slug"])
+    live = _live_maps()[0]
+    v = live.get(r["slug"]) if r.get("slug") else None
     if v is None:
-        v = _LIVE["v"][r["slug"]] = "\n".join(a["body"] for a in r["articles"] if not a["deleted"])
+        v = "\n".join(a["body"] for a in r["articles"] if not a["deleted"])
+        if r.get("slug"):
+            live[r["slug"]] = v
     return v
+
+
+def _live_maps():
+    """(살아 있는 조문 글, 빈칸 없앤 글) 슬러그별 모음 — 번들 내규 세대마다 새로. 외부 요청이면 버리는 새 모음."""
+    rk = _regs_key(all_regs())
+    hit, maps = _cache_get(_LIVE, rk)
+    if not hit:
+        maps = ({}, {})
+        _cache_put(_LIVE, rk, v=maps)
+    return maps
 
 
 def _count_name(regs: list, nm: str) -> list:
@@ -5917,9 +6012,12 @@ def _count_name(regs: list, nm: str) -> list:
     k = re.sub(r"\s+", "", nm)
     out = []
     for r in regs:
-        t = _LIVE.setdefault("ns", {}).get(r["slug"])
+        ns = _live_maps()[1]
+        t = ns.get(r["slug"]) if r.get("slug") else None
         if t is None:
-            t = _LIVE["ns"][r["slug"]] = re.sub(r"\s+", "", _live_text(r))
+            t = re.sub(r"\s+", "", _live_text(r))
+            if r.get("slug"):
+                ns[r["slug"]] = t
         n = t.count(k)
         if n:
             out.append({"reg": r["title"], "slug": r["slug"], "n": n})
@@ -5929,8 +6027,10 @@ def _count_name(regs: list, nm: str) -> list:
 def entities() -> dict:
     """{units:{이름: {name, kind, head, parent, children, src}}, committees:{id: {...}}, roles:[...], depts:[...]}"""
     regs = all_regs()
-    if _ENT["key"] == id(regs):
-        return _ENT["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_ENT, rk)
+    if hit:
+        return v
     head, deputy = ORG.get("head") or "원장", ORG.get("deputy") or "부원장"
     units = {}
 
@@ -6048,7 +6148,7 @@ def entities() -> dict:
                       "defs": [{k: d[k] for k in ("reg", "slug", "no", "text")} for d in e["defs"] if d["kind"] == "def"][:4] if e else []})
     depts.sort(key=lambda x: -x["n"])
     v = {"units": units, "committees": cmts, "roles": roles, "depts": depts[:60], "head": head, "deputy": deputy}
-    _ENT.update(key=id(regs), v=v)
+    _cache_put(_ENT, rk, v=v)
     return v
 
 
@@ -6204,8 +6304,10 @@ def _sents(body: str) -> list:
 def duties() -> dict:
     """{rels: [{actor, act, target, obj, when, modal, kind: do|approve, reg, slug, no, title, sent}], by_actor: {주체: n}}"""
     regs = all_regs()
-    if _DUTY["key"] == id(regs):
-        return _DUTY["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_DUTY, rk)
+    if hit:
+        return v
     E = entities()
     rels = []
     act_re = re.compile(r"(" + _ACT_RE + r")(?=하여야|해야|하여서는|해서는|할\s*수|한다|하며|하고|하되|하여|할\s*때)")
@@ -6272,7 +6374,7 @@ def duties() -> dict:
     for x in rels:
         by[x["actor"]] = by.get(x["actor"], 0) + 1
     v = {"rels": rels, "by_actor": dict(sorted(by.items(), key=lambda kv: -kv[1]))}
-    _DUTY.update(key=id(regs), v=v)
+    _cache_put(_DUTY, rk, v=v)
     return v
 
 
@@ -6318,8 +6420,10 @@ def _html_tables(html: str) -> list:
 def delegations() -> list:
     """위임전결 별표(○ 표시) → [{area, group, task, who, note, reg, slug}] — “누가 결재하나”의 근거."""
     regs = all_regs()
-    if _DLG["key"] == id(regs):
-        return _DLG["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_DLG, rk)
+    if hit:
+        return v
     E = entities()
     roles = {E["head"], E["deputy"], "본부장", "부서장", "실장", "팀장", "센터장", "부서의 장", "이사회", "감사"}
     out = []
@@ -6359,7 +6463,7 @@ def delegations() -> list:
                         out.append({"area": area, "group": re.sub(r"^[가-하]\.\s*", "", group),
                                     "task": task if task != group else "", "who": h, "note": note,
                                     "reg": r["title"], "slug": r["slug"]})
-    _DLG.update(key=id(regs), v=out)
+    _cache_put(_DLG, rk, v=out)
     return out
 
 
@@ -6448,8 +6552,10 @@ def _arts_in(s: str) -> list:
 def law_links() -> dict:
     """{rows: [{law, art, reg, slug, no, title, snip}], laws: {법령명: {arts: {조: [행 번호]}, regs: set}}}"""
     regs = all_regs()
-    if _LL["key"] == id(regs):
-        return _LL["v"]
+    rk = _regs_key(regs)
+    hit, v = _cache_get(_LL, rk)
+    if hit:
+        return v
     rows = []
     known = {}
     for r in regs:
@@ -6523,7 +6629,7 @@ def law_links() -> dict:
         L["arts"].setdefault(x["art"], []).append(i)
         L["regs"].add(x["slug"])
     v = {"rows": uniq, "laws": laws}
-    _LL.update(key=id(regs), v=v)
+    _cache_put(_LL, rk, v=v)
     return v
 
 
