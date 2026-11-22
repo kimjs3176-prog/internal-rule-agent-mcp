@@ -288,7 +288,8 @@ _ANNOT_SQ = re.compile(
     r"|\s*[〔\[][^\]〕\n]{0,80}(?:이동|종전|신설|개정)[^\]〕\n]{0,60}[〕\]]")   # 짝이 안 맞는 “[제24조에서 이동 …〕”도
 _CHAP_LINE = re.compile(r"^제\s*(\d+)\s*(장|절|관|편)\s*(.{0,40})$")
 _ART_LINE = re.compile(
-    r"^제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:[(（]\s*((?:[^()（）\n]|[(（][^()（）\n]{0,30}[)）]){0,60}?)\s*[)）]|(?=\s*(?:[<＜〔\[]\s*)?(?:삭제|종전))|\s*$)")
+    r"^제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:[(（]\s*((?:[^()（）\n]|[(（][^()（）\n]{0,30}[)）]){0,60}?)\s*[)）]|(?=\s*(?:[<＜〔\[【［]\s*)?(?:삭제|종전))|\s*$)")
+_ANNOT_ONLY = re.compile(r"[<＜〈〔\[【［(（][^\n]{0,60}?[>＞〉〕\]】］)）]|\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?")   # “제3조(삭제) <2020. 1. 1.>”의 개정 표기
 _ADDENDA_LINE = re.compile(r"^[<＜【〔\[［]?\s*부\s*칙(?![가-힣])")          # 부칙 · 부 칙2023. 3. 15. · <부칙> · 【부칙】
 _APPX_LINE = re.compile(r"^[\[［〔【<＜]\s*(별표|별지)")
 _HANG_CH = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
@@ -437,7 +438,9 @@ def parse_text(text: str, clean: bool = True) -> dict:
         raw = body
         if clean:
             body = "\n".join(x for x in (strip_annot(l) for l in body.split("\n")) if x)
-        deleted = (not body and (not a["title"] or bool(re.match(r"^[<＜〔\[(（]?\s*삭\s*제", raw)))) or bool(re.match(r"^[<＜〔\[]?\s*(?:삭제|종전)\s*(?:[<＜〔\[(（][^\n]{0,40}[>＞〕\])）]|\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?)?\s*$", body))
+        deleted = (not body and (not a["title"] or bool(re.match(r"^[<＜〔\[(（]?\s*삭\s*제", raw)))) \
+            or bool(re.fullmatch(r"\s*삭\s*제\s*", a["title"]) and not _ANNOT_ONLY.sub("", body).strip()) \
+            or bool(re.match(r"^[<＜〔\[【［]?\s*(?:삭제|종전)\s*[〕\]】］]?\s*(?:[<＜〔\[(（][^\n]{0,40}[>＞〕\])）]|\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?)?\s*$", body))
         out.append({"no": a["no"], "title": a["title"], "body": body,
                     "chapter": a["chapter"], "deleted": deleted})
     return {"articles": out, "chapters": chapters, "addenda": "\n".join(add),
@@ -2223,12 +2226,13 @@ def ra_lint():
         return jsonify({"success": False, "error": "점검할 조문이 없습니다."}), 400
     p = parse_text(text, clean=False)
     add = b.get("addenda")
-    add = add if isinstance(add, str) else p["addenda"]
+    new_add = isinstance(add, str)            # 화면·엔진이 넘긴 새 부칙(제·개정안) — 본문에 딸린 옛 부칙은 지난 날짜가 당연하다
+    add = add if new_add else p["addenda"]
     base = find_reg(b.get("base_slug", ""), "") if b.get("base_slug") else None
     # 개정안 본문에는 별표·서식이 따라오지 않으므로 비교할 때는 원 내규의 것을 쓴다(“해결됨” 오표시 방지)
     iss = lint_articles(p["articles"], add, p["appendix"] or (base["appendix"] if base else ""), b.get("title", ""),
                         draft_base={a["no"]: a["body"] for a in base["articles"]} if base else {})
-    iss = _addenda_date_issues(add) + iss            # 새로 쓰는 부칙만: 없는 날짜·이미 지난 시행일
+    iss = (_addenda_date_issues(add) if new_add else []) + iss     # 새로 쓰는 부칙만: 없는 날짜·이미 지난 시행일
     if not p["articles"]:
         iss.insert(0, {"level": "error", "code": "noart", "no": "",
                        "msg": "“제1조(목적)” 형식의 조문을 찾지 못했습니다.", "fix": ""})
@@ -3400,14 +3404,17 @@ def dup_regs() -> dict:
 # ── 같은 문장, 다른 수치 — 내규 사이·본문과 별표 사이에서 문장은 같은데 숫자만 다른 곳 ─────────────
 # 단위 뒤에 조사가 와도 수치로 본다(2만원으로·10일 이내). 단위 글자로 시작하는 다른 낱말(일비·원장·회의·명칭 등)만 뺀다
 _CF_Q = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(만\s*원(?![장칙본래격])|천\s*원(?![장칙본래격])|원(?![장칙본래격])|일(?![반비부자정괄련요])|개월|월(?![급])|년(?![도])|시간|분(?![의할기])"
-                   r"|주일|주(?![요차관체민택식소무제])|퍼센트|%|회(?![의사계])|배(?![상])|명(?![칭단예령의]))|(\d+)\s*분의\s*(\d+)")
+                   r"|주일|주(?![요차관체민택식소무제])|퍼센트|%|회(?![의사계])|배(?![상])|명(?![칭단예령의]))|(\d+)\s*분의\s*(\d+)"
+                   r"|(\d+)\s*만\s*(\d)\s*천\s*원(?![장칙본래격])")          # 2만5천원·1만 5천 원
 _CF_DATE = re.compile(r"\d{2,4}\s*년\s*\d{1,2}\s*월(?:\s*\d{1,2}\s*일)?|\d{1,2}\s*월\s*\d{1,2}\s*일")
 _CF_SKIP = re.compile(r"시행일|부\s*칙|경과조치|시행한다")
 _CF = {"key": None, "v": None}
 
 
 def _cf_val(m) -> str:
-    """수치 하나를 비교용 정규형으로: 2만원=20000원, 20퍼센트=20%, 10분의 3=3/10."""
+    """수치 하나를 비교용 정규형으로: 2만원=20000원, 2만5천원=25000원, 20퍼센트=20%, 10분의 3=3/10."""
+    if m.group(5):
+        return f"{int(m.group(5)) * 10000 + int(m.group(6)) * 1000}원"
     if m.group(3):
         return f"{m.group(4)}/{m.group(3)}"
     n, u = m.group(1).replace(",", ""), re.sub(r"\s", "", m.group(2))
@@ -3730,20 +3737,27 @@ def upcoming_laws(rows: list) -> list:
 _LAW_FRESH: dict = {}
 
 
+def _redact_oc(e) -> str:
+    """오류 문구의 요청 주소(…?OC=아이디&…)에서 법제처 아이디(LAW_OC)를 지운다."""
+    s = re.sub(r"(?i)\bOC=[^&\s'\"]*", "OC=***", str(e))
+    oc = os.environ.get("LAW_OC", "").strip()
+    return s.replace(oc, "***") if oc else s
+
+
 def law_fresh_one(nm: str, look_law, look_rule) -> dict:
     """규범 하나의 현행 시행일·다음 판(공포됐지만 시행 전) — 건강검진과 상위법 감시가 함께 쓴다."""
     try:
         is_law = bool(_LAW_NAME_OK.search(nm))
         v = (look_law if is_law else (look_rule or look_law))(nm) or {}
         if v.get("error"):
-            return {"error": str(v["error"])[:120]}
+            return {"error": _redact_oc(v["error"])[:120]}
         nx = v.get("next") if isinstance(v.get("next"), dict) else None
         return {"ef": v.get("ef", ""), "status": v.get("status", ""), "name": v.get("name", ""),
                 "kind": "law" if is_law or v.get("kind") == "law" else "admrul",
                 "found": bool(v.get("mst") or v.get("id")) and v.get("rank", 99) <= 1,
                 **({"next": {k: str(nx.get(k) or "")[:40] for k in ("ef", "anc", "type")}} if nx else {})}
     except Exception as e:
-        return {"error": str(e)[:120]}
+        return {"error": _redact_oc(e)[:120]}
 
 
 # ── 상위법 개정 감시: 지난번 확인과 견줘 “새로 공포된 개정”·“새로 시행된 개정”을 찾고 인용 내규를 붙인다 ──
@@ -4348,7 +4362,8 @@ def bench_extract(text: str, item: str, unit: str, cap: int = 4) -> list:
                     qs.append((m.start(), float(mu.group(1))))
             if not qs:
                 continue
-            pos = cl.find(item) if item in cl else -1
+            mi = re.search(r"\s*".join(map(re.escape, key)), cl)       # “국내 일비”·“국내일비” — 띄어쓰기가 달라도 그 항목 자리
+            pos = mi.start() if mi else -1
             after = [q for q in qs if q[0] > pos] if pos >= 0 else qs
             first = (after or sorted(qs, key=lambda q: abs(q[0] - pos)))[0][1]
             out.append({"no": no, "title": tt, "text": cl[:260], "vals": [q[1] for q in qs][:8], "first": first})
@@ -4486,14 +4501,14 @@ _LAW_ART_CHG = re.compile(r"((?:[가-힣·]{1,20}\s){0,6}?[가-힣·]{0,30}(?:�
 _LAW_NOUN_TAIL = re.compile(r"(?:방법|기법|용법|화법|요법|문법|수법|어법|공법|비법|해법|작법|필법|타법|편법|불법|위법|적법|합법|입법|사법|가법|감법)$")
 
 
-def _law_art_change(t: str) -> str:
+def _law_art_change(t: str) -> tuple:
     """요청문에서 “○○법 제N조 … 개정” 꼴의 법령명을 찾는다. 앞 낱말이 붙어 잡히면(“그런데 근로기준법”) 알려진 약칭·내규가 인용한 법령명이 될 때까지 앞에서부터 뗀다.
-    ‘지급방법’·‘평가기법’처럼 ‘-법’으로 끝나는 일반 명사는 법령명이 아니다. 찾은 법령의 조(제N조)는 _LAW_ART_LAST 에 남긴다."""
-    _LAW_ART_LAST["art"] = ""
+    ‘지급방법’·‘평가기법’처럼 ‘-법’으로 끝나는 일반 명사는 법령명이 아니다. (법령명, 조) 를 돌려준다 — 조는 법령명을 못 정해도 남긴다.
+    (전역에 두면 동시에 들어온 요청끼리 덮어쓴다)"""
     m = _LAW_ART_CHG.search((t or "")[:400])
     if not m:
-        return ""
-    _LAW_ART_LAST["art"] = re.sub(r"\s+", "", m.group(2))
+        return "", ""
+    art = re.sub(r"\s+", "", m.group(2))
     full = re.sub(r"\s+", " ", m.group(1)).strip()
     tm = re.match(r"^(.*?)\s*(시행령|시행규칙)$", full)
     base, tail = (tm.group(1), " " + tm.group(2)) if tm and tm.group(1) else (full, "")
@@ -4504,12 +4519,10 @@ def _law_art_change(t: str) -> str:
         if nm in _LAW_GENERIC or len(_nk(nm)) < 3:
             continue
         if any(_nk(x) == _nk(nm) for grp in _LAW_ALIAS for x in grp) or _nk(nm) in cited or _nk(nm + tail) in cited:
-            return nm + tail
+            return nm + tail, art
     last = words[-1] if words else ""
-    return last + tail if len(last) >= 3 and last not in _LAW_GENERIC and re.search(r"(?:법|법률)$", last) and not _LAW_NOUN_TAIL.search(last) else ""
-
-
-_LAW_ART_LAST = {"art": ""}
+    ok = len(last) >= 3 and last not in _LAW_GENERIC and re.search(r"(?:법|법률)$", last) and not _LAW_NOUN_TAIL.search(last)
+    return (last + tail if ok else ""), art
 
 
 _CORPUS_LAWS_C = {"key": None, "set": frozenset()}
@@ -4592,8 +4605,7 @@ def heuristic_plan(req: str) -> dict:
     if not lm and short_law:
         lm = short_law.group(1)
     # “청탁금지법 제10조가 개정됐어”·“근로기준법 제60조 개정에 따라 …” — 법령명 + 제N조 + 개정·바뀜. 등록 내규명을 함께 적지 않았으면 상위법 영향이다
-    law_art = _law_art_change(t)
-    law_art_no = _LAW_ART_LAST["art"]
+    law_art, law_art_no = _law_art_change(t)
     other_arts = [x for x in (re.sub(r"\s+", "", y) for y in re.findall(_REQ_ART, t)) if x != law_art_no]
     edit_words = re.search(r"(고쳐|고치어|바꿔|바꾸어|수정해|수정하여|늘려|줄여|올려|내려|정비해|개정해\s*줘|개정하여\s*줘)", t) or \
         re.search(r"\d\s*(?:만\s*원|천\s*원|원|일|개월|년|시간|%|회)\s*(?:에서|을|를|→)", t)
@@ -5338,7 +5350,7 @@ def ra_expc():
     try:
         v = expc_search(q, laws)
     except Exception as e:                                       # 해석례는 참고 자료 — 실패해도 자문 회신은 그대로 쓴다
-        v = {"items": [], "error": f"법령해석례 조회 실패: {str(e)[:80]}"}
+        v = {"items": [], "error": f"법령해석례 조회 실패: {_redact_oc(e)[:80]}"}
     return jsonify({"success": True, **v})
 
 
