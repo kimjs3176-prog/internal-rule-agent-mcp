@@ -45,7 +45,9 @@ def test_check_other_org_text_not_compared_with_our_regs(core):
     theirs = [i["message"] for i in core.t_check_regulation(text=TXT, title="출장규정", org=ORG)["issues"]]
     assert any("「여비규정」 제30조" in m for m in ours)               # 우리 여비규정(29개 조)과 대조한 경고
     assert not any("「여비규정」" in m or "구 명칭" in m for m in theirs)
-    assert any("시행일" in m for m in theirs)                          # 규정 자체의 점검은 그대로
+    assert not any("이미 지났습니다" in m for m in theirs)              # 현행 규정의 지난 부칙 시행일은 짚지 않는다
+    bad = [i["message"] for i in core.t_check_regulation(text=TXT.replace("제3조에 따른", "제9조에 따른"), title="출장규정", org=ORG)["issues"]]
+    assert any("제9조" in m for m in bad)                               # 규정 자체의 점검(없는 조 인용)은 그대로
 
 
 @needs_engine

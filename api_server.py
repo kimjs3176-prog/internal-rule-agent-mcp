@@ -63,6 +63,11 @@ def _need_oc():
     if not OC:
         raise LawNotConfigured(LAW_OC_MSG)
 
+def _redact_oc(e) -> str:
+    """오류 문구(요청 주소 “…?OC=아이디&…”가 붙는다)에서 LAW_OC 값을 지운다 — 화면·로그에 아이디가 나가지 않게."""
+    s = re.sub(r"(?i)\bOC=[^&\s'\"]*", "OC=***", str(e))
+    return s.replace(OC, "***") if OC else s
+
 BASE = "https://www.law.go.kr/DRF"
 HEADERS = {
     "User-Agent":      ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -388,8 +393,8 @@ def _lookup_law(law_name: str, target: str = "law") -> dict:
                 return out
         print(f"[MST] '{law_name}'({target}) 실패 — 태그: {sorted({e.tag for e in root.iter()})}")
     except Exception as e:
-        print(f"[MST] 오류: {e}")
-        out["error"] = str(e)[:120]          # 조회 실패를 '법령 없음'과 구분(실패는 캐시하지 않음)
+        print(f"[MST] 오류: {_redact_oc(e)}")
+        out["error"] = _redact_oc(e)[:120]         # 조회 실패를 '법령 없음'과 구분(실패는 캐시하지 않음)
     return out
 
 
@@ -437,7 +442,7 @@ def _fetch_law_root(law_name: str, target: str = "law", timeout=None, info: dict
                 print(f"[law] '{law_name}' ← {endpoint} {params}")
                 return r
         except Exception as e:
-            print(f"[law] '{law_name}' {params} 실패: {e}")
+            print(f"[law] '{law_name}' {params} 실패: {_redact_oc(e)}")
     return None
 
 # 구조 헤더 태그 (장·절·관·편 - 조문이 아님)
@@ -857,11 +862,11 @@ def get_law_articles():
                                 tried.append(f"admrul:{param_name}={mst_admrul}(성공)")
                                 break
                         except Exception as e_adm:
-                            tried.append(f"admrul:{param_name}={mst_admrul}({e_adm})")
+                            tried.append(f"admrul:{param_name}={mst_admrul}({_redact_oc(e_adm)})")
                 else:
                     tried.append("admrul:MST 없음")
             except Exception as e4:
-                print(f"[articles] Step4(admrul) 오류: {e4}")
+                print(f"[articles] Step4(admrul) 오류: {_redact_oc(e4)}")
 
         print(f"[articles] '{law_name}' 시도 내역: {tried}")
 

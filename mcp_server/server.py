@@ -47,8 +47,13 @@ def _send(obj):
 
 
 def main():
-    for line in sys.stdin:
-        line = line.strip()
+    # MCP stdio 는 UTF-8 이다. 표준입력을 그대로 읽으면 Windows(한국어)에서는 cp949 로 읽어 한글 요청에서 죽는다 — 바이트로 읽어 UTF-8 로 푼다
+    for raw in sys.stdin.buffer:
+        try:
+            line = raw.decode("utf-8-sig").strip()
+        except UnicodeDecodeError:
+            _send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error: UTF-8 이 아닙니다"}})
+            continue
         if not line:
             continue
         try:

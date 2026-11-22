@@ -841,7 +841,14 @@ def t_amend_regulation(regulation="", changes=None, appendix_changes=None, adden
         if not r:
             return {**_not_found(regulation, cand),
                     "hint": "다른 기관 규정이면 source_text 에 현행 원문을 넣거나 alio_search_regulations 의 id 를 alio_id 로 주세요."}
-        inp = {**base, "slug": r["slug"]}
+        # 등록 내규는 이 기관 것 — org 를 같이 주면 엔진이 ‘다른 기관’으로 보고 등록 내규를 못 찾는다. org 는 버리고 알린다
+        inp = {**base, "slug": r["slug"], "org": None}
+        if org:
+            res = _with_docs("amend", inp, output_dir, format, documents)
+            if isinstance(res, dict):
+                res["warnings"] = ["등록 내규 개정이라 org(기관 정보)는 쓰지 않았습니다. 다른 기관 규정이면 source_text 나 alio_id 를 주세요."] \
+                    + list(res.get("warnings") or [])
+            return res
     return _with_docs("amend", inp, output_dir, format, documents)
 
 
