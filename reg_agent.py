@@ -2221,8 +2221,11 @@ class _HxStyle:
         x = re.sub(r'textColor="[^"]*"', f'textColor="{color}"', x, count=1)
         fid = self.fonts["title" if role == "title" else "body"]
         if fid:
-            x = re.sub(r'<hh:fontRef [^>]*/>', lambda _m: "<hh:fontRef " + " ".join(
-                f'{key}="{fid.get(key, re.search(key + r"=.(\d+)", _m.group(0)).group(1))}"' for key, _ in _LANGS) + "/>", x, count=1)
+            def _font_ref(m):     # f-string 안에 \ 를 두지 않는다(Python 3.11 — 내규똑똑 CI)
+                def val(key):
+                    return fid[key] if key in fid else re.search(key + r"=.(\d+)", m.group(0)).group(1)
+                return "<hh:fontRef " + " ".join(f'{key}="{val(key)}"' for key, _ in _LANGS) + "/>"
+            x = re.sub(r'<hh:fontRef [^>]*/>', _font_ref, x, count=1)
         x = re.sub(r"<hh:(?:bold|italic)/>|<hh:underline\b[^>]*/>", "", x)
         x = x.replace("<hh:strikeout", ("<hh:bold/>" if bold else "")
                       + (f'<hh:underline type="BOTTOM" shape="SOLID" color="{ul}"/>' if ul else "") + "<hh:strikeout", 1)
