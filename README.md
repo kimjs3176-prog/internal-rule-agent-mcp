@@ -37,8 +37,16 @@
 https://reg-agent-mcp.vercel.app/mcp
 ```
 
-인증은 필요 없습니다. 주소를 브라우저로 열면 같은 연결 안내가 나옵니다.
+인증은 필요 없습니다. 주소를 브라우저로 열면 아래 연결 안내가 나옵니다.
 기관 전용 주소를 받았다면 그 주소 끝에 `/mcp`를 붙여 씁니다. 기관 주소에서는 등록된 내규 전체를 다루는 기능(한 문장 처리·건강검진·일괄 정비)도 씁니다.
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/guide-dark.png">
+  <img src="docs/images/guide-light.png" alt="커넥터 주소를 브라우저로 연 연결 안내 화면: 연결 주소와 복사 단추, claude.ai 등록 4단계" width="640">
+</picture>
+<br><sub>커넥터 주소를 브라우저로 열면 나오는 연결 안내</sub>
+</p>
 
 ### claude.ai — 웹·데스크톱·모바일
 
@@ -96,6 +104,11 @@ claude mcp add --transport http reg-agent https://reg-agent-mcp.vercel.app/mcp
 - 기관 전용 주소라면 `모든 내규에서 기획운영본부를 경영기획본부로 바꿔 줘` 같은 한 문장 요청도 됩니다.
 
 ## 📦 받는 것
+
+<p align="center">
+<img src="docs/images/result-docs.png" alt="실제로 만든 문서: 출장규정 일부개정(안) 개정문과, 2만원을 3만원으로 바꾼 신구조문대비표" width="820">
+<br><sub>“출장규정 제2조 일비를 2만원에서 3만원으로” 요청에서 실제로 나온 Word 문서의 개정문과 신구조문대비표</sub>
+</p>
 
 | 항목 | 내용 |
 |---|---|
