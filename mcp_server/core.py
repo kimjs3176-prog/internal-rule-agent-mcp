@@ -730,6 +730,15 @@ def resolve_source(op, inp):
     return out, None
 
 
+def _compact(inp):
+    """링크에 담을 요청에서 빈 값을 뺀다(읽을 때 clean_input 이 기본값을 다시 채운다) — 링크를 짧게."""
+    if isinstance(inp, dict):
+        return {k: _compact(v) for k, v in inp.items() if v not in ("", None, [], {})}
+    if isinstance(inp, list):
+        return [_compact(v) for v in inp]
+    return inp
+
+
 def make_token(op, inp):
     """내려받기 링크에 담을 요청 — 서버에 저장하지 않고 링크 자체에 담는다(서버리스에서도 된다). MCP_TOKEN 이 있으면 서명한다."""
     raw = base64.urlsafe_b64encode(zlib.compress(json.dumps([op, inp], ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)).decode().rstrip("=")
@@ -791,10 +800,14 @@ def _with_docs(op, inp, out_dir, fmt, documents):
         if warn:
             res["warnings"] = warn + list(res.get("warnings") or [])
         if documents is not False and not res.get("error") and res.get("doc_ready"):
-            tok = make_token(op, link_inp)
+            tok = make_token(op, _compact(link_inp))
             if len(tok) <= MAX_LINK and _base_url():
-                res["download"] = {"hwpx": f"{_base_url()}/api/mcp/doc/hwpx/{tok}", "docx": f"{_base_url()}/api/mcp/doc/docx/{tok}",
-                                   "note": "심의안건서·개정문·신구조문대비표·이유서 등 문서 세트. 링크를 열면 그때 만들어 내려받는다."}
+                hw, dx = f"{_base_url()}/api/mcp/doc/hwpx/{tok}", f"{_base_url()}/api/mcp/doc/docx/{tok}"
+                res["download"] = {"hwpx": hw, "docx": dx,
+                                   # 주소가 길어(요청을 링크에 담는다) 그대로 보이면 화면을 덮는다 — 이름 붙은 링크로 보여 준다
+                                   "markdown": f"[한글(hwpx) 문서 세트 내려받기]({hw}) · [Word(docx) 내려받기]({dx})",
+                                   "note": "심의안건서·개정문·신구조문대비표·이유서 등 문서 세트. 링크를 열면 그때 만들어 내려받는다. "
+                                           "사용자에게는 markdown 을 그대로 보여 주고 긴 주소를 글로 풀어 쓰지 않는다."}
             else:
                 res["download"] = {"note": "요청이 길어 내려받기 링크를 만들지 못했습니다. 웹 화면에서 같은 작업을 하고 ‘문서 받기’를 쓰세요."}
         return res
@@ -1027,7 +1040,7 @@ def _instructions():
              "금액·기한은 원문에서 확인한 값만 쓰고, 근거는 「규정명」 제N조로 밝히세요. "
              "검증 결과(verification.ok=false)나 점검 오류가 있으면 사용자에게 그대로 알리세요.")
         if _mode() == "http":
-            s += " 결과에 download 링크가 있으면 사용자에게 한글(hwpx)·Word(docx) 문서 세트 내려받기 링크로 보여 주세요."
+            s += " 결과에 download 가 있으면 download.markdown 을 그대로 붙여 한글(hwpx)·Word(docx) 내려받기 링크를 이름으로 보여 주세요(링크 주소가 길어 주소를 글로 그대로 쓰지 마세요)."
         return s
     s = ("이 서버는 기관 내규(규정·규칙·지침)의 제·개정을 돕는 ‘규정 제·개정 에이전트’입니다. "
          "답에는 근거를 「내규명」 제N조 형태로 밝히고, 금액·기한은 조문·별표 원문에서 확인한 값만 쓰세요. "
@@ -1040,7 +1053,7 @@ def _instructions():
          "run_agent·health_check·bulk_rename 은 등록 기관 내규 전체가 필요해 등록 내규에만 씁니다. "
          "검증 결과(verification.ok=false)나 점검 오류가 있으면 사용자에게 그대로 알리세요.")
     if _mode() == "http":
-        s += " 결과에 download 링크가 있으면 사용자에게 한글(hwpx)·Word(docx) 문서 세트 내려받기 링크로 보여 주세요. 원문 링크(url)도 함께 주세요."
+        s += " 결과에 download 가 있으면 download.markdown 을 그대로 붙여 한글(hwpx)·Word(docx) 내려받기 링크를 이름으로 보여 주세요(링크 주소가 길어 주소를 글로 그대로 쓰지 마세요). 원문 링크(url)도 함께 주세요."
     return s
 
 
