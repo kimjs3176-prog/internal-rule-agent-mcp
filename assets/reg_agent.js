@@ -1185,6 +1185,24 @@ function raAppxCites(head){
   return [...new Set(out)];
 }
 function raXText(x){ return [x.head, x.body].filter(s=>String(s||'').trim()).join('\n'); }
+// 별표의 표 모양: 서버가 원본 HTML 표에서 뽑은 칸별 줄 수·병합(layout, /api/regagent/articles)을 써서 줄글 본문을 표로 되돌린다.
+// 본문 줄 수가 모양과 맞을 때만(값만 바꾼 개정) 표로, 줄을 넣거나 뺐으면 null → 지금처럼 글로 둔다
+function raXLayout(x){ const o=x&&(x.layout?x:raOldX(x.id)); return o&&Array.isArray(o.layout)?o.layout:null; }
+function raXTable(x){
+  const lay=raXLayout(x); if(!lay) return null;
+  const L=String(x.body||'').split('\n').filter(l=>l.trim());
+  const need=lay.reduce((n,s)=>n+(s.table?s.table.reduce((m,r)=>m+r.reduce((k,c)=>k+(+c.n||0),0),0):(+s.lines||0)),0);
+  if(need!==L.length) return null;
+  let i=0; const take=n=>L.slice(i,i+=n);
+  return lay.map(s=>s.table?{table:s.table.map(r=>r.map(c=>({t:take(+c.n||0).join('\n'), cs:+c.cs||1, rs:+c.rs||1})))}:{lines:take(+s.lines||0)});
+}
+// 대비표용: 표의 한 행을 한 줄로(칸은 “ │ ”로 잇는다) — 칸마다 한 줄이던 것을 행 단위로 견준다. 첫 행(열 제목)은 늘 남긴다
+function raXRowLines(x){
+  const T=raXTable(x); if(!T) return null;
+  const out=[], hdr=new Set();
+  T.forEach(s=>{ if(s.lines) out.push(...s.lines); else s.table.forEach((r,k)=>{ const l=r.map(c=>c.t.replace(/\s*\n\s*/g,' ').trim()).join(' │ '); if(!k) hdr.add(l); out.push(l); }); });
+  return {lines:out, hdr};
+}
 function raXChanged(x){ if(x.type!=='modify') return true; const o=raOldX(x.id); if(!o) return true; const n=s=>String(s||'').replace(/\s+/g,' ').trim(); return n(o.body)!==n(x.body)||n(o.head)!==n(x.head); }
 function raEffAppx(){ return raArr(RA.amend.appx).filter(raXChanged); }
 // 개정문 문형 — 별표는 조문처럼 글자를 짚지 않고 통째로 바꾼다: “별표 2를 별지와 같이 한다.” 내용은 부칙 뒤에 붙는다
@@ -1762,9 +1780,10 @@ function raCmpCellX(o, x, abbr){
   if(!x||x.type==='delete') return [`<u class="ra-d">${_e(ot).replace(/\n/g,'<br>')}</u>`, `${_e(o.id)} &lt;삭 제&gt;`, ot, `${o.id} <삭 제>`];
   const nt=raXText(x);
   if(!abbr) return raCmpCell({raw:true,id:o.id,text:ot},{raw:true,id:x.id,text:nt},false);
-  const OL=ot.split('\n'), NL=nt.split('\n');
+  const OR=raXRowLines(o), NR=OR&&raXRowLines({...x, layout:o.layout});      // 둘 다 표로 되돌릴 수 있으면 행 단위로 견준다
+  const OL=OR&&NR?[o.head,...OR.lines]:ot.split('\n'), NL=OR&&NR?[x.head,...NR.lines]:nt.split('\n');
   const ops=raLcs(OL,NL,(a,b)=>a.trim()===b.trim())||[...OL.map(l=>['-',l,null]),...NL.map(l=>['+',null,l])];
-  const keep=l=>/^(?:제\s*\d+\s*호|구\s*분|[\[［〔【<＜(（]\s*(?:별표|별지))/.test(String(l).trim());
+  const keep=l=>/^(?:제\s*\d+\s*호|구\s*분|[\[［〔【<＜(（]\s*(?:별표|별지))/.test(String(l).trim())||!!(OR&&OR.hdr.has(l));
   const L=[],R=[],LP=[],RP=[]; let gap=false;
   for(let k=0;k<ops.length;){
     if(ops[k][0]==='='){ const l=ops[k][1];
@@ -2021,6 +2040,24 @@ function raDocCtx(mode){
 // 법령문(부칙) 날짜 표기: “2027. 1. 1.”·“2027-01-01” → “2027년 1월 1일”
 function raLawDate(v){ return String(v||'').trim().replace(/(\d{4})\s*[.\-]\s*(\d{1,2})\s*[.\-]\s*(\d{1,2})\.?/g,(x,y,m,d)=>`${y}년 ${+m}월 ${+d}일`); }
 function raAddendaLines(t){ const s=String(t||'').trim(); return s.split('\n').map(x=>x.trim()).filter(Boolean); }
+// 개정문 문서 블록: 별지로 붙는 별표 가운데 표 모양을 되살릴 수 있는 것은 표로(나머지·조문은 지금처럼 글). 되살릴 것이 없으면 null
+function raLawBlocks(c){
+  if(c.mode!=='amend') return null;
+  const A=RA.amend, X=(A.fullRev&&_raArts?raAppxAll():raEffAppx().filter(x=>x.type!=='delete'));
+  const T=X.map(x=>raXTable(x));
+  if(!T.some(Boolean)) return null;
+  const out=[{t:'p', text:raDocLaw({...c, appendix:''}), titleBold:1}];
+  let buf=[];
+  const flush=()=>{ if(buf.length){ out.push({t:'p', text:buf.join('\n')}); buf=[]; } };
+  X.forEach((x,i)=>{
+    buf.push('');
+    if(!T[i]){ buf.push(...raXText(x).split('\n')); return; }
+    if(String(x.head||'').trim()) buf.push(x.head);
+    T[i].forEach(s=>{ if(s.lines) buf.push(...s.lines); else { flush(); out.push({t:'table', rows:s.table}); } });
+  });
+  flush();
+  return out;
+}
 function raDocLaw(c){
   const L=[];
   if(c.mode==='enact'){
@@ -2583,7 +2620,7 @@ function raDocCmpRows(c){
 function raDocsBuild(mode){
   const c=raDocCtx(mode);
   const cmp=raDocCmpRows(c);
-  const B={c, law:raDocLaw(c), reason:raDocReason(c), notice:raDocNotice(c,false), staff:raDocNotice(c,true), review:raDocReview(c,mode), cmp, blk:{}};
+  const B={c, law:raDocLaw(c), lawBlk:raLawBlocks(c), reason:raDocReason(c), notice:raDocNotice(c,false), staff:raDocNotice(c,true), review:raDocReview(c,mode), cmp, blk:{}};
  B.blk.report=raReportBlocks(c,mode); B.blk.agenda=raAgendaBlocks(c,mode); B.blk.opinion=raOpinionBlocks(c,mode); B.blk.regul=raRegulBlocks(c,mode); B.blk.corrupt=raCorruptBlocks(c,mode);
   Object.keys(B.blk).forEach(k=>{ B[k]=raBlocksText(B.blk[k]); });     // 복사·표기 점검용 글
   return B;
@@ -2597,6 +2634,7 @@ function raDocsView(mode){
   const tabs=RA_DOCS[mode].map(([k,l])=>`<button class="ra-dtab${tab===k?' on':''}" onclick="raSet('${mode}.docTab','${k}');raRerender('${mode}')">${raIc(RA_DOC_IC[k]||'doc')}${l}</button>`).join('');
   let body;
   if(tab==='cmp') body=`<div class="ra-doc-t">「${_e(B.c.title)}」 ${B.c.word}안 신구조문대비표</div><table class="ra-cmp"><thead><tr><th>현 행</th><th>${B.c.word} 안</th></tr></thead><tbody>${B.cmp.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')||'<tr><td colspan="2">조문이 없습니다.</td></tr>'}</tbody></table>`;
+  else if(tab==='law'&&B.lawBlk) body=raBlocksHtml(B.lawBlk);
   else if(B.blk[tab]) body=raBlocksHtml(B.blk[tab])+raSubEditor(mode,tab);
   else body=`<pre class="ra-doc">${_e(B[tab])}</pre>`;
   const picks=raPicks(mode);
@@ -2659,7 +2697,8 @@ function raDocBlocks(B, picks){
     if(k==='cmp'){
       blocks.push({t:'p',text:`「${B.c.title}」 ${B.c.word}안 신구조문대비표`,titleBold:1},{t:'p',text:''});
       blocks.push({t:'table',colWidths:[23814,23814],rows:[[{t:'현 행',hd:1},{t:`${B.c.word} 안`,hd:1}],...B.cmp.map(r=>[{t:r[2],r:raHtmlRuns(r[0])},{t:r[3],r:raHtmlRuns(r[1])}])]});
-    } else if(B.blk&&B.blk[k]) blocks.push(...B.blk[k]);
+    } else if(k==='law'&&B.lawBlk) blocks.push(...B.lawBlk);
+    else if(B.blk&&B.blk[k]) blocks.push(...B.blk[k]);
     else blocks.push({t:'p',text:B[k],titleBold:1});
   });
   return blocks;
@@ -2707,7 +2746,7 @@ function raDateAdd(v,d){ const t=raYmdP(v); if(!t) return ''; t.setDate(t.getDat
 // 제출 기한: 위원회 개최 7일 전(주말이면 앞의 금요일로)
 function raDueDate(v){ const t=raYmdP(v); if(!t) return null; t.setDate(t.getDate()-7); while(t.getDay()===0||t.getDay()===6) t.setDate(t.getDate()-1); return t; }
 // 블록(문단·표) → 화면 HTML / 평문
-function raBlocksHtml(bl){ return `<div class="ra-fblk">`+bl.map(b=>b.t==='table'?`<table class="ra-form">${b.rows.map(r=>`<tr>${r.map(c=>`<${c.hd?'th':'td'}${c.cs>1?` colspan="${c.cs}"`:''}>${_e(c.t).replace(/\n/g,'<br>')}</${c.hd?'th':'td'}>`).join('')}</tr>`).join('')}</table>`
+function raBlocksHtml(bl){ return `<div class="ra-fblk">`+bl.map(b=>b.t==='table'?`<table class="ra-form">${b.rows.map(r=>`<tr>${r.map(c=>`<${c.hd?'th':'td'}${c.cs>1?` colspan="${c.cs}"`:''}${c.rs>1?` rowspan="${c.rs}"`:''}>${_e(c.t).replace(/\n/g,'<br>')}</${c.hd?'th':'td'}>`).join('')}</tr>`).join('')}</table>`
   :b.t==='break'?'<hr class="ra-pgbr">':`<pre class="ra-doc${b.titleBold?' tb':''}">${_e(b.text)}</pre>`).join('')+`</div>`; }
 function raBlocksText(bl){ return bl.map(b=>b.t==='table'?b.rows.map(r=>r.map(c=>c.t).join(' | ')).join('\n'):b.t==='break'?'':b.text).filter(x=>x!=='').join('\n\n'); }
 const RA_CELL=(t,o)=>Object.assign({t:String(t==null?'':t)},o||{});

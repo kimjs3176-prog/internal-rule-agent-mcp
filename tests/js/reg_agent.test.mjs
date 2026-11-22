@@ -1044,6 +1044,20 @@ test('호스트 메뉴 나누기: window.raHostNav 가 보일 묶음을 정한�
   assert.ok(c.raNavHtml(true).includes('data-k="advise"'));
 });
 
+test('별표 표 모양: 줄 수가 맞으면 표로, 다르면 null(글로 둠)', () => {
+  const c = load();
+  const lay = [{ lines: 1 }, { table: [[{ n: 1, cs: 1, rs: 1 }, { n: 2, cs: 1, rs: 1 }], [{ n: 1, cs: 1, rs: 1 }, { n: 1, cs: 1, rs: 1 }]] }, { lines: 1 }];
+  const x = { id: '별표 1', head: '〔별표 1〕', body: '수당표\n구 분\n금액\n(원)\n갑\n1,000\n비고', layout: lay };
+  const T = c.raXTable(x);
+  assert.equal(JSON.stringify(T), JSON.stringify([{ lines: ['수당표'] },
+    { table: [[{ t: '구 분', cs: 1, rs: 1 }, { t: '금액\n(원)', cs: 1, rs: 1 }], [{ t: '갑', cs: 1, rs: 1 }, { t: '1,000', cs: 1, rs: 1 }]] }, { lines: ['비고'] }]));
+  const R = c.raXRowLines(x);
+  assert.equal(R.lines.join('|'), '수당표|구 분 │ 금액 (원)|갑 │ 1,000|비고');
+  assert.ok(R.hdr.has('구 분 │ 금액 (원)'));
+  assert.equal(c.raXTable({ ...x, body: x.body + '\n새 줄' }), null);           // 줄을 넣으면 표로 되돌리지 않는다
+  assert.equal(c.raXTable({ ...x, layout: undefined }), null);                    // 모양이 없으면 글로
+});
+
 test('고치기 색 표시: 지운 말·넣은 말과 사람이 고친 수정안 판별', () => {
   const c = load();
   const [L, R] = c.raBodyDiff('① 일비는 25,000원으로 한다.\n② 그대로 둔다.', '① 일비는 30,000원으로 한다.\n② 그대로 둔다.\n③ 새 항');
