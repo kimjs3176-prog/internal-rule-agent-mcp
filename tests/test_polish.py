@@ -144,3 +144,29 @@ def test_template_bylaw_purpose_and_full_sentences(ra):
     assert a[3]["body"].startswith("출장 신청은 ") and a[4]["body"] == "출장 후 5일 이내에 정산한다."
     assert sum("따로 정한다" in x["body"] for x in a) == 1
     assert t["addenda"] == ["이 세칙은 발령한 날부터 시행한다."]
+
+
+def test_hwpx_public_document_layout(ra):
+    """공공기관 문서 서식: 표가 쪽 경계에서 나뉘고 제목 행을 되풀이, 쪽 번호, 휴먼명조, 줄머리 내어쓰기, 줄 배치 어림값 없음."""
+    long_rows = [[{"t": "현 행", "hd": 1}, {"t": "개 정 안", "hd": 1}]] + [
+        [{"t": f"제{i}조(목적) 이 규정은 여비에 관한 사항을 정한다.\n① 여비는 실비로 지급한다." * 3},
+         {"t": f"제{i}조(목적) (현행과 같음)\n① 여비는 정액으로 지급한다."}] for i in range(1, 30)]
+    blocks = [{"t": "p", "text": "「여비규정」 일부개정(안)\n\n1. 의결주문\n  가. 붙임과 같이 의결한다.\n\n붙임  1. 개정안 1부.\n      2. 신구조문대비표 1부.  끝.", "titleBold": 1},
+              {"t": "break"}, {"t": "table", "colWidths": [30000, 30000], "rows": long_rows}]
+    z = zipfile.ZipFile(io.BytesIO(ra.build_hwpx(blocks)))
+    sec, head = z.read("Contents/section0.xml").decode(), z.read("Contents/header.xml").decode()
+    minidom.parseString(sec); minidom.parseString(head)
+    tbl = re.search(r"<hp:tbl [^>]*>", sec).group(0)
+    assert 'pageBreak="TABLE"' in tbl and 'repeatHeader="1"' in tbl                 # 쪽 경계에서 나눔 + 제목 행 되풀이
+    assert '<hp:pos treatAsChar="0"' in sec                                            # 글자처럼 취급하면 쪽을 넘기지 못한다
+    assert int(re.search(r'<hp:sz width="(\d+)"', sec).group(1)) <= 48190             # 본문 폭 안으로 줄임
+    assert "<hp:linesegarray>" not in sec                                              # 줄 배치는 한글이 새로
+    assert '<hp:pageNum pos="BOTTOM_CENTER"' in sec                                    # 쪽 번호 - 1 -
+    assert re.search(r'<hp:margin header="2835" footer="2835" gutter="0" left="5669" right="5669" top="5669" bottom="4252"/>', sec)
+    hum = re.search(r'<hh:fontface lang="HANGUL"[^>]*>.*?<hh:font id="(\d+)" face="휴먼명조"', head, re.S).group(1)
+    pid = re.search(r'paraPrIDRef="(\d+)"[^>]*>(?:(?!</hp:p>).)*?<hp:t>가\. 붙임과', sec, re.S).group(1)
+    pp = re.search(r'<hh:paraPr id="%s".*?</hh:paraPr>' % pid, head, re.S).group(0)
+    assert int(re.search(r'<hc:intent value="(-?\d+)"', pp).group(1)) < 0          # 가. 내어쓰기(둘째 줄을 글머리 뒤로)
+    assert int(re.search(r'<hc:left value="(\d+)"', pp).group(1)) > 0               # 앞 빈칸 → 왼쪽 여백
+    cid = re.search(r'charPrIDRef="(\d+)"><hp:t>가\. 붙임과', sec).group(1)
+    assert re.search(r'<hh:charPr id="%s"[^>]*>\s*<hh:fontRef hangul="%s"' % (cid, hum), head)   # 본문 휴먼명조
