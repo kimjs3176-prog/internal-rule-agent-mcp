@@ -151,3 +151,12 @@ def test_no_engine_message_names_the_fix(monkeypatch):
     monkeypatch.setattr(engine.shutil, "which", lambda n: None)
     e = engine.run("agent", {"request": "여비규정 제15조의 일비를 3만원으로 올려줘"})["error"]
     assert "Python 3.12" in e and "다른 도구는 됩니다" in e
+
+
+def test_check_regulation_accepts_source_text(client):
+    """amend_regulation 의 source_text 를 check_regulation 에 그대로 넘겨도 점검한다(전에는 ‘text 를 주세요’ 오류)."""
+    src = "제1조(목적) 이 규정은 출장 여비를 정한다.\n제2조(일비) 일비는 제9조에 따른다."
+    a = call(client, "check_regulation", {"source_text": src, "title": "가상 여비규정", "org": "가상행정진흥원"})
+    b = call(client, "check_regulation", {"text": src, "title": "가상 여비규정", "org": "가상행정진흥원"})
+    assert not a["isError"] and a["structuredContent"] == b["structuredContent"]
+    assert any("제9조" in i["message"] for i in a["structuredContent"]["issues"])

@@ -336,6 +336,16 @@ test('raSubst: 분수·낫표는 통째로, 공통 조사는 따옴표 밖으로
   assert.ok(r2.includes('「공공기관의 운영에 관한 법률」') && r2.includes('시행령」'), r2);
   const r3 = JSON.stringify(c.raSubst('여비는 3만원을 지급한다.', '여비는 5만원을 지급한다.'));
   assert.ok(r3.includes('3만원') && !r3.includes('3만원을'), r3);
+  // 천 단위 쉼표·소수점은 수의 일부: “20”이 아니라 “20,000원”을 바꾼다
+  const r4 = c.raSubst('일비는 1일 20,000원으로 한다.', '일비는 1일 25,000원으로 한다.');
+  assert.equal(r4.a, '20,000원'); assert.equal(r4.b, '25,000원');
+  const r5 = c.raSubst('식비는 1일 25,000원으로 하되, 당일 출장은 20,000원으로 한다.', '식비는 1일 30,000원으로 하되, 당일 출장은 20,000원으로 한다.');
+  assert.equal(r5.a, '25,000원'); assert.equal(r5.b, '30,000원');
+  const r6 = c.raSubst('기준의 1.5배를 지급한다.', '기준의 2.5배를 지급한다.');
+  assert.ok(r6.a.includes('1.5배') && r6.b.includes('2.5배'), JSON.stringify(r6));
+  // 문장 끝 쉼표에서는 그대로 끊는다
+  const r7 = c.raSubst('예산의 범위에서, 지급한다.', '예산의 한도에서, 지급한다.');
+  assert.ok(!r7.a.includes(','), JSON.stringify(r7));
 });
 
 test('raBenchSame: 같은 조 제목 판정', () => {

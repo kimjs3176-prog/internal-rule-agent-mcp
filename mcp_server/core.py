@@ -176,7 +176,8 @@ def t_get_regulation(regulation, articles=None, include_appendix=False, appendic
     return out
 
 
-def t_check_regulation(regulation="", text="", title="", alio_id="", org=None):
+def t_check_regulation(regulation="", text="", title="", alio_id="", org=None, source_text=""):
+    text = text or source_text                          # amend_regulation 과 같은 이름(source_text)으로 줘도 받는다
     if alio_id and not text:
         src, err = resolve_source("amend", {"alio_id": alio_id, "title": title, "org": org})
         if err:
@@ -188,7 +189,7 @@ def t_check_regulation(regulation="", text="", title="", alio_id="", org=None):
         d = _post("/api/regagent/lint", {"text": text, "title": title or "검토안"}, headers={"X-RA-Ctx": hdr} if hdr else None)
     else:
         if not regulation:
-            return {"error": "regulation(내규명)이나 text(조문 글) 중 하나를 주세요."}
+            return {"error": "regulation(내규명)이나 text(조문 글, source_text 도 됨) 중 하나를 주세요."}
         r, cand = _find(regulation)
         if not r:
             return _not_found(regulation, cand)
@@ -905,6 +906,7 @@ TOOLS = [
      "내규 하나(또는 붙여 넣은 조문 글)의 형식 오류를 점검한다: 없는·삭제된 조문 인용, 항·호 번호, 현행 목록에 없는 내규명, 옛 명칭, 표기. "
      "범용: 다른 기관 사규는 text(원문)나 alio_id(알리오 공시 규정)와 org 를 주면 이 서버의 등록 내규와 대조하지 않고 그 규정만 점검한다.",
      {"type": "object", "properties": {"regulation": {"type": "string", "description": "점검할 내규명"}, "text": {"type": "string", "description": "또는 점검할 조문 글(제1조(목적) …)"},
+                                       "source_text": {"type": "string", "description": "text 와 같다(amend_regulation 과 같은 이름으로 줄 때)"},
                                        "title": {"type": "string", "description": "text 의 내규명(선택)"},
                                        "alio_id": {"type": "string", "description": "또는 알리오 공시 규정(alio_search_regulations 결과의 id)"}, **_ORG}}),
     ("health_check", "내규 건강검진", t_health_check, "기관 내규 전체를 진단해 평균 점수·등급 분포·문제가 있는 내규 수와 점수가 낮은 내규(이유 포함)를 돌려준다.",
