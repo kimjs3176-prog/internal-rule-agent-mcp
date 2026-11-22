@@ -14,14 +14,12 @@ try:
     def _xml_fromstring(s): return _DET.fromstring(s)
 except Exception:
     def _xml_fromstring(s): return ET.fromstring(s)
-import urllib3
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import requests as req_lib
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 app.json.ensure_ascii = False                 # 한글을 \uXXXX 로 늘리지 않는다(응답 크기 1/2~1/3)
@@ -108,10 +106,29 @@ def _make_session(verify: bool = True, retries: int = 4) -> req_lib.Session:
 
 # 기본 세션은 TLS 인증서를 검증한다(GitHub 토큰·Google API 키 전송에 사용).
 _SESSION = _make_session()
-# 법제처(law.go.kr)는 인증서 체인 문제가 있어 이 호출에만 검증을 끈다.
-# 민감한 토큰을 보내는 GitHub/Google 세션과 분리해 노출을 막는다.
+# 법제처(law.go.kr)는 중간 인증서(GlobalSign RSA OV SSL CA 2018)를 보내지 않아 기본 검증이 실패한다.
+# 검증을 끄지 않고, certifi 묶음에 그 중간 인증서(certs/law_go_kr_intermediate.pem)를 더한 묶음으로 검증한다.
+_LAW_INTERMEDIATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "law_go_kr_intermediate.pem")
+
+
+def _law_ca_bundle():
+    """certifi(또는 REQUESTS_CA_BUNDLE·SSL_CERT_FILE — 사내망 TLS 검사 인증서) + 법제처 중간 인증서 → 임시 묶음 파일 경로."""
+    import certifi
+    import tempfile
+    srcs = [certifi.where()] + [os.environ[k] for k in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
+                                 if os.environ.get(k) and os.path.isfile(os.environ[k])] + [_LAW_INTERMEDIATE]
+    parts = []
+    for f in dict.fromkeys(srcs):
+        with open(f, encoding="utf-8", errors="ignore") as fh:
+            parts.append(fh.read().strip())
+    fd, path = tempfile.mkstemp(prefix="law_ca_", suffix=".pem")      # 서버리스(Vercel)도 /tmp 는 쓸 수 있다
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(parts) + "\n")
+    return path
+
+
 # 재시도는 _law_get_xml 한 곳에서만 한다(겹치면 법제처 장애 때 수십 초씩 붙잡힌다).
-_LAW_SESSION = _make_session(verify=False, retries=0)
+_LAW_SESSION = _make_session(verify=_law_ca_bundle(), retries=0)
 
 
 # ── 공통 HTTP 헬퍼 ────────────────────────────────────────────────────────────
