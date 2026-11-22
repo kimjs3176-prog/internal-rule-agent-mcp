@@ -75,8 +75,12 @@ def _f(out, line, rule, level, match, message, suggest=""):
 _DATE_RE = re.compile(r"(?<![\d.])((?:19|20)\d{2})\s*([./-])\s*(\d{1,2})\s*\2\s*(\d{1,2})(\.?)(?![\d])")
 _TILDE_RE = re.compile(r"\s+[~∼〜～]\s*|\s*[~∼〜～]\s+|[~〜～]")
 _TIME_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])")
-_MONEY_RE = re.compile(r"(?<![\d,.])(금\s*)?(\d{4,16})\s*원")      # 16자리(경 단위)까지만 읽는다
-_MONEY_COMMA_RE = re.compile(r"(?<![\d,.])(금\s*)?(\d{1,3}(?:,\d{3})+)\s*원(?!\s*\(\s*금)")
+# ‘원’ 뒤가 한글이면 조사·단위(원을·원권·원 이하…)일 때만 금액 — “2026 원장은”·“1000 원칙”은 금액이 아니다
+_WON = (r"원(?:(?![가-힣])|(?=(?:을|를|은|는|이|가|의|에|에서|에게|으로|로|과|와|까지|부터|씩|이하|이상|미만|초과"
+        r"|도|만|권|정도|당|짜리|이고|이며|이다|으로서|으로써)(?![가-힣])))")
+# “계약금 30000원”의 ‘금’은 낱말의 끝 — 금액 앞 ‘금’은 앞에 한글이 없을 때만 함께 잡는다
+_MONEY_RE = re.compile(r"(?<![\d,.])((?<![가-힣])금\s*)?(\d{4,16})\s*" + _WON)      # 16자리(경 단위)까지만 읽는다
+_MONEY_COMMA_RE = re.compile(r"(?<![\d,.])((?<![가-힣])금\s*)?(\d{1,3}(?:,\d{3})+)\s*" + _WON + r"(?!\s*\(\s*금)")
 _COLON_RE = re.compile(r"([가-힣A-Za-z)」])(\s+):|([가-힣A-Za-z)」]):(?=[^\s/])")
 _DASH_RE = re.compile(r"[—–―]")
 _QUOTE_RE = re.compile(r"(?<![A-Za-z가-힣])'([^'\n]{1,30})'")
@@ -137,7 +141,7 @@ def check(text: str, kind: str = "doc") -> list:
         for m in _MONEY_RE.finditer(ln):            # 앞의 “금 ”까지 잡아야 고쳐 쓴 글이 “금 금…”이 되지 않는다
             v = int(m.group(2))
             _f(out, n, "MONEY", "warn", m.group(0), "금액은 세 자리마다 쉼표를 찍고 한글을 함께 씁니다.", f"금{v:,}원(금{hangul_amount(v)}원)")
-        for m in re.finditer(r"금\s+(\d{1,3}(?:,\d{3})+)\s*원\s*\(\s*금\s*([가-힣]+)\s*원?\s*\)|금(\d{1,3}(?:,\d{3})+)원\s+\(\s*금([가-힣]+)원\s*\)", ln):
+        for m in re.finditer(r"(?<![가-힣])금\s+(\d{1,3}(?:,\d{3})+)\s*원\s*\(\s*금\s*([가-힣]+)\s*원?\s*\)|(?<![가-힣])금(\d{1,3}(?:,\d{3})+)원\s+\(\s*금([가-힣]+)원\s*\)", ln):
             v = int((m.group(1) or m.group(3)).replace(",", ""))
             _f(out, n, "MONEY", "warn", m.group(0), "금액 표기는 띄우지 않고 붙여 씁니다.", f"금{v:,}원(금{hangul_amount(v)}원)")
         if kind == "doc":

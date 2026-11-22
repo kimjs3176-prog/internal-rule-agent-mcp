@@ -49,9 +49,14 @@ def main(argv=None):
         norm = lambda x: os.path.normcase(os.path.realpath(os.path.normpath(os.path.abspath(x))))
         reg_dir = os.path.normpath(os.path.abspath(ri.REG_DIR))      # 끝 “/”(Windows의 대체 구분자 포함)를 없앤다 — 백업 경로가 폴더 안쪽이 되지 않게
         same = norm(reg_dir) == norm(os.path.join(ri.BASE_DIR, "regulations"))
+        # REG_DIR 만 바꾸고 REG_MANIFEST 를 빠뜨려도 저장소 기본 매니페스트를 덮어쓰지 않게
+        same = same or norm(ri.REG_MANIFEST_PATH) == norm(os.path.join(ri.BASE_DIR, "regulations_manifest.json"))
         if same and not a.force:
-            n = len(ri.load_manifest())
-            print(f"멈춤: 저장소의 기본 내규 데이터({n}건, {ri.REG_DIR})를 비우려 합니다.\n"
+            try:
+                n = len(ri.load_manifest())
+            except ValueError:
+                n = "?"
+            print(f"멈춤: 저장소의 기본 내규 데이터({n}건, {ri.REG_DIR} · {ri.REG_MANIFEST_PATH})를 비우려 합니다.\n"
                   "  다른 기관 시험이면 REG_DIR·REG_MANIFEST 환경변수로 별도 폴더를 지정하세요(구동안내서 ‘모의데이터 안내’).\n"
                   "  Windows PowerShell: $env:REG_DIR=\"po\\regulations\"; $env:REG_MANIFEST=\"po\\manifest.json\"\n"
                   "  정말 기본 데이터를 바꾸려면 --force 를 함께 주세요(기존 데이터는 백업 폴더로 옮깁니다).")
@@ -72,10 +77,29 @@ def main(argv=None):
         os.makedirs(ri.REG_DIR, exist_ok=True)
         man = []
     else:
-        man = ri.load_manifest()
+        try:
+            man = ri.load_manifest()
+        except ValueError as e:                      # 깨진 매니페스트를 빈 목록으로 보고 덮어쓰지 않는다
+            print(f"멈춤: {e}")
+            return 3
     ok = warn = fail = 0
+    groups = {}                                       # 같은 규정명(띄어쓰기·대소문자만 다름)이 둘 이상이면 어느 것도 고르지 않고 알린다
+    for f in files:
+        groups.setdefault(ri.norm_key(split_name(f)[0]), []).append(f)
+    for fs in groups.values():
+        if len(fs) > 1:
+            print(f"  ✗ 같은 규정명 파일이 {len(fs)}개입니다 — 하나만 남기고 다시 실행하세요: " + ", ".join(fs))
+            fail += len(fs)
     for f in files:
         title, rev = split_name(f)
+        if len(groups[ri.norm_key(title)]) > 1:
+            continue
+        try:
+            slug = ri.slug_for(man, title)
+        except ValueError as e:
+            print(f"  ✗ {f}: {e}")
+            fail += 1
+            continue
         with open(os.path.join(a.folder, f), "rb") as fh:
             raw = fh.read()
         try:
@@ -84,7 +108,6 @@ def main(argv=None):
             print(f"  ✗ {f}: {e}")
             fail += 1
             continue
-        slug = ri.reg_slug(title)
         if not a.dry_run:
             ri.write_reg(slug, res["view_html"], res["text"], f, raw)
             man = ri.upsert(man, {"title": title, "revision": rev,

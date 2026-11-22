@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import logging
 import os
 import re
 
@@ -131,11 +132,20 @@ def split_articles(text: str, title: str = ""):
 
 
 def load_manifest():
+    """검색용(읽기 전용) 매니페스트. 없으면 빈 목록. 깨졌으면 모든 요청이 멈추지 않게 기록만 남기고 빈 목록 —
+    덮어쓰는 쪽(reg_import.load_manifest)은 깨진 파일에서 멈춘다."""
     try:
         with open(MANIFEST, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+            man = json.load(f)
+    except FileNotFoundError:
         return []
+    except (OSError, ValueError) as e:
+        logging.getLogger(__name__).error("내규 매니페스트를 읽을 수 없습니다(%s): %s", MANIFEST, e)
+        return []
+    if not isinstance(man, list):
+        logging.getLogger(__name__).error("내규 매니페스트 형식이 잘못되었습니다(%s): 목록이 아님", MANIFEST)
+        return []
+    return man
 
 
 def iter_chunks(slugs=None, max_chars: int = 1800):
