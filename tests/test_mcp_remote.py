@@ -131,3 +131,27 @@ def test_search_fetch_and_read_tools(client):
     assert any(x["regulation"] == "여비규정" for x in d["results"])                               # 붙은 말로 없으면 낱말별로
     r = call(client, "get_regulation", {})
     assert r["isError"] and "regulation" in r["content"][0]["text"]                                # 필수 입력이 빠지면 무엇이 빠졌는지
+
+
+def test_rate_limit_per_ip(client, monkeypatch):
+    """같은 주소에서 1분에 MCP_PER_MIN 번을 넘으면 429(Retry-After), 다른 주소는 그대로. 토큰 확인보다 먼저 센다."""
+    from mcp_server import remote
+    remote._RATE.clear()
+    monkeypatch.setenv("MCP_PER_MIN", "10")
+    monkeypatch.setenv("VERCEL", "1")                          # Vercel 앞단이 채운 X-Forwarded-For 로 센다
+    a, b = {"X-Forwarded-For": "203.0.113.7"}, {"X-Forwarded-For": "198.51.100.9"}
+    codes = [rpc(client, "ping", headers=a).status_code for _ in range(12)]
+    assert codes[:10] == [200] * 10 and codes[10:] == [429, 429]
+    r = rpc(client, "ping", headers=a)
+    assert r.status_code == 429 and 1 <= int(r.headers["Retry-After"]) <= 60 and r.get_json()["error"]["code"] == -32000
+    assert rpc(client, "ping", headers=b).status_code == 200
+    assert client.get("/api/mcp/doc/hwpx/x", headers=a).status_code == 429     # 문서 내려받기 링크도 같은 상한
+    assert client.get("/mcp", headers={**a, "Accept": "text/html"}).status_code == 200   # 브라우저 안내는 세지 않음
+    monkeypatch.setenv("MCP_TOKEN", "s3cret")
+    assert rpc(client, "ping", headers=a).status_code == 429                  # 틀린 토큰도 상한에 걸린다(대입 방지)
+    monkeypatch.delenv("VERCEL")                                              # Vercel 밖: 꾸민 X-Forwarded-For 는 믿지 않는다
+    monkeypatch.delenv("MCP_TOKEN")
+    remote._RATE.clear()
+    codes = [rpc(client, "ping", headers={"X-Forwarded-For": f"10.0.0.{i}"}).status_code for i in range(12)]
+    assert codes[10:] == [429, 429]
+    remote._RATE.clear()

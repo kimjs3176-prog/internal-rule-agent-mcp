@@ -9,11 +9,15 @@ claude.ai·ChatGPT 의 커넥터, Claude Code(--transport http), VS Code·Cursor
       MCP_TOKEN=…             설정하면 Authorization: Bearer <값> 이 있어야 쓴다(사내 배포용). 내려받기 링크도 이 값으로 서명한다.
       MCP_ALLOWED_ORIGINS=…   브라우저에서 직접 부를 때 허용할 출처(쉼표 구분). ALLOWED_ORIGINS(화면 CORS)·MCP_PUBLIC_URL 은 늘 허용
       MCP_PUBLIC_URL=…        링크에 쓸 공개 주소(프록시 뒤라 주소가 다르게 보일 때)
+      MCP_PER_MIN=120         남용 방지: 같은 접속 주소(IP)에서 1분에 받는 호출 수(MCP 호출·문서 내려받기). 넘으면 429
+      MCP_TRUST_PROXY=1       Vercel 밖에서 프록시(nginx 등) 뒤에 둘 때만: X-Forwarded-For 의 첫 주소를 접속 주소로 센다
 """
 import hmac
 import json
 import os
 import re
+import threading
+import time
 from urllib.parse import quote, urlsplit
 
 from flask import Blueprint, Response, request
@@ -89,6 +93,47 @@ def _cors(resp, origin):
     return resp
 
 
+# ── 남용 방지: 접속 주소(IP)별 분당 호출 상한 ──────────────────────────────────
+# 인스턴스 메모리에만 센다(주소는 저장하지 않고 이 판단에만 쓴다). 서버리스는 인스턴스마다 따로 세므로 대략의 상한이다.
+# claude.ai·ChatGPT 커넥터는 그 회사 서버에서 부르므로, 그 사용자들은 몇 개의 주소를 함께 쓴다 — 상한을 넉넉히 둔다.
+_RATE: dict = {}
+_RATE_LOCK = threading.Lock()
+
+
+def _per_min() -> int:
+    try:
+        return max(10, int(os.environ.get("MCP_PER_MIN") or 120))
+    except ValueError:
+        return 120
+
+
+def _client_ip() -> str:
+    # Vercel 은 앞단에서 X-Forwarded-For 를 실제 접속 주소로 채운다. 그 밖에서는 요청자가 이 머리글을 꾸밀 수 있으므로
+    # 프록시 뒤라고 밝힌 때(MCP_TRUST_PROXY=1)만 믿고, 아니면 실제 연결 주소(remote_addr)를 쓴다.
+    if os.environ.get("VERCEL") or (os.environ.get("MCP_TRUST_PROXY") or "").strip() == "1":
+        v = (request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or "").split(",")[0].strip()
+        if v:
+            return v
+    return request.remote_addr or ""
+
+
+def rate_limited() -> bool:
+    """이번 1분 동안 이 주소의 호출이 상한을 넘었는가(세면서 판단)."""
+    now = int(time.time() // 60)
+    k = (_client_ip(), now)
+    with _RATE_LOCK:
+        n = _RATE.get(k, 0) + 1
+        _RATE[k] = n
+        if len(_RATE) > 5000:
+            for kk in [x for x in _RATE if x[1] < now]:
+                _RATE.pop(kk, None)
+    return n > _per_min()
+
+
+def _retry_after() -> str:
+    return str(max(1, 60 - int(time.time()) % 60))
+
+
 def _rpc_error(status, code, message, origin="", extra=None):
     r = Response(_dump({"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": message}}),
                  status=status, mimetype="application/json")
@@ -114,6 +159,9 @@ def mcp_endpoint():
         return _cors(r, origin)
     if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):   # 브라우저로 주소를 열면 연결 안내
         return _guide_page()
+    # 호출 상한은 토큰 확인보다 먼저 센다 — 틀린 토큰 요청도 세어 MCP_TOKEN 무차별 대입을 늦춘다
+    if request.method == "POST" and rate_limited():
+        return _rpc_error(429, -32000, "요청이 너무 많습니다. 잠시 후 다시 시도하세요.", origin, {"Retry-After": _retry_after()})
     if not _auth_ok():
         return _rpc_error(401, -32001, "Unauthorized: Authorization: Bearer <MCP_TOKEN> 이 필요합니다.", origin,
                           {"WWW-Authenticate": 'Bearer realm="reg-agent"'})
@@ -158,6 +206,10 @@ def mcp_doc(fmt, token):
         return Response("Not Found", status=404)
     if fmt not in ("hwpx", "docx"):
         return Response("형식은 hwpx·docx 중 하나입니다.", status=404, mimetype="text/plain; charset=utf-8")
+    if rate_limited():                                   # 링크를 열면 엔진을 다시 돌리므로 같은 상한으로 센다
+        r = Response("요청이 너무 많습니다. 잠시 후 다시 시도하세요.", status=429, mimetype="text/plain; charset=utf-8")
+        r.headers["Retry-After"] = _retry_after()
+        return r
     try:
         op, inp = core.read_token(token)
     except PermissionError as e:
