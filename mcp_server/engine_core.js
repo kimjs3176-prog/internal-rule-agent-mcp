@@ -42,11 +42,20 @@
   const alioId = h => [h.orgId, h.idx, h.category || '', h.table || 'COMM_RULE', h.idxName || 'RULE_NO', String(h.mod || '').slice(0, 40)].join('|');
 
   // 문서 세트(심의안건서·개정문·대비표·이유서 등)의 내용. 한글·Word 파일은 바깥 실행기가 서버 API(/api/regagent/hwpx|docx)로 만든다
+  // MCP 로는 채울 수 없어 빈 서식으로만 나오는 문서는 세트에서 뺀다(심의안건서의 ‘붙임’ 목록도 함께 맞춘다)
+  //  · 의견수렴 결과: 제출 의견을 받는 입력이 MCP 에 없다 → 의견이 없으면 ‘○○(해당 여부 확인)·제출된 의견 없음’뿐
+  //  · 심의 사전검토 의견서: 검토 항목이 하나도 없으면(예: 다른 기관 원문 — 우리 기관 심의기준과 대조하지 않음) 제목과 ‘끝.’뿐
+  const hasOpinion = mode => raArr(raSub_(mode).opinions).some(o => o && ['who', 'what', 'why'].some(k => String(o[k] || '').trim()));
+  const hasReviewItems = B => /\n\s*1\.\s/.test(String(B.review || ''));
   function docPayload(mode) {
-    const B = raDocsBuild(mode);
-    const picks = raPicks(mode).filter(k => k !== 'review' || RA[mode].review);
-    const names = Object.fromEntries(RA_DOCS[mode]);
-    return { filename: `${B.c.title}_${B.c.word}안`, blocks: raDocBlocks(B, picks), documents: picks.map(k => names[k] || k) };
+    const S = RA[mode], names = Object.fromEntries(RA_DOCS[mode]);
+    const picks = raPicks(mode).filter(k => k !== 'review' || S.review);
+    let B = raDocsBuild(mode);
+    const empty = picks.filter(k => (k === 'opinion' && !hasOpinion(mode)) || (k === 'review' && !hasReviewItems(B)));
+    const keep = picks.filter(k => !empty.includes(k));
+    if (empty.length) { S.picks = keep; S.picksV2 = 1; B = raDocsBuild(mode); }      // 붙임 목록을 남은 문서로 다시 만든다
+    return { filename: `${B.c.title}_${B.c.word}안`, blocks: raDocBlocks(B, keep), documents: keep.map(k => names[k] || k),
+      omitted: empty.map(k => names[k] || k) };
   }
 
   async function opAgent(inp, RA) {
