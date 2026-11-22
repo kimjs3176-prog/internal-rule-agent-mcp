@@ -41,18 +41,6 @@ def test_ai_no_change_message_points_to_fallback():
     assert "AI가 수정안을 만들지 못했습니다. 개정 의도를 구체적으로" not in src
 
 
-def test_ai_modal_fits_short_screens_and_guards_compat():
-    # UX-4: 낮은 화면에서도 저장 단추가 보인다 / UX-9: 서버에 사내 모델 주소가 없으면 저장하지 않는다
-    html = (ROOT / "index.html").read_text(encoding="utf-8")
-    modal = html[html.index(".modal{"):html.index("}", html.index(".modal{"))]
-    assert "max-height:calc(100dvh" in modal and "overflow-y:auto" in modal
-    acts = html[html.index(".m-acts{"):html.index("}", html.index(".m-acts{"))]
-    assert "position:sticky" in acts
-    save = html[html.index("function saveAiSettings"):]
-    assert save.index("_compatOk===false") < save.index("localStorage.setItem('aiSettings'")
-    assert "_compatOk=('ready' in d)?!!d.ready:null" in html     # 조회 실패(서버 꺼짐 등)는 막지 않는다
-
-
 def test_docs_match_screen_names():
     # ENA-15·UX-13: 구동안내서 제정 단계 이름과 README 내규 등록 단추 위치가 화면과 같다
     guide = (ROOT / "docs" / "contest" / "구동안내서.md").read_text(encoding="utf-8")
@@ -61,4 +49,4 @@ def test_docs_match_screen_names():
     for t in ("조문 초안", "점검·검토", "문서 받기"):
         assert f"{{t:'{t}'" in js
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "📤 내규 등록" not in readme and "왼쪽 메뉴 맨 아래 **내규 등록**" in readme
+    assert "📤 내규 등록" not in readme and "내규똑똑(`/upload`)" in readme     # 화면 등록은 내규똑똑으로 옮겼다

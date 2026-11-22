@@ -1,7 +1,7 @@
 """규정 제·개정 에이전트 — MCP(Model Context Protocol) 서버(표준 입출력).
 
 Claude·ChatGPT·Gemini·사내 모델 등 MCP 를 지원하는 AI 도우미가 이 에이전트를 “도구”로 쓰게 한다.
-웹 화면과 같은 엔진·같은 내규 데이터를 쓰며, 별도 패키지 없이 표준 입출력(stdio) JSON-RPC 로 동작한다.
+내규똑똑 에이전트 화면과 같은 엔진·같은 내규 데이터를 쓰며, 별도 패키지 없이 표준 입출력(stdio) JSON-RPC 로 동작한다.
 배포한 웹 서비스의 /mcp 주소로 원격 연결도 된다(mcp_server/remote.py, docs/MCP.md).
 
 실행: python mcp_server/server.py        (AI 도우미의 MCP 설정에 이 명령을 등록 — docs/MCP.md)

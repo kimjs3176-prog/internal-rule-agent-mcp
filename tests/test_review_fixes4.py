@@ -1,9 +1,6 @@
 """기능 점검 5차: 자문 검색어(조사·일상어·함께 다룬 조문), 중복 등록, 법령 약칭, 제정 골격 문장."""
 import json
 import os
-import subprocess
-import sys
-import textwrap
 
 import reg_agent as ra
 
@@ -78,40 +75,6 @@ def test_template_enact_clause_sentences():
     assert bodies["복무관리"].startswith("근무상황의 기록은")
     d = ra.template_enact({"title": "재택근무 운영지침", "purpose": "재택근무", "contents": "예외: 직원은 상급자의 승인을 받은 경우"})
     assert "경우하여야" not in d["articles"][3]["body"]
-
-
-UPLOAD = textwrap.dedent(r'''
-    import io, json
-    import api_server
-    c = api_server.app.test_client()
-    body = "직원창업규칙\n\n제1조(목적) 이 규칙은 직원의 창업 활동 보장과 지원에 필요한 사항을 정함을 목적으로 한다.\n제2조(신청) 창업직원은 신청서를 제출하여야 한다."
-
-    def up(title, text, **extra):
-        data = {"title": title, "file": (io.BytesIO(text.encode("utf-8")), "a.txt"), **extra}
-        r = c.post("/api/regs/upload", data=data, content_type="multipart/form-data", environ_base={"REMOTE_ADDR": "127.0.0.1"})
-        return r.status_code, (r.get_json(silent=True) or {})
-
-    out = {"first": up("직원창업규칙", body)[0]}
-    out["typo"] = up("직업창업규칙", body)
-    out["typo_ok"] = up("직업창업규칙", body, new_ok="1")[0]
-    print(json.dumps(out, ensure_ascii=False))
-''')
-
-
-def test_upload_guards_misnamed_duplicate(tmp_path):
-    reg = tmp_path / "regulations"
-    reg.mkdir()
-    man = tmp_path / "manifest.json"
-    man.write_text("[]", encoding="utf-8")
-    env = {**os.environ, "REG_DIR": str(reg), "REG_MANIFEST": str(man), "REG_UPLOAD_TOKEN": "",
-           "GITHUB_TOKEN": "", "GITHUB_REPO": "", "REG_UPLOAD_ALLOW_ANON": ""}
-    p = subprocess.run([sys.executable, "-c", UPLOAD], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
-    assert p.returncode == 0, p.stderr[-2000:]
-    out = json.loads(p.stdout.strip().splitlines()[-1])
-    assert out["first"] == 200
-    code, data = out["typo"]
-    assert code == 409 and data["similar"] == "직원창업규칙"
-    assert out["typo_ok"] == 200                             # 새 규정이 맞다고 확인하면 등록
 
 
 # ── AI 산출물의 사람 검토: 인용 검증 · 작업 실적 대장 ─────────────────────────

@@ -232,6 +232,13 @@ def mcp_doc(fmt, token):
     return r
 
 
+def guide_or_404():
+    """첫 주소(/) — 이 저장소에는 웹 화면이 없어 MCP 연결 안내를 보인다. 원격 MCP 를 껐으면(MCP_HTTP=off) 404."""
+    if not enabled():
+        return Response("Not Found", status=404, mimetype="text/plain; charset=utf-8")
+    return _guide_page()
+
+
 def _guide_page():
     """브라우저로 MCP 주소를 열었을 때의 안내 — 이 주소를 AI 도우미에 넣는 방법과 도구 목록. MCP 클라이언트는 POST 라 영향이 없다."""
     from html import escape as _h

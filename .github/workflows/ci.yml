@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: 프론트엔드 문법 검사
+      - name: 엔진 문법 검사
         run: node --check assets/reg_agent.js
-      - name: 프론트엔드 로직 테스트
+      - name: 엔진 로직 테스트
         run: node --test tests/js/*.test.mjs

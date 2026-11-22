@@ -60,13 +60,6 @@ def test_bulk_includes_appendix(client):
     assert d["reg_count"] == 25 and d["total"] == 35
 
 
-def test_narrow_screen_menu_is_one_row():
-    # UX-1: 좁은 화면에서 메뉴 묶음을 풀어 한 줄로(묶음 머리·소제목 숨김, 접힌 묶음도 보임)
-    css = open(os.path.join(os.path.dirname(__file__), "..", "assets", "reg_agent.css"), encoding="utf-8").read()
-    m = re.search(r"@media \(max-width:1023px\)\{\s*\.ra-nav \.ra-nav-g,\.ra-nav \.ra-nav-gb,\.ra-nav \.ra-nav-g\.fold \.ra-nav-gb\{display:contents;\}", css)
-    assert m and ".ra-nav .ra-nav-gh,.ra-nav .ra-nav-sub{display:none;}" in css
-
-
 def test_review_regressions_round2(ra, client):
     import time
     # 시행규칙 제N조는 법령 — 내규 고치기로 보지 않는다
