@@ -1740,6 +1740,157 @@ def split_appendix(text: str) -> list:
     return [{"id": b["id"], "head": b["head"], "body": "\n".join(b["lines"])} for b in out]
 
 
+# ── 별표의 표 모양 ─────────────────────────────────────────────────────────────
+# 내규 원문 글(text.txt·html_to_text)은 표를 칸마다 한 줄로 풀어 둔다. 개정문 별지·대비표에서 표로 다시 그리려고
+# 원본 HTML 의 표에서 칸마다 몇 줄인지(n)와 병합(cs·rs)만 뽑아 둔다. 글은 늘 원문 글의 줄을 그대로 쓰므로,
+# 뽑은 모양을 펼친 줄이 그 별표의 원문 줄과 하나하나 같을 때만 쓴다(다르면 모양 없음 → 지금처럼 글로).
+_TBL_MARK = re.compile(r"@@RA_TBL(\d+)@@")
+
+
+def _leaf_tables(h: str) -> list:
+    """안에 다른 표가 없는 표의 (시작, 끝) 위치."""
+    out, stack = [], []
+    for m in re.finditer(r"<\s*(/?)\s*table\b[^>]*>", h, re.I):
+        if not m.group(1):
+            stack.append([m.start(), False])
+        elif stack:
+            s0, nested = stack.pop()
+            if not nested:
+                out.append((s0, m.end()))
+            if stack:
+                stack[-1][1] = True
+    return out
+
+
+def _cell_lines(fragment: str) -> list:
+    return [ln.strip() for ln in reg_chunks.html_to_text(fragment).split("\n") if ln.strip()]
+
+
+def _table_cells(t: str) -> list:
+    """표 HTML → 행 목록 [[{n: 줄 수, cs, rs, lines}]]."""
+    rows = []
+    for tr in re.findall(r"<\s*tr\b.*?(?=<\s*tr\b|<\s*/\s*table)", t, re.I | re.S):
+        cells = []
+        for m in re.finditer(r"<\s*(?:td|th)\b([^>]*)>(.*?)(?=<\s*/\s*(?:td|th)\s*>|<\s*(?:td|th)\b|<\s*/\s*tr)", tr, re.I | re.S):
+            a = m.group(1)
+            cs = re.search(r'colspan\s*=\s*["\']?(\d+)', a, re.I)
+            rs = re.search(r'rowspan\s*=\s*["\']?(\d+)', a, re.I)
+            ln = _cell_lines(m.group(2))
+            cells.append({"n": len(ln), "cs": max(1, min(20, int(cs.group(1)) if cs else 1)),
+                          "rs": max(1, min(200, int(rs.group(1)) if rs else 1)), "lines": ln})
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def table_grid(rows: list):
+    """병합을 반영해 칸의 열 위치를 매긴다 → (열 위치 [[col]], 열 수) · 행마다 열 수가 다르면 (None, 0)."""
+    occ, cols, width = set(), [], []
+    for r, row in enumerate(rows):
+        c, rc = 0, []
+        for cell in row:
+            while (r, c) in occ:
+                c += 1
+            rc.append(c)
+            for dr in range(int(cell.get("rs") or 1)):
+                for dc in range(int(cell.get("cs") or 1)):
+                    occ.add((r + dr, c + dc))
+            c += int(cell.get("cs") or 1)
+        cols.append(rc)
+        width.append(max([cc + 1 for (rr, cc) in occ if rr == r] or [0]))
+    if not rows or len(set(width)) != 1 or any(rr >= len(rows) for (rr, _) in occ):
+        return None, 0
+    return cols, width[0]
+
+
+def _norm_line(s: str) -> str:
+    return re.sub(r"[·ㆍ․・‧∙]", "·", re.sub(r"\s+", "", s or ""))
+
+
+_LAYOUT_CACHE: dict = {}
+
+
+def appendix_layouts(slug: str) -> dict:
+    """{별표 id: [{"lines": n} | {"table": [[{n, cs, rs}]]}]} — 원문 줄과 맞는 별표만. 원본 HTML 이 없거나 못 읽으면 {}."""
+    path = os.path.join(reg_chunks.REG_DIR, slug, "index.html")
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return {}
+    if key in _LAYOUT_CACHE:
+        return _LAYOUT_CACHE[key]
+    out = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            h = f.read()
+        tabs, parts, last = {}, [], 0
+        for k, (s0, e0) in enumerate(_leaf_tables(h)):
+            rows = _table_cells(h[s0:e0])
+            _, ncol = table_grid(rows)
+            # 맨 위·맨 아래의 한 칸짜리 행(별표 머리·표 제목·단위·비고)은 표가 아니라 글 줄로 둔다
+            one = lambda r: len(r) == 1 and (ncol <= 1 or r[0]["cs"] >= ncol) and r[0]["rs"] == 1
+            i, j = 0, len(rows)
+            while i < j and one(rows[i]):
+                i += 1
+            while j > i and one(rows[j - 1]):
+                j -= 1
+            pre = [ln for r in rows[:i] for ln in r[0]["lines"]]
+            post = [ln for r in rows[j:] for ln in r[0]["lines"]]
+            body = rows[i:j]
+            esc = lambda L: "".join(f"<p>{_html_esc(x)}</p>" for x in L)
+            parts.append(h[last:s0])
+            if body and ncol > 1:
+                tabs[k] = body
+                parts.append(esc(pre) + f"<p>@@RA_TBL{k}@@</p>" + esc(post))
+            else:
+                parts.append(h[s0:e0])
+            last = e0
+        parts.append(h[last:])
+        p = parse_text(reg_chunks.html_to_text("".join(parts)))
+        actual = {b["id"]: b for b in split_appendix(_reg_appendix(slug))}
+        for b in split_appendix(p["appendix"]):
+            segs, ok = [], True
+            for ln in b["body"].split("\n"):
+                m = _TBL_MARK.fullmatch(ln.strip())
+                if m:
+                    segs.append({"table": tabs[int(m.group(1))]})
+                elif _TBL_MARK.search(ln):
+                    ok = False
+                    break
+                elif segs and "lines" in segs[-1]:
+                    segs[-1]["lines"].append(ln)
+                else:
+                    segs.append({"lines": [ln]})
+            a = actual.get(b["id"])
+            if not ok or not a or not any("table" in x for x in segs):
+                continue
+            exp = [_norm_line(x) for sg in segs for x in (sg["lines"] if "lines" in sg else
+                   [ln for r in sg["table"] for c in r for ln in c["lines"]])]
+            if [x for x in exp if x] != [x for x in (_norm_line(y) for y in a["body"].split("\n")) if x]:
+                continue
+            if any(table_grid(sg["table"])[0] is None for sg in segs if "table" in sg):
+                continue
+            out[b["id"]] = [{"lines": len([x for x in sg["lines"] if _norm_line(x)])} if "lines" in sg else
+                            {"table": [[{"n": c["n"], "cs": c["cs"], "rs": c["rs"]} for c in r] for r in sg["table"]]}
+                            for sg in segs]
+    except Exception as e:                                       # 모양을 못 뽑으면 글로 둔다(개정·문서는 그대로 됨)
+        print(f"[layout] {slug}: {e}")
+        out = {}
+    if len(_LAYOUT_CACHE) > 400:
+        _LAYOUT_CACHE.clear()
+    _LAYOUT_CACHE[key] = out
+    return out
+
+
+def _reg_appendix(slug: str) -> str:
+    r = next((x for x in all_regs() if x["slug"] == slug), None)
+    return (r or {}).get("appendix") or parse_text(_reg_raw_text(slug))["appendix"]
+
+
+def _html_esc(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 @bp.route("/api/regagent/articles")
 def ra_articles():
     r = find_reg(request.args.get("slug", ""), request.args.get("title", ""))
@@ -1749,7 +1900,19 @@ def ra_articles():
                     "category": r["category"], "revision": r["revision"],
                     "chapters": r["chapters"], "articles": r["articles"],
                     "addenda_tail": r["addenda"][-1500:], "has_appendix": bool(r["appendix"]),
-                    "appendix": split_appendix(r["appendix"])})
+                    "appendix": _with_layouts(r)})
+
+
+def _with_layouts(r: dict) -> list:
+    """별표 블록에 표 모양(layout)을 붙인다 — 원문 줄과 맞는 것만(붙여 넣은 원문·HTML 없는 내규는 없음)."""
+    blocks = split_appendix(r["appendix"])
+    if r.get("pasted") or not r.get("slug"):
+        return blocks
+    lay = appendix_layouts(r["slug"])
+    for b in blocks:
+        if b["id"] in lay:
+            b["layout"] = lay[b["id"]]
+    return blocks
 
 
 @bp.route("/api/regagent/similar", methods=["POST"])
@@ -2293,7 +2456,7 @@ def _hx_line(st: _HxStyle, ln: str, title=False, page_break=False, after_title=F
     return _hx_p(pid, [(st.char(bold=head), text)], page_break)
 
 
-def _cell(st, c, col, row, cspan, width, bf, hdr=False, vcenter=False, law=False):
+def _cell(st, c, col, row, cspan, width, bf, hdr=False, vcenter=False, law=False, rspan=1):
     lines = _seg_lines(c)
     em = _HX["cell"]
     pid = st.para("CENTER" if c.get("hd") else "JUSTIFY", ls=_HX["cell_ls"])
@@ -2326,7 +2489,7 @@ def _cell(st, c, col, row, cspan, width, bf, hdr=False, vcenter=False, law=False
             f'<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="{va}" '
             f'linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">'
             f'{"".join(paras)}</hp:subList><hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
-            f'<hp:cellSpan colSpan="{cspan}" rowSpan="1"/><hp:cellSz width="{width}" height="{h}"/>'
+            f'<hp:cellSpan colSpan="{cspan}" rowSpan="{rspan}"/><hp:cellSz width="{width}" height="{h}"/>'
             f'<hp:cellMargin left="510" right="510" top="283" bottom="283"/></hp:tc>'), h
 
 
@@ -2341,17 +2504,23 @@ def _table(st, rows, col_w, bf, bfh=None, page_break=False):
         nhdr += 1
     vcenter = nhdr == 0                        # 제목 행이 없는 항목표(심의안건 앞면 등)는 칸 가운데
     law = bool(nhdr) and any(re.sub(r"\s", "", c.get("t", "")).startswith("현행") for c in rows[0])   # 신구조문대비표
+    # 행마다 칸을 그린다. 칸의 열 위치(col)는 병합(cs·rs)을 반영해 _norm_blocks 가 매겼다.
+    # 높이: 한 행짜리 칸으로 행 높이를 정하고(여러 행 칸은 높이를 행 수로 나눠 보탬), 여러 행 칸의 높이는 걸친 행 높이의 합
+    drawn = []
     for r, cells in enumerate(rows):
-        col, tcs, rh = 0, [], 0
+        col0, tcs, rh = 0, [], 0
         for c in cells:
-            cs = int(c.get("cs") or 1)
+            cs, rs = int(c.get("cs") or 1), int(c.get("rs") or 1)
+            col = int(c["col"]) if c.get("col") is not None else col0
             w = sum(col_w[col:col + cs])
-            x, h = _cell(st, c, col, r, cs, w, (bfh or bf) if c.get("hd") else bf, hdr=r < nhdr, vcenter=vcenter, law=law)
-            tcs.append(x)
-            rh = max(rh, h)
-            col += cs
-        tcs = [re.sub(r'(<hp:cellSz width="\d+" height=")\d+', r"\g<1>" + str(rh), t) for t in tcs]
+            x, h = _cell(st, c, col, r, cs, w, (bfh or bf) if c.get("hd") else bf, hdr=r < nhdr, vcenter=vcenter, law=law, rspan=rs)
+            tcs.append([x, rs])
+            rh = max(rh, h if rs == 1 else -(-h // rs))
+            col0 = col + cs
         heights.append(rh)
+        drawn.append(tcs)
+    for r, tcs in enumerate(drawn):
+        tcs = [re.sub(r'(<hp:cellSz width="\d+" height=")\d+', r"\g<1>" + str(sum(heights[r:r + rs])), t) for t, rs in tcs]
         trs.append("<hp:tr>" + "".join(tcs) + "</hp:tr>")
     # pageBreak="TABLE": 쪽 경계에서 행 가운데라도 나눈다(긴 조문 한 행이 한 쪽보다 길어도 다음 쪽으로 이어짐)
     tbl = (f'<hp:tbl id="{1000 + len(trs)}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" '
@@ -2398,13 +2567,31 @@ def _norm_blocks(blocks) -> list:
             if not isinstance(r, list):
                 continue
             cells = [{"t": str(c.get("t", "")), "hd": bool(c.get("hd")), "cs": _clamp_int(c.get("cs") or 1, 1, 20, 1),
-                      "r": _norm_runs(c.get("r"))}
+                      "rs": _clamp_int(c.get("rs") or 1, 1, 200, 1), "r": _norm_runs(c.get("r"))}
                      for c in r[:20] if isinstance(c, dict)]
             if cells:
                 rows.append(cells)
         if not rows:
             continue
-        ncol = min(40, max(sum(c["cs"] for c in r) for r in rows))
+        cols, ncol = table_grid(rows)
+        if cols is None:                        # 병합이 맞지 않는 표: 행 병합을 풀고 열 병합만 둔다(칸이 밀리지 않게)
+            for r in rows:
+                for c in r:
+                    c["rs"] = 1
+            cols, ncol = table_grid(rows)
+        if cols is None:
+            cols = []
+            for r in rows:
+                acc, rc = 0, []
+                for c in r:
+                    rc.append(acc)
+                    acc += c["cs"]
+                cols.append(rc)
+            ncol = max(sum(c["cs"] for c in r) for r in rows)
+        for r, rc in zip(rows, cols):
+            for c, col in zip(r, rc):
+                c["col"] = col
+        ncol = min(40, ncol)
         cw = blk.get("colWidths")
         ok = isinstance(cw, list) and len(cw) == ncol and all(isinstance(x, (int, float)) and 0 < x < 1e6 for x in cw)
         out.append({"t": "table", "rows": rows, "ncol": ncol, "colWidths": [int(x) for x in cw] if ok else None})
@@ -2984,18 +3171,28 @@ def build_docx(blocks: list) -> bytes:
             ws = [max(300, int(9000 * w / sum(cw))) for w in cw]
             grid = "".join(f'<w:gridCol w:w="{w}"/>' for w in ws)
             trs = []
+            cont = {}                                        # (행, 열) → 위 칸에서 이어지는 행 병합 칸의 열 수
             for i, r in enumerate(rows):
-                tcs, col = [], 0
                 for c in r:
+                    for dr in range(1, c.get("rs") or 1):
+                        cont[(i + dr, c["col"])] = c["cs"]
+            for i, r in enumerate(rows):
+                items = [(c["col"], c) for c in r] + [(col, cs) for (ri, col), cs in cont.items() if ri == i]
+                tcs = []
+                for col, c in sorted(items, key=lambda x: x[0]):
+                    if not isinstance(c, dict):                # 위에서 내려온 병합 칸(내용 없음)
+                        tcs.append(f'<w:tc><w:tcPr><w:tcW w:w="{sum(ws[col:col + c])}" w:type="dxa"/>'
+                                   + (f'<w:gridSpan w:val="{c}"/>' if c > 1 else "") + '<w:vMerge/></w:tcPr><w:p/></w:tc>')
+                        continue
                     cs = c["cs"]
                     jc = '<w:pPr><w:jc w:val="center"/></w:pPr>' if c.get("hd") else ""
                     paras = "".join(f"<w:p>{jc}" + "".join(_w_run(t, u) for t, u in ln) + "</w:p>" for ln in _seg_lines(c))
                     tcs.append(f'<w:tc><w:tcPr><w:tcW w:w="{sum(ws[col:col + cs])}" w:type="dxa"/>'
                                + (f'<w:gridSpan w:val="{cs}"/>' if cs > 1 else "")
+                               + ('<w:vMerge w:val="restart"/>' if (c.get("rs") or 1) > 1 else "")
                                + (('<w:shd w:val="clear" w:color="auto" w:fill="EAF2FE"/>') if c.get("hd") else "")
                                + f'</w:tcPr>{paras}</w:tc>')
-                    col += cs
-                trs.append("<w:tr>" + ('<w:trPr><w:tblHeader/></w:trPr>' if i == 0 else "") + "".join(tcs) + "</w:tr>")
+                trs.append("<w:tr>" + ('<w:trPr><w:tblHeader/></w:trPr>' if i == 0 and all(c.get("hd") for c in r) else "") + "".join(tcs) + "</w:tr>")
             bd = "".join(f'<w:{s} w:val="single" w:sz="4" w:space="0" w:color="444444"/>'
                          for s in ("top", "left", "bottom", "right", "insideH", "insideV"))
             if pb:
