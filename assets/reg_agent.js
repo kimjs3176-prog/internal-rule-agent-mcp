@@ -271,7 +271,7 @@ function raArtText(a){
   if(a.raw) return String(a.text||'');                          // 별표·서식 블록(머리 줄+내용)은 조 표기 없이 그대로
   if(a.deleted||a.type==='delete') return `${raLbl(a.no)} 삭제`;
   const lines=String(a.body||'').split('\n');
-  return `${raLbl(a.no)}(${a.title||''}) ${lines[0]||''}`.trimEnd()+(lines.length>1?'\n'+lines.slice(1).join('\n'):'');
+  return `${raLbl(a.no)}${a.title?`(${a.title})`:''} ${lines[0]||''}`.trimEnd()+(lines.length>1?'\n'+lines.slice(1).join('\n'):'');
 }
 function raParse(text){
   const out=[], chapters=[]; let cur=null, chap='', zone='body'; const add=[], apx=[];
@@ -1487,7 +1487,7 @@ function raRepJosa(text, a, b){
   const out=src.replace(new RegExp(`(^|[^가-힣])${esc}(${RA_JOSA_ALT})?(?=[^가-힣]|$)`,'g'),(all,pre,j)=>{ n++;
     if(!j) return pre+b;
     if(!P[j]) return pre+b+j;                                         // 의·에·에서·도·까지… 받침과 상관없는 조사
-    if(j==='으로'||j==='로'){ const c=b.slice(-1), k=c>='가'&&c<='힣'?(c.charCodeAt(0)-0xAC00)%28:0; return pre+b+(k&&k!==8?'으로':'로'); }
+    if(j==='으로'||j==='로') return pre+b+raRo(b);                     // 숫자·괄호 끝도 개정 문장과 같은 받침 규칙(30000으로·5로)
     return pre+b+raJosa(b,P[j]); });
   return {s:out, n};
 }
@@ -2103,7 +2103,7 @@ function raUnits(body){
   const out=[]; let h=0, ho=0;
   String(body||'').replace(/\r/g,'').replace(/ⓛ/g,'①').replace(/[\u2780-\u2789]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x2780+0x2460)).split('\n').forEach(raw=>{
     const ln=raw.trim(); if(!ln) return;
-    const mh=ln.match(/^([①-⑳])/);
+    const mh=ln.match(/^([①-⑳㉑-㉟㊱-㊿])/);
     if(mh){ h=RA_HANG.indexOf(mh[1])+1; ho=0; out.push({lv:'h',h,ho:0,mk:'',text:ln}); return; }
     const m1=ln.match(/^(\d{1,2})\.\s/); if(m1){ ho=+m1[1]; out.push({lv:'ho',h,ho,mk:'',text:ln}); return; }
     const m2=ln.match(/^([가-하])\.\s/); if(m2&&ho){ out.push({lv:'mk',h,ho,mk:m2[1],text:ln}); return; }
@@ -2113,7 +2113,7 @@ function raUnits(body){
   return out;
 }
 function raUKey(u){ return u.lv+'|'+u.h+'|'+u.ho+'|'+u.mk; }
-function raUBody(u){ return u.text.replace(/^(?:[①-⑳]\s*|\d{1,2}\.\s+|[가-하]\.\s+)/,''); }
+function raUBody(u){ return u.text.replace(/^(?:[①-⑳㉑-㉟㊱-㊿]\s*|\d{1,2}\.\s+|[가-하]\.\s+)/,''); }
 // 단위 이름: 제5조제2항제3호가목, 아래에 호가 있는 항(또는 조 본문)은 “각 호 외의 부분”
 function raULbl(no, u, all){
   let s=raLbl(no);
@@ -2133,7 +2133,7 @@ function raSubst(o, n){
   const sp=c=>/\s/.test(c||' ');
   const stop=(t,i)=>/[,.]/.test(t[i])&&!(/\d/.test(t[i-1]||'')&&/\d/.test(t[i+1]||''));   // 쉼표·마침표에서 끊되, 숫자 사이(20,000·1.5)는 수의 일부
   while(l>0&&!sp(o[l-1])) l--;                                   // 어절 머리까지
-  if(!(rO>l&&sp(o[rO-1]))) while(rO<o.length&&!sp(o[rO])&&!stop(o,rO)){ rO++; rN++; }   // 어절 끝까지(쉼표·마침표 앞) — 이미 어절 경계면 그대로(“예산의 범위에서 ”를 삭제)
+  if(!(rO>l&&sp(o[rO-1]))) while(rO<o.length&&!sp(o[rO])&&!stop(o,rO)&&!/[(（]/.test(o[rO])){ rO++; rN++; }   // 괄호 앞에서도 멈춘다(“원장(부원장을 포함한다)” → “원장”)   // 어절 끝까지(쉼표·마침표 앞) — 이미 어절 경계면 그대로(“예산의 범위에서 ”를 삭제)
   // “2분의 1”처럼 ‘의’ 뒤에 수가 오면 그 수까지
   if(/의$/.test(o.slice(l,rO))&&/^\s\d/.test(o.slice(rO))){ let e=rO+1; while(e<o.length&&!sp(o[e])&&!stop(o,e)) e++; rN+=e-rO; rO=e; }
   // 공통 조사는 따옴표 밖으로 뺀다: “3만원”을 → “5만원”으로
@@ -2145,7 +2145,9 @@ function raSubst(o, n){
   const verbish=t=>/(하|되|있|없|않|같|이|한|된|할|될|싶|지)$/.test(t);
   if(jo&&jn&&jo===jn && rO-jo.length>l && rO-jo.length>=p && rN-jn.length>=p && stem.length>=2 && stemN.length>=2 && !verbish(stem) && !verbish(stemN)){ rO-=jo.length; rN-=jn.length; }
   const cnt=t=>t?o.split(t).length-1:0;
-  for(let k=0;k<3&&(rO-l<2||cnt(o.slice(l,rO))!==1);k++){        // 짧거나 여러 번 나오면 앞 어절을 붙인다
+  // 다른 낱말 속(“부원장”의 “원장”)에만 또 나오고 첫 자리가 바꿀 자리면 한 번 나오는 것으로 본다(역적용은 첫 자리를 바꾼다)
+  const one=t=>{ if(cnt(t)===1) return true; if(o.indexOf(t)!==l||/^[가-힣]/.test(t)===false) return false; let k=-1, w=0; while((k=o.indexOf(t,k+1))>=0) if(!/[가-힣]/.test(o[k-1]||'')) w++; return w===1; };
+  for(let k=0;k<3&&(rO-l<2||!one(o.slice(l,rO)));k++){        // 짧거나 여러 번 나오면 앞 어절을 붙인다
     if(l===0) break;
     l--; while(l>0&&sp(o[l-1])) l--; while(l>0&&!sp(o[l-1])) l--;
   }
@@ -2156,7 +2158,7 @@ function raSubst(o, n){
     if(nq(o.slice(l,rO),op)>nq(o.slice(l,rO),cl)){ const e=o.indexOf(cl,rO); if(e>=0&&nq(n.slice(l,rN+e+1-rO),op)===nq(n.slice(l,rN+e+1-rO),cl)){ rN+=e+1-rO; rO=e+1; } }
   }
   let a=o.slice(l,rO), b=n.slice(l,rN);
-  if(!a.trim()||cnt(a)!==1) return null;
+  if(!a.trim()||!one(a)) return null;
   if(!b.trim()&&!/\s$/.test(a)){ if(sp(o[rO])&&o[rO]!=='\n') a+=' '; else if(l>0&&sp(o[l-1])) a=' '+a; }   // 지울 때는 띄어쓰기 한 칸도 함께
   if(a.length>60||a.includes('\n')||b.includes('\n')) return null;
   if(a.trim()===o.trim()||(o.length>=12&&!/^[「〔\[［【].*[」〕\]］】]$/.test(a.trim())&&a.trim().length>=o.trim().length*0.7)) return null;   // 거의 다 바뀌면 단위째 고쳐 쓴다
@@ -2165,7 +2167,7 @@ function raSubst(o, n){
 // 항·호를 중간에 끼워 넣어 뒤 번호가 밀린 경우(다른 내용은 그대로) → 법제 문형
 // “제5조제4항을 제5항으로, 제3항을 제4항으로 하고, 같은 조에 제3항을 다음과 같이 신설한다.” 못 다루면 null
 function raShiftInsert(L, O, N){
-  const strip=t=>t.replace(/^(?:[①-⑳]\s*|\d{1,2}\.\s+)/,'');
+  const strip=t=>t.replace(/^(?:[①-⑳㉑-㉟㊱-㊿]\s*|\d{1,2}\.\s+)/,'');
   const blocks=(us,lv,h)=>{ const out=[], rest=[]; let cur=null;      // 같은 부모의 lv 단위 묶음(아래 단위 포함)과 그 밖의 줄
     us.forEach(u=>{ if(u.lv===lv&&(lv==='h'||u.h===h)){ cur={n:lv==='h'?u.h:u.ho, us:[u]}; out.push(cur); }
       else if(cur&&(lv==='h'?u.lv!=='b':(u.lv==='mk'&&u.h===h&&u.ho===cur.n))) cur.us.push(u);
@@ -2197,7 +2199,8 @@ function raAmendSentences(oldA, ch){
   if(new Set(O.map(raUKey)).size!==O.length||new Set(N.map(raUKey)).size!==N.length) return whole();
   const S=[], add=(s,lines,ord)=>S.push({s, lines:lines||[], ord:ord==null?-1:ord});   // ord: 조문 안 순서(문장을 위에서 아래 순으로 잇는다)
   const ot=String(oldA.title||'').trim(), nt=String(ch.title||'').trim();
-  if(ot!==nt){ if(!nt) return whole(); add(`${L}의 제목 “${ot}”${raEul(ot)} “${nt}”${raRo(nt)} 한다.`,null,-1); }
+  if(ot!==nt){ if(!nt||!ot) return whole();   // 제목을 새로 달거나 없애면 “제목 “”를 …” 대신 조 전체를 쓴다
+    add(`${L}의 제목 “${ot}”${raEul(ot)} “${nt}”${raRo(nt)} 한다.`,null,-1); }
   const ok=new Map(O.map(u=>[raUKey(u),u])), nk=new Map(N.map(u=>[raUKey(u),u]));
   // 현행 단위가 개정안에 그대로 있어야 한다(끝에서 지우거나 끝에 덧붙인 단위만 허용 — 함께 지우거나 덧붙인 형제는 셈하지 않는다)
   const removed=O.filter(u=>!nk.has(raUKey(u))), added=N.filter(u=>!ok.has(raUKey(u)));
@@ -2212,7 +2215,8 @@ function raAmendSentences(oldA, ch){
     return whole(); }
   const DEL=/^[<＜〔\[]?\s*삭\s*제\s*(?:[<＜(（][^>＞)）]{0,30}[>＞)）])?\s*[>＞〕\]]?\s*$/;
   const subs=[]; let bodyWhole=false;         // [{lbl, a, b, ord}] 같은 a→b는 “각각”으로 묶는다
-  O.forEach((u,i)=>{ const v=nk.get(raUKey(u)); if(!v||v.text===u.text) return;
+  const ws=t=>t.replace(/\s+/g,' ').trim();                         // 띄어쓰기만 다른 단위는 고치지 않은 것으로 본다(raChanged 와 같게)
+  O.forEach((u,i)=>{ const v=nk.get(raUKey(u)); if(!v||ws(v.text)===ws(u.text)) return;
     const lbl=raULbl(ch.no,u,O), ob=raUBody(u), nb=raUBody(v);
     if(u.lv!=='b'&&DEL.test(nb.trim())){ const l2=lbl.replace(/ 각 [호목] 외의 부분$/,''); add(`${l2}${raEul(l2)} 삭제한다.`,null,i); return; }   // 항·호를 “삭제”로 바꿈
     const d=ob.search(/(^|\s)다만[,，]/), dn=nb.search(/(^|\s)다만[,，]/);
@@ -2241,7 +2245,7 @@ function raAmendSentences(oldA, ch){
     add(`${g.p}에 ${nm}${raEul(nm)} ${g.us.length>1?'각각 ':''}다음과 같이 신설한다.`, g.us.flatMap(u=>u.text.split('\n')), O.length+N.indexOf(g.us[0])); });
   S.sort((x,y)=>x.ord-y.ord);
   if(!S.length) return {head:'', lines:[]};
-  const touched=O.filter(u=>{ const v=nk.get(raUKey(u)); return !v||v.text!==u.text; }).length;   // 고치거나 지운 현행 단위
+  const touched=O.filter(u=>{ const v=nk.get(raUKey(u)); return !v||ws(v.text)!==ws(u.text); }).length;   // 고치거나 지운 현행 단위
   if(S.length>4 || (O.length>2 && S.length>1 && touched>=Math.ceil(O.length*0.6))) return whole();
   // 한 문장으로 잇기: “…하고, 같은 조 제3항 중 …”
   const hangOf=t=>(t.match(new RegExp('^'+L+'(제\\d+항)'))||[])[1]||'';
@@ -2358,8 +2362,8 @@ function raApplyAmend(arts, text, appendix){
       if((mm=s.match(/^(.+?)에 단서를 다음과 같이 신설한다$/))){ const lb=raRtLabel(mm[1]); const a=lb&&findA(lb.no); if(!a){ errors.push(s); return; }
         const units=raUnits(a.body), i=raRtFind(units,lb); if(i<0){ errors.push(s); return; }
         danseo--; let got; [got,li]=raRtTake(ls,li,'',danseo); units[i].text=units[i].text.trimEnd()+' '+got.join('\n'); a.body=units.map(u=>u.text).join('\n'); lastH=lb.h||lastH; return; }
-      // 3) 단위·조 삭제
-      if((mm=s.match(/^(.+?)(?:을|를) 삭제한다$/))){ const lb=raRtLabel(mm[1]); const a=lb&&findA(lb.no); if(!a){ errors.push(s); return; }
+      // 3) 단위·조 삭제 — “… 중 “A”를 삭제한다”(글귀 삭제)는 6)에서 읽는다
+      if((mm=s.match(/^([^“]+?)(?:을|를) 삭제한다$/))){ const lb=raRtLabel(mm[1]); const a=lb&&findA(lb.no); if(!a){ errors.push(s); return; }
         if(!lb.h&&!lb.ho&&!lb.mk){ a.deleted=true; a.body=''; a.title=''; return; }
         const units=raUnits(a.body), i=raRtFind(units,lb); if(i<0){ if(units.some(u=>u.lv==='h'&&u.h===lb.h&&/삭제$/.test(u.text))) return; errors.push(s); return; }
         const mk=(units[i].text.match(RA_UMARK)||[''])[0]; units[i].text=mk.trim()+' 삭제';          // 번호는 남기고 “삭제”
@@ -2405,9 +2409,11 @@ function raApplyAmend(arts, text, appendix){
 function raRtNorm(a){
   if(!a||a.deleted) return 'X';
   const n=t=>String(t||'').replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/\s+/g,' ').trim();
-  const us=raUnits(a.body).map(u=>n(u.text));
-  while(us.length>1&&/^(?:[①-⑳㉑-㉟㊱-㊿]|\d{1,2}\.)\s*삭제$/.test(us[us.length-1])) us.pop();
-  return n(a.title)+'|'+us.join('\n');
+  const us=raUnits(a.body).map(u=>({lv:u.lv, t:n(u.text)}));
+  const D=/^(?:[①-⑳㉑-㉟㊱-㊿]|\d{1,2}\.)\s*삭제(?:\s*[<＜(（〔\[][^>＞)）〕\]]{0,30}[>＞)）〕\]])?$/;   // “3. 삭제”·“③ 삭제 <2026. 1. 1.>”
+  for(let i=us.length-1;i>=0;i--){ const u=us[i], nx=us[i+1];       // 조 끝의 항, 각 항 끝의 호(다음 항이 이어져도)
+    if(us.length>1&&D.test(u.t)&&(u.lv==='ho'?!nx||(nx.lv!=='ho'&&nx.lv!=='mk'):!nx)) us.splice(i,1); }
+  return n(a.title)+'|'+us.map(u=>u.t).join('\n');
 }
 // 지금 수정안으로 만든 개정문을 현행에 적용해 수정안과 견준다 → {ok, n, nx, diffs:[{no, exp, got}], errors}
 function raRoundTrip(){
