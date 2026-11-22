@@ -37,11 +37,9 @@
 
 ## 2. 저장소에 함께 들어 있는 것
 
-| 구성요소 | 위치 | 라이선스 | 비고 |
-|---|---|---|---|
-| Pretendard 글꼴 1.3.9(Variable, 동적 서브셋) | `assets/fonts/pretendard/` | SIL OFL 1.1 | 저작권 Kil Hyung-jin. 라이선스 전문을 `assets/fonts/pretendard/LICENSE.txt`로 함께 넣었습니다. 글꼴만 따로 팔지 않는 한 자유롭게 쓰고 재배포할 수 있습니다 |
+외부 글꼴·라이브러리 파일은 넣지 않았습니다(웹 화면과 Pretendard 글꼴은 내규똑똑 저장소로 옮겼습니다).
 
-- 화면(HTML·CSS·JavaScript)은 외부 라이브러리 없이 직접 작성했습니다.
+- 규칙 엔진(`assets/reg_agent.js`)과 MCP 연결 안내 화면은 외부 라이브러리 없이 직접 작성했습니다.
 - **알리오 조회(`alio.py`):** 요청 방식만 MIT 라이선스 오픈소스 [alio-mcp](https://github.com/chromehearts79/alio-mcp)를 참고했고, 코드는 직접 작성했습니다.
 
 ## 3. 선택 실행 환경(설치하면 쓰는 기능)

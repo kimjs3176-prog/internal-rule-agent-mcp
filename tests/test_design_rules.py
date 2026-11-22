@@ -23,10 +23,11 @@ def _offenders(css):
     return out
 
 
-def test_no_left_stripes():
-    files = [os.path.join(ROOT, "assets", "reg_agent.css"), os.path.join(ROOT, "assets", "tokens.css")]
-    html = open(os.path.join(ROOT, "index.html"), encoding="utf-8").read()
-    css = "".join(open(f, encoding="utf-8").read() for f in files) + "".join(re.findall(r"<style>(.*?)</style>", html, re.S))
+def test_no_left_stripes(client):
+    # 이 저장소에 남은 화면은 MCP 연결 안내(/)뿐이다. 에이전트 화면 CSS 는 내규똑똑(agro-law)이 같은 규칙으로 막는다
+    html = client.get("/", headers={"Accept": "text/html"}).get_data(as_text=True)
+    css = "".join(re.findall(r"<style>(.*?)</style>", html, re.S))
+    assert css
     bad = _offenders(css)
     assert not bad, "왼쪽 색띠 금지:\n" + "\n".join(bad[:20])
     js = open(os.path.join(ROOT, "assets", "reg_agent.js"), encoding="utf-8").read()

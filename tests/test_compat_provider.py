@@ -92,8 +92,6 @@ def test_draft_uses_compat_without_key(client, compat, monkeypatch):
     assert d["success"] and seen and seen[0] == ("compat", "", "gpt-oss-20b")
 
 
-def test_ui_has_compat_tab():
-    html = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert 'data-p="compat"' in html and 'id="aiModelTxt"' in html and "/api/ai/models?provider=compat" in html
+def test_engine_knows_compat_provider():
     js = (ROOT / "assets" / "reg_agent.js").read_text(encoding="utf-8")
     assert "p==='compat'&&RA_ORG._compat!==false" in js and "RA_ORG._compat=!!(d.compat&&d.compat.ready)" in js

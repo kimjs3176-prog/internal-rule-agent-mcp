@@ -21,7 +21,7 @@ if __name__ == "__main__":
     url = f"http://localhost:{PORT}"
     print("=" * 50)
     print("  🌾  규정 제·개정 에이전트")
-    print(f"  🔗  {url}")
+    print(f"  🔗  {url}  (MCP: {url}/mcp)")
     print("  종료: Ctrl+C")
     print("=" * 50)
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()

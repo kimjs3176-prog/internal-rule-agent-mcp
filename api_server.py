@@ -1,5 +1,5 @@
 """
-KOAT 규정 제·개정 에이전트 — API 서버
+KOAT 규정 제·개정 에이전트 — MCP 서버(/mcp)와 규칙 엔진 API(웹 화면은 내규똑똑 /agent 로 옮김)
 배포: Vercel / Render / Railway
 로컬: python run_local.py
 """
@@ -716,16 +716,8 @@ def _parse_articles(root: ET.Element):
 
 @app.route("/")
 def index():
-    # 로컬 실행 시 index.html 서빙
-    # Vercel에서는 vercel.json이 index.html을 직접 서빙함
-    try:
-        import os
-        html_path = os.path.join(os.path.dirname(__file__), "index.html")
-        with open(html_path, encoding="utf-8") as f:
-            return Response(f.read(), mimetype="text/html; charset=utf-8")
-    except FileNotFoundError:
-        return Response("<h1>index.html not found</h1>", status=404)
-
+    """첫 주소는 MCP 연결 안내다. 웹 화면은 내규똑똑(kimjs3176-prog/agro-law)의 /agent 로 옮겼다."""
+    return _mcp_remote.guide_or_404()
 
 
 # ── 관련법령: 법령 체계도(상위·하위법)·관련법령(준용·피준용 등) ─────────────────────────
@@ -1539,19 +1531,7 @@ def _hwpx_full_border(header_xml):
 # ══════════════════════════════════════════════════════════════════════════
 # 규정 제·개정 에이전트(reg_agent.py) — 공통 헬퍼를 넘겨 등록
 # ══════════════════════════════════════════════════════════════════════════
-@app.route("/assets/<path:subpath>")
-def serve_asset_file(subpath):
-    """정적 리소스(로컬 실행용 — Vercel은 vercel.json이 정적 처리)."""
-    from flask import send_from_directory
-    if any(part.startswith(".") for part in subpath.replace("\\", "/").split("/")):
-        return Response("404", status=404)
-    return send_from_directory(os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets"), subpath)
-
-
-import reg_upload as _reg_upload  # noqa: E402
 _MCP_ONLY = (os.environ.get("MCP_ONLY") or "").strip().lower() in ("1", "true", "yes", "on")
-if not _MCP_ONLY:                     # 범용 MCP 전용 배포에는 내규 등록이 없다(등록 내규를 두지 않음)
-    _reg_upload.register(app)        # 내규 원문 등록(/upload) + 저장소 자동 커밋
 
 import reg_agent as _reg_agent  # noqa: E402
 _reg_agent.register(
