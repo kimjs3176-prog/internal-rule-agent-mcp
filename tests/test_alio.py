@@ -172,3 +172,15 @@ def test_review_cites_other_agency_cases(ra):
 def test_alio_search_all_without_keyword(client, fake_alio):
     d = client.post("/api/regagent/alio/search", json={"q": "", "all": True, "orgs": ["C0105"]}).get_json()
     assert d["success"] and len(d["hits"]) == 91
+
+
+def test_pdf_reflow_joins_broken_tokens():
+    """PDF 글자층이 낱말 중간에서 끊긴 것(“제1↵조(↵목적)”, “2017.↵7.↵1.”)을 다시 이어 조문을 찾는다. 쪽 번호 줄은 뺀다."""
+    import alio
+    import reg_agent as R
+    raw = "-\n1\n-\n여 비 규 정\n제26\n차개정 2017.\n7.\n1.\n제1\n조(\n목적)\n이 규정은 출장에 관한 사항을 정한다.\n제2\n조(\n정의)\n1.\n\"\n여행\"\n이란 업무로 인한 출장을 말한다."
+    t = alio.pdf_reflow(raw)
+    assert "제26차개정 2017.7.1." in t and "제1조(목적)" in t and "제2조(정의)" in t and '1. "여행"' in t
+    assert not t.startswith("-") and "\n1\n" not in t
+    p = R.parse_text(t)
+    assert [a["no"] for a in p["articles"]] == ["1", "2"] and p["articles"][0]["title"] == "목적"

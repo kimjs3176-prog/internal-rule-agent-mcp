@@ -311,6 +311,50 @@ def _kind(name: str, raw: bytes) -> str:
     return os.path.splitext(name or "")[1].lower().lstrip(".")
 
 
+_PAGE_NO = re.compile(r"^[-–—]?\s*\d{1,4}\s*[-–—]?$")
+
+
+def pdf_reflow(text: str) -> str:
+    """PDF 에서 뽑은 글은 낱말 중간에서 줄이 끊긴다(“제1↵조(↵목적)”, “2017.↵7.↵1.”). 토막 난 번호·괄호·따옴표만 다시 잇고,
+    쪽 번호 줄(“- 1 -”)은 뺀다. 다른 줄바꿈은 그대로 둔다 — 조문 머리(제N조(…))를 다시 찾을 수 있게."""
+    lines = [ln.strip() for ln in (text or "").split("\n")]
+    keep = []
+    for i, ln in enumerate(lines):                                   # 쪽 번호: “-”·“1”·“-” 로 나뉜 것까지
+        if ln in ("-", "–", "—") or (_PAGE_NO.match(ln) and (i == 0 or lines[i - 1] in ("-", "–", "—", "")) and
+                                       (i + 1 >= len(lines) or lines[i + 1] in ("-", "–", "—", ""))):
+            continue
+        keep.append(ln)
+    out = []
+    for ln in keep:
+        if not out or not ln or not out[-1]:
+            out.append(ln)
+            continue
+        prev = out[-1]
+        glue = (re.search(r"(?:제\s*\d+|\d)$", prev) and re.match(r"^(?:조|항|호|목|차|장|절|관|편|\d|[.,)\]」』”’\"'])", ln)) \
+            or re.search(r"[(\[「『“‘]$", prev) or re.match(r"^[)\]」』”’,.]", ln) \
+            or (re.search(r"\d\.$", prev) and re.match(r"^\d", ln)) \
+            or re.search(r"조\($", prev)
+        if glue or prev in ("\"", "'", "“", "‘") or (prev.endswith("\"") and prev.count("\"") % 2 == 1):
+            out[-1] = prev + ln
+        elif re.fullmatch(r"\d{1,2}\.", prev):                       # 호 번호만 남은 줄(“1.”) → 다음 줄과 한 줄로
+            out[-1] = prev + " " + ln
+        else:
+            out.append(ln)
+    # 조 제목이 여러 줄로 갈린 것(“제9조(일비,↵식비,↵숙박비의지급)”) — 괄호가 닫힐 때까지(최대 4줄) 잇는다
+    merged, i = [], 0
+    while i < len(out):
+        ln = out[i]
+        if re.match(r"^제\s*\d+\s*조(?:\s*의\s*\d+)?\s*\(", ln):
+            k = 0
+            while ln.count("(") > ln.count(")") and i + 1 < len(out) and out[i + 1] and k < 4:
+                i += 1
+                k += 1
+                ln = ln + (" " if ln.endswith(",") else "") + out[i]
+        merged.append(ln)
+        i += 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(merged)).strip()
+
+
 def file_text(name: str, raw: bytes, depth: int = 0) -> str:
     import hwp5
     import reg_import
@@ -334,7 +378,7 @@ def file_text(name: str, raw: bytes, depth: int = 0) -> str:
             t = hwp5.pdf_text(raw)
             if not t:
                 raise AlioError("PARSE", "PDF에서 글자를 뽑지 못했습니다(스캔 이미지 PDF일 수 있습니다).")
-            return t
+            return pdf_reflow(t)
     except AlioError:
         raise
     except (ValueError, zipfile.BadZipFile) as e:
