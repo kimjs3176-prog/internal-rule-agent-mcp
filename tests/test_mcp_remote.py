@@ -164,3 +164,12 @@ def test_rate_limit_per_ip(client, monkeypatch):
     codes = [rpc(client, "ping", headers={"X-Forwarded-For": f"10.0.0.{i}"}).status_code for i in range(12)]
     assert codes[10:] == [429, 429]
     remote._RATE.clear()
+
+
+def test_download_markdown_link_is_named(client):
+    """내려받기 링크는 주소가 길어(요청을 링크에 담는다) 이름 붙은 마크다운으로도 준다 — 화면에 긴 주소가 그대로 나오지 않게."""
+    d = call(client, "run_agent", {"request": "여비규정 제15조의 일비를 3만원으로 올려줘"}, headers=PUB)["structuredContent"]
+    md = d["download"]["markdown"]
+    assert md.startswith("[한글(hwpx) 문서 세트 내려받기](") and d["download"]["hwpx"] in md and d["download"]["docx"] in md
+    assert "download.markdown" in rpc(client, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                                             "clientInfo": {"name": "t", "version": "0"}}).get_json()["result"]["instructions"]
