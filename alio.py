@@ -82,16 +82,20 @@ def _request(method: str, path: str, *, json_body=None, binary=False, retries=2,
                 continue
             if r.status_code != 200:
                 raise AlioError("HTTP", f"알리오 응답 오류(HTTP {r.status_code})")
-            if binary:
-                buf = io.BytesIO()
-                for chunk in r.iter_content(65536):
-                    buf.write(chunk)
-                    if buf.tell() > MAX_FILE:
-                        raise AlioError("HTTP", "규정 파일이 너무 큽니다.")
-                    if deadline and time.time() > deadline:
-                        raise AlioError("NETWORK", "규정 파일을 받는 데 시간이 너무 오래 걸립니다.")
-                return r, buf.getvalue()
-            return r, r.text
+            try:                               # 받는 도중 끊김(ChunkedEncodingError·ReadTimeout 등)도 연결 실패로 다룬다
+                if binary:
+                    buf = io.BytesIO()
+                    for chunk in r.iter_content(65536):
+                        buf.write(chunk)
+                        if buf.tell() > MAX_FILE:
+                            raise AlioError("HTTP", "규정 파일이 너무 큽니다.")
+                        if deadline and time.time() > deadline:
+                            raise AlioError("NETWORK", "규정 파일을 받는 데 시간이 너무 오래 걸립니다.")
+                    return r, buf.getvalue()
+                return r, r.text
+            except requests.RequestException:
+                last = AlioError("NETWORK", "알리오에서 받는 도중 연결이 끊겼습니다. 잠시 뒤 다시 시도하세요.")
+                continue
         finally:
             r.close()
     raise last or AlioError("NETWORK", "알리오 응답 시간이 초과되었습니다. 잠시 뒤 다시 시도하세요.")
@@ -100,13 +104,14 @@ def _request(method: str, path: str, *, json_body=None, binary=False, retries=2,
 _REACH = {"ok": None, "at": 0.0}
 PROBE_TIMEOUT = float(os.environ.get("ALIO_PROBE_TIMEOUT", "2.5"))
 PROBE_TTL = 600                                         # 10분 동안은 확인 결과를 다시 쓴다
+PROBE_FAIL_TTL = 60                                     # 실패는 1분만 기억한다(잠깐 끊겼던 것이 10분 동안 막히지 않게)
 
 
 def reachable(force: bool = False) -> bool:
     """알리오에 닿는지 짧게(≤2.5초) 확인하고 10분 동안 기억한다.
     사내망·차단 환경에서 기관 목록 조회가 재시도까지 하며 십수 초를 기다리던 것을 막는다."""
     now = time.time()
-    if not force and _REACH["ok"] is not None and now - _REACH["at"] < PROBE_TTL:
+    if not force and _REACH["ok"] is not None and now - _REACH["at"] < (PROBE_TTL if _REACH["ok"] else PROBE_FAIL_TTL):
         return _REACH["ok"]
     try:
         r = _S.head(BASE, timeout=PROBE_TIMEOUT, allow_redirects=True)
@@ -173,7 +178,10 @@ def _search_org(org: dict, keyword: str, category: str, deadline=None) -> list:
         page += 1
     if total and len(rows) < total:            # 쪽 수 상한(MAX_PAGES)으로 잘림 — 화면에 알린다
         with _lock:
-            _cache.setdefault("trunc", {})[ck] = (len(rows), total)
+            tr = _cache.setdefault("trunc", {})
+            tr[ck] = (len(rows), total)
+            if len(tr) > 2000:
+                tr.clear()
     out = [{"org": org["name"], "orgId": org["id"], "title": (r.get("title") or "").strip(),
             "category": r.get("bidType") or "", "categoryName": CATEGORIES.get(r.get("bidType"), r.get("bidType") or ""),
             "enf": r.get("stDate") or "", "mod": r.get("idate") or "", "idx": str(r.get("idx") or ""),
@@ -183,6 +191,7 @@ def _search_org(org: dict, keyword: str, category: str, deadline=None) -> list:
         _cache["search"][ck] = (time.time(), out)
         if len(_cache["search"]) > 2000:
             _cache["search"].clear()
+            _cache.get("trunc", {}).clear()     # 잘림 표시도 검색 결과와 함께 비운다
     return out
 
 
