@@ -5,7 +5,7 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOW = {".ra-steps li"}
-BAD = re.compile(r"border-left\s*:\s*(?:(\d+(?:\.\d+)?)px|var\(--rule-bar\))\s+solid|border-left-color\s*:|"
+BAD = re.compile(r"border-left(?:-width)?\s*:\s*(?:[a-z]+\s+)?(?:(\d+(?:\.\d+)?)px|[\d.]+r?em|var\(--rule-bar\))|border-left-color\s*:|"
                  r"border-inline-start\s*:\s*\d|box-shadow\s*:[^;}]*inset\s+[1-9]\d*px\s+0(?:px)?\s+0(?:px)?\s")
 
 
@@ -31,4 +31,18 @@ def test_no_left_stripes(client):
     bad = _offenders(css)
     assert not bad, "왼쪽 색띠 금지:\n" + "\n".join(bad[:20])
     js = open(os.path.join(ROOT, "assets", "reg_agent.js"), encoding="utf-8").read()
-    assert not re.search(r"border-left\s*:\s*[2-9]px", js), "화면 코드의 인라인 스타일에도 왼쪽 색띠 금지"
+    assert not re.search(r"border-?[lL]eft(?:-width)?\s*[:=]\s*['\"]?(?:[a-z]+\s+)?(?:[2-9]|[1-9]\d)px", js), "화면 코드의 인라인 스타일에도 왼쪽 색띠 금지"
+
+
+def test_no_left_stripes_in_regulation_pages():
+    # 내규 원문 페이지(regulations/*/index.html)와 그것을 만드는 틀(reg_import.py)도 같은 규칙을 따른다
+    src = open(os.path.join(ROOT, "reg_import.py"), encoding="utf-8").read().replace("{{", "{").replace("}}", "}")
+    bad = [f"reg_import.py: {b}" for b in _offenders("".join(re.findall(r"<style>(.*?)</style>", src, re.S)))]
+    for base in ("regulations", os.path.join("samples")):
+        for dp, _, fs in os.walk(os.path.join(ROOT, base)):
+            for f in fs:
+                if f.endswith(".html"):
+                    html = open(os.path.join(dp, f), encoding="utf-8").read()
+                    bad += [f"{os.path.relpath(os.path.join(dp, f), ROOT)}: {b}"
+                            for b in _offenders("".join(re.findall(r"<style>(.*?)</style>", html, re.S)))]
+    assert not bad, "왼쪽 색띠 금지:\n" + "\n".join(bad[:20])

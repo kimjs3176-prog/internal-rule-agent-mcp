@@ -82,18 +82,19 @@ def _valid_start(text: str, pos: int) -> bool:
     if pos == 0:
         return True
     before = text[max(0, pos - 24):pos]
+    # 줄 시작(뒤에 공백만 있어도 줄 시작으로 본다) — 앞줄이 “…방법”·“…규정”으로 끝나도 새 조문이다
+    if re.search(r"\n[ \t 　]*$", before):
+        return True
+    line = before.split("\n")[-1]          # 인용 판정은 같은 줄 안의 앞 문맥만 본다
     # 법령 인용 표기 뒤 → 인용
-    if re.search(r"[「」『』]\s*$", before):
+    if re.search(r"[「」『』]\s*$", line):
         return False
-    if re.search(r"(?:법|령|규칙|규정|정관|조례|협약|지침)\s*$", before):
+    if re.search(r"(?:법|령|규칙|규정|정관|조례|협약|지침)\s*$", line):
         return False
-    if re.search(r"(?:동법|같은\s*법|이\s*법|해당\s*법)\s*$", before):
+    if re.search(r"(?:동법|같은\s*법|이\s*법|해당\s*법)\s*$", line):
         return False
     tail = before.rstrip()
     if not tail:
-        return True
-    # 줄 시작(뒤에 공백만 있어도 줄 시작으로 본다)
-    if re.search(r"\n[ \t 　]*$", before):
         return True
     # 장·절·관 제목 바로 뒤 (예: "제1장 총 칙  제1조(목적) …")
     if re.search(r"제\s*\d+\s*[장절관편]\s*[^\n]{0,12}$", tail):
