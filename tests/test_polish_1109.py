@@ -49,4 +49,5 @@ def test_docs_match_screen_names():
     for t in ("조문 초안", "점검·검토", "문서 받기"):
         assert f"{{t:'{t}'" in js
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "📤 내규 등록" not in readme and "내규똑똑(`/upload`)" in readme     # 화면 등록은 내규똑똑으로 옮겼다
+    ops = (ROOT / "docs" / "운영.md").read_text(encoding="utf-8")     # README는 커넥터 사용만, 운영 안내는 docs/운영.md
+    assert "📤 내규 등록" not in readme and "내규똑똑(`/upload`)" in ops     # 화면 등록은 내규똑똑으로 옮겼다
