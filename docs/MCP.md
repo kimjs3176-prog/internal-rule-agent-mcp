@@ -38,7 +38,7 @@ claude mcp add --transport http reg-agent https://<배포 주소>/mcp
 
 **결과로 받는 것**
 - 개정문·대비표·검증 결과는 글(JSON)로 받는다.
-- 문서 세트(심의안건서·개정문·신구조문대비표·이유서 등)는 **내려받기 링크**(`download.hwpx`·`download.docx`)로 받는다. 서버에 저장하지 않고, 링크를 열 때 같은 요청을 다시 실행해 만든다.
+- 문서 세트(심의안건서·개정문·신구조문대비표·이유서 등)는 **내려받기 링크**(`download.hwpx`·`download.docx`)로 받는다. 서버에 저장하지 않고, 링크를 열 때 같은 요청을 다시 실행해 만든다. 링크는 만든 뒤 24시간 동안 쓸 수 있다(지나면 410 — AI 도우미에게 문서를 다시 만들어 달라고 한다).
 - 조문 결과에는 원문 보기 링크(`url`)가 붙는다.
 
 **환경변수(서버 관리자)**
@@ -49,8 +49,8 @@ claude mcp add --transport http reg-agent https://<배포 주소>/mcp
 | `MCP_TOKEN` | 값을 정하면 `Authorization: Bearer <값>` 머리글이 있어야 쓴다. 사내 배포용이다. 머리글을 넣을 수 있는 도구(Claude Code `--header`, VS Code, Cursor)에서 쓴다. 내려받기 링크는 이 값으로 서명된다. claude.ai·ChatGPT 커넥터는 이 방식의 토큰을 넣을 수 없으니, 공개 시연 서버는 비워 둔다. |
 | `MCP_ALLOWED_ORIGINS` | 브라우저에서 직접 부르는 클라이언트의 출처(쉼표 구분). 화면 CORS 허용 출처(`ALLOWED_ORIGINS`, localhost)와 `MCP_PUBLIC_URL`은 늘 허용한다. 서버 간 호출(claude.ai·ChatGPT·Claude Code)은 출처가 없어 이 값과 상관없다. |
 | `MCP_PUBLIC_URL` | 링크에 쓸 공개 주소. 프록시 뒤라 주소가 다르게 보일 때만 쓴다. |
-| `MCP_PER_MIN` | 남용 방지: 같은 접속 주소(IP)에서 1분에 받는 호출 수(MCP 호출·문서 내려받기, 기본 120). 넘으면 429와 `Retry-After`. 인스턴스 메모리로 세므로 서버리스에서는 대략의 상한이다. |
-| `MCP_TRUST_PROXY=1` | Vercel 밖에서 프록시 뒤에 둘 때만 `X-Forwarded-For`의 첫 주소를 접속 주소로 센다. 그 밖에서는 꾸밀 수 있는 머리글이라 믿지 않는다. |
+| `MCP_PER_MIN` | 남용 방지: 같은 접속 주소(IP)에서 1분에 받는 호출 수(MCP 호출·문서 내려받기, 기본 120). 넘으면 429와 `Retry-After`. 묶음(JSON-RPC 배열) 요청은 건마다 센다. 인스턴스 메모리로 세므로 서버리스에서는 대략의 상한이다. |
+| `MCP_TRUST_PROXY=1` | Vercel 밖에서 프록시 뒤에 둘 때만 `X-Forwarded-For`의 마지막 주소(프록시가 붙인 것)를 접속 주소로 센다. 그 밖에서는 꾸밀 수 있는 머리글이라 믿지 않는다. |
 | `MCP_ENGINE`, `MCP_ENGINE_TIMEOUT` | 엔진 실행 방식(`quickjs`·`node`, 6절)과 한 번의 제한 시간(초, 기본 90) |
 
 **방식**

@@ -121,7 +121,8 @@ def test_amend_input_normalisation(client):
 
 # ── 내려받기 링크·전송 ─────────────────────────────────────────────────────────
 def _tok(op, inp):
-    return base64.urlsafe_b64encode(zlib.compress(json.dumps([op, inp], ensure_ascii=False).encode(), 9)).decode().rstrip("=")
+    exp = int(time.time()) + 3600                                                                # 링크에는 기한(exp)이 있다
+    return base64.urlsafe_b64encode(zlib.compress(json.dumps([op, inp, exp], ensure_ascii=False).encode(), 9)).decode().rstrip("=")
 
 
 @needs_engine

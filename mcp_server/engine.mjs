@@ -7,7 +7,19 @@ const HERE = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(H
 const inp = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
 const BASE = String(inp.base || '');
 // 엔진이 부를 수 있는 곳은 이 서버의 내규 API 뿐이다(외부 주소·다른 경로는 막는다 — mcp_server/engine.py 의 allowed 와 같은 규칙)
-const ALLOWED = u => /^\/api\/(?:regagent|law)\//.test(u) && !/^\/api\/regagent\/ledger/.test(u);
+// 퍼센트 부호화(%6Cedger 등)·점 경로(./ ../)·겹친 빗금으로 막힌 경로를 돌아가지 못하게, 다 푼 경로로 따진다
+const ALLOWED = u => {
+  const raw = String(u).split('?', 1)[0];
+  if (!/^\/api\/(?:regagent|law)\//.test(raw)) return false;
+  let p = raw;
+  for (let i = 0; ; i++) {
+    let q; try { q = decodeURIComponent(p); } catch { return false; }
+    if (q === p) break;
+    if (i >= 4) return false;
+    p = q;
+  }
+  return !/\.\.|\/\/|\\|(?:^|\/)\.(?:\/|$)/.test(p) && !/^\/api\/regagent\/ledger/i.test(p);
+};
 
 function loadEngine() {
   const store = {}, none = () => null;

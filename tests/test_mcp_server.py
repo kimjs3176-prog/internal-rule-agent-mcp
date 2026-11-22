@@ -83,8 +83,7 @@ def test_read_tools(mcp):
     assert d["regulations"] == 25 and d["places"] == 35 and d["amendments"][0]["regulation"]
     r, d = mcp.call("health_check", {"top": 2})
     assert d["regulations"] >= 100 and len(d["lowest"]) == 2
-    r, d = mcp.call("없는_도구", {})
-    assert r["isError"]
+    assert mcp.rpc("tools/call", {"name": "없는_도구", "arguments": {}})["error"]["code"] == -32602    # 모르는 도구는 프로토콜 오류
 
 
 @needs_engine
