@@ -63,7 +63,7 @@ def test_old_protocol_version_is_accepted():
     m = Mcp()
     try:
         assert m.rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})["result"]["protocolVersion"] == "2024-11-05"
-        assert m.rpc("initialize", {"protocolVersion": "1999-01-01"})["result"]["protocolVersion"] == "2025-06-18"   # 모르는 판이면 서버가 아는 최신 판
+        assert m.rpc("initialize", {"protocolVersion": "1999-01-01"})["result"]["protocolVersion"] == "2025-11-25"   # 모르는 판이면 서버가 아는 최신 판
     finally:
         m.close()
 
