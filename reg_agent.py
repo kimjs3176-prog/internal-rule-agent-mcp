@@ -2121,11 +2121,8 @@ def _xesc(s):
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
-_LS = ('<hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" '
-       'baseline="850" spacing="600" horzpos="0" horzsize="{w}" flags="393216"/></hp:linesegarray>')
 
-
-# 문서 서식: 블록·셀 글자 모양 이름 → HWPX charPr/paraPr 번호(build_hwpx 가 header.xml 에 추가해 채운다)
+# 이전 호환: 서식 이름 → 번호(시험·다른 모듈이 읽을 수 있게 마지막 문서의 값을 남긴다)
 _HS = {"char": {"": "0"}, "para": {"": "0"}}
 
 
@@ -2144,63 +2141,226 @@ def _seg_lines(c: dict) -> list:
     return lines
 
 
-def _para(text, width=47628, page_break=False, style="", align=""):
-    ch, pa = _HS["char"].get(style, "0"), _HS["para"].get(align, "0")
-    return (f'<hp:p id="0" paraPrIDRef="{pa}" styleIDRef="0" pageBreak="{1 if page_break else 0}" '
-            f'columnBreak="0" merged="0"><hp:run charPrIDRef="{ch}"><hp:t>{_xesc(text)}</hp:t></hp:run>'
-            + _LS.format(w=width) + '</hp:p>')
+# ── 공공기관 문서 서식(한글) ───────────────────────────────────────────────
+# 본문 휴먼명조 14pt·줄 간격 160%, 제목 HY헤드라인M 18pt, 표 안 11pt·130%(우리 기관 내규 원문과 같은 표 글자 크기).
+# 쪽: A4, 위 20mm·아래 15mm·좌우 20mm, 머리말·꼬리말 10mm, 아래 가운데 쪽 번호 “- 1 -”.
+# 표는 글자처럼 취급하지 않고(그래야 쪽 경계에서 나뉜다) 쪽이 바뀌면 제목 행을 되풀이한다.
+# 줄 배치(linesegarray)는 넣지 않는다 — 한글이 열 때 글꼴에 맞춰 새로 배치한다(어림값을 넣으면 줄이 겹쳐 보인다).
+_HX = {"body": 1400, "title": 1800, "cell": 1100, "gap": 700,
+       "body_ls": 160, "cell_ls": 130, "text_w": 48190,
+       "face": "휴먼명조", "title_face": "HY헤드라인M",
+       "margin": {"left": 5669, "right": 5669, "top": 5669, "bottom": 4252, "header": 2835, "footer": 2835}}
+_LANGS = [("hangul", "HANGUL"), ("latin", "LATIN"), ("hanja", "HANJA"), ("japanese", "JAPANESE"),
+          ("other", "OTHER"), ("symbol", "SYMBOL"), ("user", "USER")]
+# 줄머리 표지(내어쓰기 기준): 1. 가. 1) 가) (1) (가) ① □ ○ ㅇ - · ※ ▪
+_HX_MARK = re.compile(r"^(?:붙임\s+(?:\d+\.\s+)?|\d{1,2}\.\s+|[가-하]\.\s+|\d{1,2}\)\s+|[가-하]\)\s+|\(\d{1,2}\)\s+|\([가-하]\)\s+"
+                      r"|[①-⑳➀-➉]\s*|[□■○◦ㅇ\-·※▪•]\s+)")
 
 
-def _cell(c, col, row, cspan, width, bf, hdr=False):
+def _tw(s: str, em: int) -> int:
+    """글 폭 어림(HWPUNIT): 한글·한자·전각 기호 1em, 영문·숫자 0.55em, 빈칸 0.5em, 문장부호 0.33em."""
+    w = 0.0
+    for ch in s:
+        if ch == " ":
+            w += 0.5
+        elif ch in ".,:;()[]'\"":
+            w += 0.33
+        elif ord(ch) < 128:
+            w += 0.55
+        else:
+            w += 1.0
+    return int(w * em)
+
+
+class _HxStyle:
+    """header.xml 에 글자 모양(charPr)·문단 모양(paraPr)을 필요할 때 덧붙이고 번호를 돌려준다."""
+
+    def __init__(self, header: str):
+        self.h = header
+        self.c0 = re.search(r'<hh:charPr id="0".*?</hh:charPr>', header, re.S).group(0)
+        self.p0 = re.search(r'<hh:paraPr id="0".*?</hh:paraPr>', header, re.S).group(0)
+        self.cn = int(re.search(r'<hh:charProperties itemCnt="(\d+)">', header).group(1))
+        self.pn = int(re.search(r'<hh:paraProperties itemCnt="(\d+)">', header).group(1))
+        self.cadd, self.padd, self.cmap, self.pmap = [], [], {}, {}
+        self.fonts = {"body": self._font(_HX["face"]), "title": self._font(_HX["title_face"], fallback=_HX["face"])}
+
+    def _font(self, face: str, fallback: str = "") -> dict:
+        """언어별 글꼴 번호. 그 언어 목록에 없으면 한글 목록의 같은 글꼴을 복사해 넣는다."""
+        ids = {}
+        han = re.search(r'<hh:fontface lang="HANGUL"[^>]*>(.*?)</hh:fontface>', self.h, re.S)
+        src = None
+        for nm in (face, fallback):
+            if nm and han:
+                src = re.search(r'<hh:font id="\d+" face="' + re.escape(nm) + r'"[^>]*>.*?</hh:font>|<hh:font id="\d+" face="'
+                                + re.escape(nm) + r'"[^>]*/>', han.group(1), re.S)
+                if src:
+                    face = nm
+                    break
+        for key, lang in _LANGS:
+            m = re.search(r'(<hh:fontface lang="' + lang + r'" fontCnt=")(\d+)(">)(.*?)(</hh:fontface>)', self.h, re.S)
+            if not m:
+                continue
+            f = re.search(r'<hh:font id="(\d+)" face="' + re.escape(face) + r'"', m.group(4))
+            if f:
+                ids[key] = f.group(1)
+            elif src:
+                n = int(m.group(2))
+                el = re.sub(r'id="\d+"', f'id="{n}"', src.group(0), count=1)
+                self.h = self.h[:m.start()] + m.group(1) + str(n + 1) + m.group(3) + m.group(4) + el + m.group(5) + self.h[m.end():]
+                ids[key] = str(n)
+        return ids
+
+    def char(self, role="body", size=None, bold=False, color="#000000", ul=None) -> str:
+        size = size or _HX["body"]
+        k = (role, size, bold, color, ul)
+        if k in self.cmap:
+            return self.cmap[k]
+        cid = str(self.cn + len(self.cadd))
+        x = re.sub(r'id="0"', f'id="{cid}"', self.c0, count=1)
+        x = re.sub(r'height="\d+"', f'height="{size}"', x, count=1)
+        x = re.sub(r'textColor="[^"]*"', f'textColor="{color}"', x, count=1)
+        fid = self.fonts["title" if role == "title" else "body"]
+        if fid:
+            x = re.sub(r'<hh:fontRef [^>]*/>', lambda _m: "<hh:fontRef " + " ".join(
+                f'{key}="{fid.get(key, re.search(key + r"=.(\d+)", _m.group(0)).group(1))}"' for key, _ in _LANGS) + "/>", x, count=1)
+        x = re.sub(r"<hh:(?:bold|italic)/>|<hh:underline\b[^>]*/>", "", x)
+        x = x.replace("<hh:strikeout", ("<hh:bold/>" if bold else "")
+                      + (f'<hh:underline type="BOTTOM" shape="SOLID" color="{ul}"/>' if ul else "") + "<hh:strikeout", 1)
+        self.cadd.append(x)
+        self.cmap[k] = cid
+        return cid
+
+    def para(self, align="JUSTIFY", left=0, intent=0, ls=None, prev=0, nxt=0, keep=False) -> str:
+        ls = ls or _HX["body_ls"]
+        k = (align, left, intent, ls, prev, nxt, keep)
+        if k in self.pmap:
+            return self.pmap[k]
+        pid = str(self.pn + len(self.padd))
+        x = re.sub(r'id="0"', f'id="{pid}"', self.p0, count=1)
+        x = re.sub(r'(<hh:align horizontal=")[A-Z_]+', r"\g<1>" + align, x, count=1)
+        for tag, v in (("intent", intent), ("left", left), ("prev", prev), ("next", nxt)):
+            x = re.sub(r'(<hc:' + tag + r' value=")-?\d+', r"\g<1>" + str(v), x, count=1)
+        x = re.sub(r'(<hh:lineSpacing type=")[A-Z_]+(" value=")\d+', r"\g<1>PERCENT\g<2>" + str(ls), x, count=1)
+        x = re.sub(r'widowOrphan="\d"', 'widowOrphan="1"', x, count=1)
+        x = re.sub(r'keepWithNext="\d"', f'keepWithNext="{1 if keep else 0}"', x, count=1)
+        x = re.sub(r'breakNonLatinWord="[A-Z_]+"', 'breakNonLatinWord="KEEP_WORD"', x, count=1)
+        self.padd.append(x)
+        self.pmap[k] = pid
+        return pid
+
+    def header(self) -> str:
+        h = self.h
+        if self.cadd:
+            end = h.find("</hh:charProperties>")
+            h = h[:end] + "".join(self.cadd) + h[end:]
+            h = re.sub(r'<hh:charProperties itemCnt="\d+">', f'<hh:charProperties itemCnt="{self.cn + len(self.cadd)}">', h, count=1)
+        if self.padd:
+            end = h.find("</hh:paraProperties>")
+            h = h[:end] + "".join(self.padd) + h[end:]
+            h = re.sub(r'<hh:paraProperties itemCnt="\d+">', f'<hh:paraProperties itemCnt="{self.pn + len(self.padd)}">', h, count=1)
+        return h
+
+
+def _hx_p(pid, runs, page_break=False) -> str:
+    body = "".join(f'<hp:run charPrIDRef="{cid}"><hp:t>{_xesc(t)}</hp:t></hp:run>' for cid, t in runs) \
+        or f'<hp:run charPrIDRef="{runs and runs[0][0] or 0}"><hp:t></hp:t></hp:run>'
+    return (f'<hp:p id="0" paraPrIDRef="{pid}" styleIDRef="0" pageBreak="{1 if page_break else 0}" '
+            f'columnBreak="0" merged="0">{body}</hp:p>')
+
+
+def _hx_line(st: _HxStyle, ln: str, title=False, page_break=False, after_title=False) -> str:
+    """문단 한 줄 → 공문서 문단. 앞 빈칸은 왼쪽 여백으로, 줄머리 표지(1. 가. ① 붙임 …)는 내어쓰기로 바꿔
+    둘째 줄부터 글머리 뒤에 맞춘다. 제목은 가운데·HY헤드라인M, ‘1. 의결주문’ 같은 큰 제목은 굵게."""
+    em = _HX["body"]
+    if title:
+        return _hx_p(st.para("CENTER", nxt=1200, keep=True, ls=130), [(st.char("title", _HX["title"], bold=True), ln.strip())], page_break)
+    if not ln.strip():
+        return _hx_p(st.para(ls=100), [(st.char(size=_HX["gap"]), "")], page_break)
+    lead = len(ln) - len(ln.lstrip(" 　"))
+    text = ln.strip()
+    left = _tw(ln[:lead].replace("　", "  "), em)
+    if not lead and re.match(r"[①-⑳]", text):                       # 조문의 항(①)은 한 칸 들여 쓴다(법령 조문 배치)
+        left = _tw(" ", em)
+    if re.fullmatch(r"부\s*칙(?:\s*<[^>]*>)?", text):                  # 부칙 머리: 가운데 굵게
+        return _hx_p(st.para("CENTER", prev=600, keep=True), [(st.char(bold=True), text)], page_break)
+    m = _HX_MARK.match(text)
+    hang = _tw(m.group(0), em) if m else 0
+    head = bool(not lead and re.match(r"\d{1,2}\.\s+\S", text) and len(text) <= 40)
+    pid = st.para("JUSTIFY", left=left, intent=-hang, prev=(300 if head else 0), keep=head)   # 한글: 첫 줄은 왼쪽 여백, 둘째 줄부터 +내어쓰기
+    return _hx_p(pid, [(st.char(bold=head), text)], page_break)
+
+
+def _cell(st, c, col, row, cspan, width, bf, hdr=False, vcenter=False, law=False):
     lines = _seg_lines(c)
-    pa = _HS["para"].get("center" if c.get("hd") else "", "0")
-    paras = "".join(
-        f'<hp:p id="0" paraPrIDRef="{pa}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">'
-        + ("".join(f'<hp:run charPrIDRef="{_HS["char"].get(u, "0")}"><hp:t>{_xesc(t)}</hp:t></hp:run>' for t, u in ln)
-           or '<hp:run charPrIDRef="0"><hp:t></hp:t></hp:run>')
-        + f'{_LS.format(w=max(1000, width - 400))}</hp:p>'
-        for ln in lines)
-    lines = ["".join(t for t, _ in ln) for ln in lines]
-    # 줄 수·폭으로 높이를 어림(한글이 열 때 다시 계산)
-    est = sum(max(1, int(len(ln) * 1000 / max(1500, width - 1000)) + 1) for ln in lines)
-    h = max(1848, est * 1600 + 600)
+    em = _HX["cell"]
+    pid = st.para("CENTER" if c.get("hd") else "JUSTIFY", ls=_HX["cell_ls"])
+    style = {"": dict(), "b": dict(bold=True), "d": dict(color="#C00000", ul="#C00000"), "i": dict(bold=True, color="#1F3FBF", ul="#1F3FBF")}
+    paras = []
+    for ln in lines:
+        runs = [(st.char("body", em, **style.get(u or "", {})), t) for t, u in ln]
+        if not runs:
+            runs = [(st.char("body", em), "")]
+        # 대비표 칸의 조문(① 1. 가.)도 내어쓰기
+        first = "".join(t for _, t in runs)
+        m = _HX_MARK.match(first.lstrip()) if not c.get("hd") else None
+        if m:
+            lead = _tw(first[:len(first) - len(first.lstrip())], em)
+            if law and lead == 0:              # 대비표: 항 ① 한 칸, 호 1. 두 칸, 목 가. 세 칸 들여 쓰기(법령 조문 배치)
+                mk = m.group(0)
+                lead = _tw(" " * (1 if re.match(r"[①-⑳➀-➉]", mk) else 2 if re.match(r"\d", mk) else 3 if re.match(r"[가-하]", mk) else 0), em)
+            hang = _tw(m.group(0), em)
+            pp = st.para("JUSTIFY", left=lead, intent=-hang, ls=_HX["cell_ls"])
+            runs[0] = (runs[0][0], runs[0][1].lstrip())
+        else:
+            pp = pid
+        paras.append(_hx_p(pp, runs))
+    # 높이 어림(최소 높이 — 한글이 열 때 내용에 맞춰 늘린다). 크게 잡으면 빈 칸이 생기므로 넉넉하지 않게
+    per = max(1, int((width - 1020) / (em * 0.82)))
+    nl = sum(max(1, -(-len("".join(t for t, _ in ln)) // per)) for ln in lines)
+    h = max(1700, int(nl * em * _HX["cell_ls"] / 100) + 600)
+    va = "CENTER" if (c.get("hd") or vcenter) else "TOP"
     return (f'<hp:tc name="" header="{1 if hdr else 0}" hasMargin="1" protect="0" editable="0" dirty="0" borderFillIDRef="{bf}">'
-            f'<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" '
+            f'<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="{va}" '
             f'linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">'
-            f'{paras}</hp:subList><hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
+            f'{"".join(paras)}</hp:subList><hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
             f'<hp:cellSpan colSpan="{cspan}" rowSpan="1"/><hp:cellSz width="{width}" height="{h}"/>'
-            f'<hp:cellMargin left="283" right="283" top="141" bottom="141"/></hp:tc>'), h
+            f'<hp:cellMargin left="510" right="510" top="283" bottom="283"/></hp:tc>'), h
 
 
-def _table(rows, col_w, bf, bfh=None, page_break=False):
+def _table(st, rows, col_w, bf, bfh=None, page_break=False):
     total = sum(col_w)
+    if total > _HX["text_w"]:                  # 본문 폭을 넘으면 비율대로 줄인다(표가 오른쪽 여백 밖으로 나가지 않게)
+        col_w = [int(w * _HX["text_w"] / total) for w in col_w]
+        total = sum(col_w)
     trs, heights = [], []
     nhdr = 0                                   # 쪽이 바뀔 때 되풀이할 제목 행: 맨 위에서 이어지는, 모든 칸이 제목인 행만
     while nhdr < len(rows) and all(c.get("hd") for c in rows[nhdr]):
         nhdr += 1
+    vcenter = nhdr == 0                        # 제목 행이 없는 항목표(심의안건 앞면 등)는 칸 가운데
+    law = bool(nhdr) and any(re.sub(r"\s", "", c.get("t", "")).startswith("현행") for c in rows[0])   # 신구조문대비표
     for r, cells in enumerate(rows):
         col, tcs, rh = 0, [], 0
         for c in cells:
             cs = int(c.get("cs") or 1)
             w = sum(col_w[col:col + cs])
-            x, h = _cell(c, col, r, cs, w, (bfh or bf) if c.get("hd") else bf, hdr=r < nhdr)
+            x, h = _cell(st, c, col, r, cs, w, (bfh or bf) if c.get("hd") else bf, hdr=r < nhdr, vcenter=vcenter, law=law)
             tcs.append(x)
             rh = max(rh, h)
             col += cs
-        # 같은 행 셀 높이 통일
         tcs = [re.sub(r'(<hp:cellSz width="\d+" height=")\d+', r"\g<1>" + str(rh), t) for t in tcs]
         heights.append(rh)
         trs.append("<hp:tr>" + "".join(tcs) + "</hp:tr>")
-    tbl = (f'<hp:tbl id="0" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" '
-           f'lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="{1 if nhdr else 0}" rowCnt="{len(rows)}" colCnt="{len(col_w)}" '
+    # pageBreak="TABLE": 쪽 경계에서 행 가운데라도 나눈다(긴 조문 한 행이 한 쪽보다 길어도 다음 쪽으로 이어짐)
+    tbl = (f'<hp:tbl id="{1000 + len(trs)}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" '
+           f'lock="0" dropcapstyle="None" pageBreak="TABLE" repeatHeader="{1 if nhdr else 0}" rowCnt="{len(rows)}" colCnt="{len(col_w)}" '
            f'cellSpacing="0" borderFillIDRef="{bf}" noAdjust="0">'
            f'<hp:sz width="{total}" widthRelTo="ABSOLUTE" height="{sum(heights)}" heightRelTo="ABSOLUTE" protect="0"/>'
-           f'<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" '
-           f'vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>'
-           f'<hp:outMargin left="0" right="0" top="283" bottom="283"/>'
-           f'<hp:inMargin left="510" right="510" top="141" bottom="141"/>' + "".join(trs) + '</hp:tbl>')
-    return (f'<hp:p id="0" paraPrIDRef="0" styleIDRef="0" pageBreak="{1 if page_break else 0}" columnBreak="0" merged="0">'
-            f'<hp:run charPrIDRef="0">{tbl}</hp:run>' + _LS.format(w=47628) + '</hp:p>')
+           f'<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" '
+           f'vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="CENTER" vertOffset="0" horzOffset="0"/>'
+           f'<hp:outMargin left="0" right="0" top="0" bottom="567"/>'
+           f'<hp:inMargin left="510" right="510" top="283" bottom="283"/>' + "".join(trs) + '</hp:tbl>')
+    return (f'<hp:p id="0" paraPrIDRef="{st.para(ls=100)}" styleIDRef="0" pageBreak="{1 if page_break else 0}" columnBreak="0" merged="0">'
+            f'<hp:run charPrIDRef="{st.char(size=_HX["gap"])}">{tbl}<hp:t></hp:t></hp:run></hp:p>')
 
 
 def _clamp_int(v, lo, hi, default):
@@ -2219,39 +2379,6 @@ def _norm_runs(v) -> list:
         if isinstance(x, dict) and isinstance(x.get("s"), str):
             out.append({"s": x["s"][:20000], "u": x.get("u") if x.get("u") in ("d", "i", "b") else ""})
     return out
-
-
-def _hwpx_styles(header: str) -> str:
-    """header.xml 에 굵게·밑줄(삭제 빨강/추가 파랑 굵게)·제목 글자 모양과 가운데 정렬 문단 모양을 덧붙이고 번호를 _HS 에 담는다."""
-    _HS["char"], _HS["para"] = {"": "0"}, {"": "0"}
-    m = re.search(r'<hh:charProperties itemCnt="(\d+)">', header)
-    c0 = re.search(r'<hh:charPr id="0".*?</hh:charPr>', header, re.S)
-    if m and c0:
-        n = int(m.group(1))
-        add, specs = [], [("b", "#000000", "<hh:bold/>", None), ("d", "#C00000", "", "#C00000"),
-                          ("i", "#1F3FBF", "<hh:bold/>", "#1F3FBF"), ("title", "#000000", "<hh:bold/>", None)]
-        for k, (name, color, bold, ul) in enumerate(specs):
-            x = re.sub(r'id="0"', f'id="{n + k}"', c0.group(0), count=1)
-            x = re.sub(r'textColor="[^"]*"', f'textColor="{color}"', x, count=1)
-            if name == "title":
-                x = re.sub(r'height="\d+"', 'height="1600"', x, count=1)
-            x = re.sub(r"<hh:(?:bold|italic)/>|<hh:underline\b[^>]*/>", "", x)
-            x = x.replace("<hh:strikeout", bold + (f'<hh:underline type="BOTTOM" shape="SOLID" color="{ul}"/>' if ul else "") + "<hh:strikeout", 1)
-            add.append(x)
-            _HS["char"][name] = str(n + k)
-        end = header.find("</hh:charProperties>")
-        header = header[:end] + "".join(add) + header[end:]
-        header = header.replace(m.group(0), f'<hh:charProperties itemCnt="{n + len(add)}">', 1)
-    m = re.search(r'<hh:paraProperties itemCnt="(\d+)">', header)
-    p0 = re.search(r'<hh:paraPr id="0".*?</hh:paraPr>', header, re.S)
-    if m and p0:
-        n = int(m.group(1))
-        x = re.sub(r'id="0"', f'id="{n}"', p0.group(0), count=1).replace('horizontal="JUSTIFY"', 'horizontal="CENTER"', 1)
-        end = header.find("</hh:paraProperties>")
-        header = header[:end] + x + header[end:]
-        header = header.replace(m.group(0), f'<hh:paraProperties itemCnt="{n + 1}">', 1)
-        _HS["para"]["center"] = str(n)
-    return header
 
 
 def _norm_blocks(blocks) -> list:
@@ -2291,7 +2418,6 @@ def build_hwpx(blocks: list) -> bytes:
     bf = _CTX["hwpx_full_border"](header)
     header, bfh = _hwpx_shaded(header, bf)
     with _HWPX_LOCK:
-        header = _hwpx_styles(header)
         return _build_hwpx(zin, header, sec, bf, blocks, bfh)
 
 
@@ -2313,18 +2439,32 @@ def _hwpx_shaded(header: str, bf: str):
 _HWPX_LOCK = threading.Lock()
 
 
+def _hx_first(first: str, st: _HxStyle) -> str:
+    """구역 첫 문단(쪽 설정): 여백을 공문서 기준으로, 아래 가운데 쪽 번호(- 1 -)를 넣는다."""
+    M = _HX["margin"]
+    first = re.sub(r'<hp:margin [^>]*/>', f'<hp:margin header="{M["header"]}" footer="{M["footer"]}" gutter="0" left="{M["left"]}" '
+                   f'right="{M["right"]}" top="{M["top"]}" bottom="{M["bottom"]}"/>', first, count=1)
+    first = re.sub(r'<hp:linesegarray>.*?</hp:linesegarray>', '', first, flags=re.S)
+    first = re.sub(r'paraPrIDRef="\d+"', f'paraPrIDRef="{st.para(ls=100)}"', first, count=1)
+    first = re.sub(r'charPrIDRef="\d+"', f'charPrIDRef="{st.char(size=_HX["gap"])}"', first)
+    pn = '<hp:ctrl><hp:pageNum pos="BOTTOM_CENTER" formatType="DIGIT" sideChar="-"/></hp:ctrl>'
+    return first.replace("</hp:ctrl></hp:run>", "</hp:ctrl>" + pn + "</hp:run>", 1) if "<hp:pageNum" not in first else first
+
+
 def _build_hwpx(zin, header, sec, bf, blocks, bfh=None) -> bytes:
+    st = _HxStyle(header)
     m = re.search(r'<hs:sec\b[^>]*>', sec)
     prefix, body = sec[:m.end()], sec[m.end():]
     pi = body.find('<hp:p')
     pj = body.find('</hp:p>', pi) + len('</hp:p>')
-    first = re.sub(r'<hp:t>.*?</hp:t>', '<hp:t></hp:t>', body[pi:pj], flags=re.S)
+    first = _hx_first(re.sub(r'<hp:t>.*?</hp:t>', '<hp:t></hp:t>', body[pi:pj], flags=re.S), st)
     parts, pb = [], False                      # 쪽 나눔은 빈 문단 대신 다음 문단(표)에 건다
-    for i, blk in enumerate(_norm_blocks(blocks)):
+    nb = _norm_blocks(blocks)
+    for blk in nb:
         t = blk.get("t")
         if t == "table":
             ncol = blk["ncol"]
-            parts.append(_table(blk["rows"], blk["colWidths"] or [int(47628 / ncol)] * ncol, bf, bfh, page_break=pb))
+            parts.append(_table(st, blk["rows"], blk["colWidths"] or [int(_HX["text_w"] / ncol)] * ncol, bf, bfh, page_break=pb))
             pb = False
         elif t == "break":
             pb = True
@@ -2332,11 +2472,14 @@ def _build_hwpx(zin, header, sec, bf, blocks, bfh=None) -> bytes:
             txt = str(blk.get("text") or "")
             ttl = bool(blk.get("titleBold"))
             for j, ln in enumerate(txt.split("\n")):
-                parts.append(_para(ln, page_break=(pb or bool(blk.get("pageBreak"))) and j == 0,
-                                   style="title" if ttl and j == 0 else "", align="center" if ttl and j == 0 else ""))
+                parts.append(_hx_line(st, ln, title=ttl and j == 0, page_break=(pb or bool(blk.get("pageBreak"))) and j == 0))
             pb = False
-    new_sec = prefix + first + "".join(parts) + _para("") + "</hs:sec>"
-    plain = "\n".join(str(b_.get("text") or "") for b_ in _norm_blocks(blocks) if b_.get("t") not in ("table", "break"))
+    _HS["char"] = {"": "0", "b": st.char(size=_HX["cell"], bold=True), "d": st.char(size=_HX["cell"], color="#C00000", ul="#C00000"),
+                   "i": st.char(size=_HX["cell"], bold=True, color="#1F3FBF", ul="#1F3FBF"), "title": st.char("title", _HX["title"], bold=True)}
+    _HS["para"] = {"": "0", "center": st.para("CENTER")}
+    new_sec = prefix + first + "".join(parts) + "</hs:sec>"
+    header = st.header()
+    plain = "\n".join(str(b_.get("text") or "") for b_ in nb if b_.get("t") not in ("table", "break"))
     out = io.BytesIO()
     zout = zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED)
     zout.writestr(zipfile.ZipInfo("mimetype"), "application/hwp+zip", compress_type=zipfile.ZIP_STORED)
