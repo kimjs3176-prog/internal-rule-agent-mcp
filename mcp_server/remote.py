@@ -261,18 +261,32 @@ p.lead{{color:var(--mu);margin:0 0 28px;text-wrap:balance}} section{{background:
 h2{{font-size:16px;margin:0 0 10px}} code{{font:14px ui-monospace,SFMono-Regular,Menlo,monospace}} .url{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
 .url code{{flex:1;min-width:0;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--rule);overflow-wrap:anywhere}}
 button{{font:600 14px inherit;padding:10px 16px;border-radius:999px;border:0;background:var(--ink);color:var(--card);cursor:pointer}}
-ol,ul{{margin:0;padding-left:20px}} li{{margin:4px 0}} .mu{{color:var(--mu);font-size:14px}}
+ol,ul{{margin:0;padding-left:20px}} .chip{{font-size:12px;font-weight:600;color:var(--mu);border:1px solid var(--rule);border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:2px}} li{{margin:4px 0}} .mu{{color:var(--mu);font-size:14px}}
 </style></head><body><main>
 <h1>{_h(title)}</h1><p class="lead">{_h(lead)}</p>
 <section><h2>연결 주소</h2><div class="url"><code id="u">{_h(url)}</code><button onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('u').textContent).then(()=>{{this.textContent='복사됨'}})">복사</button></div>
 <p class="mu">이 주소는 AI 도우미에 넣는 주소입니다. 브라우저로 여는 화면이 아닙니다.</p></section>
-<section><h2>AI 도우미에 등록</h2><ol>
-<li><b>claude.ai</b>: 설정 → 커넥터 → 사용자 지정 커넥터 추가 → 이 주소 입력(인증 비움) → 대화창 도구 메뉴에서 켜기</li>
-<li><b>ChatGPT</b>: 설정 → 앱·커넥터 → 고급에서 개발자 모드 → 만들기 → 이 주소, 인증 “없음”</li>
-<li><b>Claude Code</b>: <code>claude mcp add --transport http reg-agent {_h(url)}</code></li></ol></section>
+<section><h2>claude.ai 에 등록 <span class="chip">웹·데스크톱·모바일</span></h2><ol>
+<li><b>설정 → 커넥터</b>에서 <b>사용자 지정 커넥터 추가</b>를 누릅니다.</li>
+<li>이름(예: 규정 제·개정 에이전트)과 위 주소를 넣습니다. 고급 설정(인증)은 비워 둡니다.</li>
+<li><b>추가</b>를 누릅니다.</li>
+<li>새 대화의 입력창 <b>도구 메뉴</b>에서 이 커넥터를 켭니다.</li></ol>
+<p class="mu">팀·기업 요금제에서는 조직 관리자가 먼저 추가해야 구성원이 켤 수 있습니다.</p></section>
+<section><h2>ChatGPT 에 등록</h2><ol>
+<li><b>설정 → 앱·커넥터 → 고급 설정</b>에서 <b>개발자 모드</b>를 켭니다.</li>
+<li>앱·커넥터 화면에서 <b>만들기</b>를 누릅니다.</li>
+<li>이름과 위 주소를 넣고, 인증은 <b>없음</b>으로 둡니다.</li>
+<li>새 대화의 <b>＋ 메뉴 → 개발자 모드</b>에서 이 커넥터를 고릅니다.</li></ol></section>
+<section><h2>그 밖의 도우미</h2><ul>
+<li><b>Claude Code</b>: <code>claude mcp add --transport http reg-agent {_h(url)}</code></li>
+<li><b>VS Code · Cursor</b>(<code>.vscode/mcp.json</code>): <code>{{ "servers": {{ "reg-agent": {{ "type": "http", "url": "{_h(url)}" }} }} }}</code></li></ul></section>
 <section><h2>이렇게 물어보세요</h2><ul>{ex}</ul></section>
 <section><h2>도구 {len(core.tool_list())}개</h2><ul>{tools}</ul>
 <p class="mu">개정문·대비표·검증·점검·문서는 이 서버의 규칙 엔진이 만듭니다. 받은 원문과 결과는 서버에 저장하지 않습니다.</p></section>
+<section><h2>잘 안 될 때</h2><ul>
+<li><b>대화에서 도구를 안 씀</b>: 도구 메뉴(ChatGPT는 개발자 모드)에서 커넥터가 켜져 있는지 보고, 새 대화에서 다시 요청합니다.</li>
+<li><b>추가할 때 연결 실패</b>: 주소 끝이 <code>/mcp</code>인지, 인증을 비워 뒀는지 확인합니다.</li>
+<li><b>사용자 지정 커넥터 메뉴가 없음</b>: 팀·기업 요금제면 조직 관리자에게 추가를 요청합니다.</li></ul></section>
 </main></body></html>"""
     r = Response(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
