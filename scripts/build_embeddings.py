@@ -161,15 +161,24 @@ def save(chunks, keys, have, model: str, dim: int, total: int):
                       "preview": m.get("preview") or c["text"][:240],
                       **({"h": m["h"]} if m.get("h") else {})})
         blobs.append(vec)
-    with open(BIN_PATH, "wb") as f:
-        for v in blobs:
-            f.write(v)
     meta = {"model": model, "dim": dim, "count": len(metas),
             "scale": 1.0 / 127.0, "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_chunks": total, "complete": len(metas) >= total,
             "chunks": metas}
-    with open(META_PATH, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False)
+    # 임시 파일에 다 쓴 뒤 바꿔 넣는다 — 저장 중 중단돼도 옛 인덱스가 반쯤 쓰인 채 남지 않는다
+    btmp, mtmp = BIN_PATH + ".tmp", META_PATH + ".tmp"
+    try:
+        with open(btmp, "wb") as f:
+            for v in blobs:
+                f.write(v)
+        with open(mtmp, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False)
+        os.replace(btmp, BIN_PATH)
+        os.replace(mtmp, META_PATH)
+    finally:
+        for t in (btmp, mtmp):
+            if os.path.exists(t):
+                os.remove(t)
     return len(metas)
 
 
@@ -247,6 +256,11 @@ def main():
     except QuotaExhausted as e:
         stopped = e
         print("\n일일 쿼터가 소진되어 중단합니다. 지금까지 만든 벡터를 저장합니다.")
+    except BaseException:                           # 쿼터 외 오류(4xx·네트워크·Ctrl+C)에도 진행분은 남긴다
+        if dim is not None and have:
+            n = save(chunks, keys, have, args.model, dim, len(chunks))
+            print(f"\n오류로 중단 — 지금까지 만든 벡터 {n:,}개를 저장했습니다. 같은 명령으로 이어서 만들 수 있습니다.")
+        raise
 
     if dim is None:
         sys.exit("생성된 벡터가 없습니다.")

@@ -95,13 +95,30 @@ def reg_slug(title: str) -> str:
     s = re.sub(r"\s+", "_", s).strip("._")
     # 파일시스템 이름 한도(255바이트) 안에서 자른다 — 한글은 글자당 3바이트
     b = s.encode("utf-8")[:200]
-    return b.decode("utf-8", "ignore").strip("._")
+    s = b.decode("utf-8", "ignore").strip("._")
+    if not s:                                         # 빈 슬러그면 REG_DIR 바로 아래에 쓰게 된다
+        raise ValueError(f"규정명으로 폴더 이름을 만들 수 없습니다: {title!r} — 글자가 있는 규정명으로 바꿔 주세요.")
+    return s
+
+
+def slug_for(man: list, title: str) -> str:
+    """같은 규정(norm_key)이 매니페스트에 있으면 그 슬러그를, 없으면 새 슬러그.
+    'CCTV운영지침'·'CCTV 운영 지침'처럼 띄어쓰기만 다른 이름이 다른 폴더로 갈라지지 않게 한다."""
+    key = norm_key(title)
+    for m in man:
+        if m.get("slug") and norm_key(m.get("title", "")) == key:
+            return m["slug"]
+    return reg_slug(title)
 
 
 
 # ── 문서 → 블록(단락·표) 추출 ────────────────────────────────────────────────
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+# 본문 흐름이 아닌 하위 트리: HWPX 머리말·꼬리말·각주·미주, DOCX 호환용 대체 그림(mc:Fallback — mc:Choice 와 같은 글이 한 번 더)
+_SKIP_TAGS = {"header", "footer", "footNote", "endNote", "Fallback"}
 
 
 def _xml_blocks(root: ET.Element, para_tag: str, table_tag: str,
@@ -133,42 +150,69 @@ def _xml_blocks(root: ET.Element, para_tag: str, table_tag: str,
             out.append(sub.tail or "")
         return "".join(out)
 
+    def is_tab(el: ET.Element, parent: ET.Element) -> bool:
+        """DOCX 본문 탭(<w:r><w:tab/>). 단락 속성의 탭 위치 정의(<w:tabs><w:tab/>)는 제외."""
+        return _local(el.tag) == "tab" and _local(parent.tag) != "tabs"
+
     def cell_text(tc: ET.Element) -> str:
         parts = []
-        for el in tc.iter():
-            t = _local(el.tag)
-            if t in text_tags:
-                parts.append(tag_text(el))
-            elif t == para_tag and parts:
-                parts.append(" ")
+
+        def go(node):                                # 안쪽 표의 글도 이 셀 안에 한 번만 담긴다
+            for el in node:
+                t = _local(el.tag)
+                if t in _SKIP_TAGS:
+                    continue
+                if t in text_tags:
+                    parts.append(tag_text(el))
+                    continue
+                if is_tab(el, node):
+                    parts.append(" ")
+                    continue
+                if t == para_tag and parts:
+                    parts.append(" ")
+                go(el)
+        go(tc)
         return re.sub(r"\s+", " ", "".join(parts)).strip()
 
+    def own(node: ET.Element, tag: str):
+        """node 아래의 tag 요소 — 안쪽 표(table_tag) 속은 들어가지 않는다."""
+        for el in node:
+            n = _local(el.tag)
+            if n == tag:
+                yield el
+            elif n != table_tag:
+                yield from own(el, tag)
+
+    def _int(v) -> int:
+        try:
+            return int(v or 1)
+        except (TypeError, ValueError):
+            return 1
+
     def cell_span(tc: ET.Element):
-        """셀 병합 정보(colspan, rowspan). HWPX는 hp:cellSpan, DOCX는 gridSpan/vMerge."""
+        """셀 병합 정보(colspan, rowspan). HWPX는 hp:cellSpan, DOCX는 gridSpan/vMerge. 안쪽 표의 병합은 보지 않는다."""
         cs = rs = 1
-        for sub in tc.iter():
-            n = _local(sub.tag)
-            if n == "cellSpan":                      # HWPX
-                cs = int(sub.get("colSpan") or 1)
-                rs = int(sub.get("rowSpan") or 1)
-            elif n == "gridSpan":                    # DOCX
-                try:
-                    cs = int(list(sub.attrib.values())[0])
-                except (ValueError, IndexError):
-                    pass
+        for sub in own(tc, "cellSpan"):              # HWPX
+            cs, rs = _int(sub.get("colSpan")), _int(sub.get("rowSpan"))
+        for sub in own(tc, "gridSpan"):              # DOCX
+            vals = list(sub.attrib.values())
+            if vals:
+                cs = _int(vals[0])
         return max(cs, 1), max(rs, 1)
 
     def table_block(tbl: ET.Element):
-        rows = []
-        for tr in tbl.iter():
-            if _local(tr.tag) != row_tag:
-                continue
+        rows, el_of = [], {}
+        for tr in own(tbl, row_tag):
             cells = []
             for tc in tr:
                 if _local(tc.tag) != cell_tag:
                     continue
                 cs, rs = cell_span(tc)
                 cells.append({"t": cell_text(tc), "cs": cs, "rs": rs})
+                if next(own(tc, table_tag), None) is not None:   # 표 안의 표: 열람 화면에서 그 셀 안에 표로 한 번만
+                    cells[-1]["blocks"] = _xml_blocks(tc, para_tag, table_tag, row_tag, cell_tag,
+                                                      text_tags, break_tags)
+                el_of[id(cells[-1])] = tc
             if cells:
                 rows.append(cells)
         _merge_char_cells(rows)      # 세로쓰기로 글자마다 쪼개진 셀 복원
@@ -181,6 +225,12 @@ def _xml_blocks(root: ET.Element, para_tag: str, table_tag: str,
         # 1열 표는 제목·안내 박스로 쓰인 레이아웃 표 → 표 대신 단락으로
         if max(sum(c["cs"] for c in r) for r in rows) <= 1:
             for r in rows:
+                tc = el_of.get(id(r[0])) if r else None
+                if tc is not None and next(own(tc, table_tag), None) is not None:
+                    walk(tc, False)           # 표를 감싼 틀: 안쪽 표를 표 그대로 꺼낸다
+                    if buf:
+                        flush()
+                    continue
                 blocks.append({"type": "p", "text": (r[0]["t"] if r else "").strip()})
             return None
         return {"type": "table", "rows": rows}
@@ -188,6 +238,11 @@ def _xml_blocks(root: ET.Element, para_tag: str, table_tag: str,
     def walk(node, in_para: bool):
         for child in list(node):
             tag = _local(child.tag)
+            if tag in _SKIP_TAGS:
+                continue
+            if is_tab(child, node):
+                buf.append(" ")
+                continue
             if tag == table_tag:
                 flush()                       # 표 앞 텍스트를 단락으로 마무리
                 tb = table_block(child)
@@ -296,7 +351,9 @@ _ENTITY_RE = re.compile(r"&#(x[0-9a-f]+|\d+);?", re.I)
 
 
 def _unentity_urls(html: str) -> str:
-    """href/src 값 속 숫자 문자 참조(jav&#x61;script:)를 풀어 아래 검사에 걸리게 한다."""
+    """href/src 값 속 숫자 문자 참조(jav&#x61;script:)를 풀어 아래 검사에 걸리게 한다.
+    브라우저는 URL 의 탭·줄바꿈을 버리고 앞뒤 공백·제어 문자를 걷으므로(java&#9;script:, &#32;javascript:)
+    그렇게 걷어 낸 값이 위험한 스킴이면 걷어 낸 값으로 바꿔 둔다."""
     def dec(m):
         v = m.group(1)
         try:
@@ -304,8 +361,25 @@ def _unentity_urls(html: str) -> str:
         except (ValueError, OverflowError):
             return m.group(0)
         return ch if ch.isascii() and (ch.isalnum() or ch in ":/") else m.group(0)
-    return re.sub(r"((?:href|src|action|xlink:href)\s*=\s*[\"']?)([^\"'\s>]*)",
-                  lambda m: m.group(1) + _ENTITY_RE.sub(dec, m.group(2)), html, flags=re.I)
+
+    def dec_all(m):
+        v = m.group(1)
+        try:
+            return chr(int(v[1:], 16) if v[0] in "xX" else int(v))
+        except (ValueError, OverflowError):
+            return m.group(0)
+
+    def fix(m):
+        v = m.group(3)
+        probe = _ENTITY_RE.sub(dec_all, v)
+        probe = re.sub(r"(?i)&colon;", ":", re.sub(r"(?i)&(?:tab|newline);", "", probe))   # 이름 참조(java&Tab;script&colon;)
+        probe = re.sub(r"^[\x00-\x20\x7f]+", "", re.sub(r"[\t\n\r]", "", probe))
+        if re.match(r"(?:javascript|data|vbscript):", probe, re.I):
+            return m.group(1) + m.group(2) + probe + m.group(2)
+        return m.group(1) + m.group(2) + _ENTITY_RE.sub(dec, v) + m.group(2)
+    html = re.sub(r"((?:href|src|action|xlink:href)\s*=\s*)(\"|')(.*?)\2", fix, html, flags=re.I | re.S)
+    return re.sub(r"((?:href|src|action|xlink:href)\s*=\s*)()([^\"'\s>]+)",
+                  fix, html, flags=re.I)
 
 
 def _sanitize_html(html: str) -> str:
@@ -335,6 +409,8 @@ def _merge_char_cells(rows: list) -> list:
     그대로 두면 폭 좁은 빈 칸이 늘어서 표가 어수선해진다.
     합친 셀의 colspan 을 합계로 유지해 열 정렬은 그대로 둔다.
     (숫자·기호는 실제 자료일 수 있으므로 한글 한 글자만 대상으로 한다)
+    수/우/미·상/중/하·유/무·가/나/다 같은 한 글자 자료 셀을 뭉치지 않도록, 그 행의 나머지 칸이
+    모두 비어 있는(도식처럼 빈 칸 사이에 글자를 흩어 둔) 경우에만 합치고, 같은 글자 반복(건|건|건)은 두다.
     """
     for r in rows:
         out, i = [], 0
@@ -344,7 +420,9 @@ def _merge_char_cells(rows: list) -> list:
                    and _ONE_HANGUL.match((r[j]["t"] or "").strip())
                    and r[j]["rs"] == r[i]["rs"]):
                 j += 1
-            if j - i >= 2:
+            rest = r[:i] + r[j:]
+            if (j - i >= 2 and rest and not any((c["t"] or "").strip() for c in rest)
+                    and len({(c["t"] or "").strip() for c in r[i:j]}) > 1):
                 out.append({"t": "".join((c["t"] or "").strip() for c in r[i:j]),
                             "cs": sum(c["cs"] for c in r[i:j]),
                             "rs": r[i]["rs"]})
@@ -388,6 +466,11 @@ def _table_html(rows: list) -> str:
                 attr += f' colspan="{c["cs"]}"'
             if c["rs"] > 1:
                 attr += f' rowspan="{c["rs"]}"'
+            if c.get("blocks"):                       # 표 안의 표
+                inner = "".join(_table_html(b["rows"]) if b["type"] == "table" else f"<p>{_esc(b['text'])}</p>"
+                                for b in c["blocks"] if b["type"] == "table" or (b.get("text") or "").strip())
+                out.append(f"<{tag}{attr}>{inner}</{tag}>")
+                continue
             out.append(f'<{tag}{attr}>{_esc(c["t"])}</{tag}>')
         return "".join(out)
 
@@ -477,11 +560,27 @@ def _blocks_to_view_html(title: str, meta: dict, blocks: list,
 </body></html>"""
 
 
+def _decode_html(raw: bytes) -> str:
+    """HTML 업로드 디코딩: <meta charset>(euc-kr 등)을 먼저 따르고, 없으면 UTF-8 → CP949 순으로."""
+    m = re.search(rb"<meta[^>]+charset\s*=\s*[\"']?\s*([A-Za-z0-9_\-]+)", raw[:4096], re.I)
+    if m:
+        enc = m.group(1).decode("ascii").lower()
+        enc = "cp949" if enc in ("euc-kr", "euckr", "ks_c_5601-1987", "ksc5601") else enc   # 확장 완성형까지
+        try:
+            return raw.decode(enc)
+        except (LookupError, UnicodeDecodeError):
+            pass
+    try:
+        return _decode(raw)
+    except ValueError:
+        return raw.decode("utf-8", errors="replace")
+
+
 def _convert_upload(filename: str, raw: bytes, title: str, meta: dict) -> dict:
     """업로드 파일 → {view_html, text, converted, warning}."""
     ext = os.path.splitext(filename)[1].lower()
     if ext in (".html", ".htm"):
-        html = _sanitize_html(raw.decode("utf-8", errors="replace"))
+        html = _sanitize_html(_decode_html(raw))
         import html as _html_mod
         t = re.sub(r"(?is)<\s*(head|script|style|title)\b.*?<\s*/\s*\1\s*>", " ", html)
         t = re.sub(r"(?i)<\s*(br|/p|/div|/tr|/li|/h[1-6]|/table)\s*/?>", "\n", t)
@@ -571,11 +670,18 @@ def norm_key(s: str) -> str:
 
 
 def load_manifest() -> list:
+    """매니페스트 읽기. 파일이 없을 때만 빈 목록 — 깨진 파일을 빈 목록으로 읽으면 다음 저장 때 통째로 덮어쓴다."""
     try:
         with open(REG_MANIFEST_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+            man = json.load(f)
+    except FileNotFoundError:
         return []
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise ValueError(f"매니페스트를 읽을 수 없습니다({REG_MANIFEST_PATH}: {e}). "
+                         "파일을 고치거나 백업(.backup-…)으로 되돌린 뒤 다시 실행하세요.") from e
+    if not isinstance(man, list):
+        raise ValueError(f"매니페스트 형식이 잘못되었습니다({REG_MANIFEST_PATH}: 목록이 아님).")
+    return man
 
 
 def save_manifest(man: list) -> None:
@@ -592,15 +698,28 @@ def convert(filename: str, raw: bytes, title: str, meta: dict) -> dict:
     return _convert_upload(filename, raw, title, meta)
 
 
+def _atomic_write(path: str, data) -> None:
+    """임시 파일에 다 쓴 뒤 os.replace — 중간에 실패해도 옛 파일이 반쯤 쓰인 채 남지 않는다."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data.encode("utf-8") if isinstance(data, str) else data)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
 def write_reg(slug: str, view_html: str, text: str, orig_filename: str, raw: bytes) -> str:
     """regulations/<slug>/ 에 열람 HTML·본문·원본을 쓴다. 저장된 원본 파일명 반환."""
+    if not slug or slug in (".", "..") or re.search(r"[\\/]", slug):
+        raise ValueError(f"규정 폴더 이름이 올바르지 않습니다: {slug!r}")
     d = os.path.join(REG_DIR, slug)
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "index.html"), "w", encoding="utf-8") as f:
-        f.write(view_html)
+    _atomic_write(os.path.join(d, "index.html"), view_html)
     if text:
-        with open(os.path.join(d, "text.txt"), "w", encoding="utf-8") as f:
-            f.write(text)
+        _atomic_write(os.path.join(d, "text.txt"), text)
     elif os.path.exists(os.path.join(d, "text.txt")):
         os.remove(os.path.join(d, "text.txt"))       # 본문을 못 읽은 개정판(PDF·HWP)이면 옛 본문으로 개정·검색하지 않게 지운다
     ext = os.path.splitext(orig_filename)[1].lower()
@@ -608,9 +727,12 @@ def write_reg(slug: str, view_html: str, text: str, orig_filename: str, raw: byt
         if fn_.startswith("original.") and os.path.splitext(fn_)[1].lower() != ext:
             os.remove(os.path.join(d, fn_))
     stored = f"original{ext}"
-    with open(os.path.join(d, stored), "wb") as f:
-        f.write(raw)
+    _atomic_write(os.path.join(d, stored), raw)
     return stored
+
+
+# 원본 파일에서 나온 값 — 새 원본으로 바꿀 때 옛 값이 남으면 엉뚱한 PDF·원본을 가리킨다
+_DERIVED_KEYS = ("original", "searchable", "pdf")
 
 
 def upsert(man: list, entry: dict) -> list:
@@ -618,7 +740,8 @@ def upsert(man: list, entry: dict) -> list:
     key = norm_key(entry["title"])
     for i, m in enumerate(man):
         if norm_key(m.get("title", "")) == key:
-            man[i] = {**m, **entry}
+            kept = {k: v for k, v in m.items() if k not in _DERIVED_KEYS}
+            man[i] = {**kept, **entry}
             return man
     man.append(entry)
     return man

@@ -10,12 +10,14 @@ QuickJS 에서는 같은 프로세스의 Flask 앱을 직접 부르고(네트워
 """
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
+from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -31,8 +33,21 @@ _ALLOWED = re.compile(r"^/api/(?:regagent|law)/[\w\-/.%]*$")
 def allowed(method: str, url: str) -> bool:
     """엔진이 부를 수 있는 서버 API 인가: 내규·법령 조회 API(GET·POST)만. 작업 실적 기록·등록·외부 주소는 안 된다."""
     path = str(url).split("?", 1)[0]
-    return (method in ("GET", "POST") and bool(_ALLOWED.match(path)) and ".." not in path and "//" not in path
-            and not path.startswith("/api/regagent/ledger"))
+    if method not in ("GET", "POST") or not _ALLOWED.match(path):
+        return False
+    # 퍼센트 부호화(%6Cedger, %252e%252e …)로 막힌 경로를 돌아가지 못하게, 더 풀리지 않을 때까지 푼 뒤 따진다
+    dec = path
+    for _ in range(5):
+        nxt = unquote(dec)
+        if nxt == dec:
+            break
+        dec = nxt
+    else:
+        return False
+    if ".." in dec or "//" in dec or "\\" in dec:
+        return False
+    norm = posixpath.normpath(dec)
+    return not norm.lower().startswith("/api/regagent/ledger")
 
 
 def _read(p):
@@ -182,6 +197,8 @@ def _run_quickjs(inp: dict, fetch=local_fetch, deadline=None, script=None, timeo
             q = json.loads(ctx.eval("__ftake()"))
             if q:
                 for req in q:
+                    if time.monotonic() > deadline:      # 시간이 다 되면 다음 요청을 시작하지 않는다
+                        raise TimeoutError
                     try:
                         st, text, ctype = (fetch(req["method"], req["url"], req.get("body"), req["ctx"]) if req.get("ctx")
                                            else fetch(req["method"], req["url"], req.get("body")))

@@ -10,7 +10,7 @@ claude.ai·ChatGPT 의 커넥터, Claude Code(--transport http), VS Code·Cursor
       MCP_ALLOWED_ORIGINS=…   브라우저에서 직접 부를 때 허용할 출처(쉼표 구분). ALLOWED_ORIGINS(화면 CORS)·MCP_PUBLIC_URL 은 늘 허용
       MCP_PUBLIC_URL=…        링크에 쓸 공개 주소(프록시 뒤라 주소가 다르게 보일 때)
       MCP_PER_MIN=120         남용 방지: 같은 접속 주소(IP)에서 1분에 받는 호출 수(MCP 호출·문서 내려받기). 넘으면 429
-      MCP_TRUST_PROXY=1       Vercel 밖에서 프록시(nginx 등) 뒤에 둘 때만: X-Forwarded-For 의 첫 주소를 접속 주소로 센다
+      MCP_TRUST_PROXY=1       Vercel 밖에서 프록시(nginx 등) 뒤에 둘 때만: X-Forwarded-For 의 마지막 주소(프록시가 붙인 것)를 접속 주소로 센다
 """
 import hmac
 import json
@@ -21,6 +21,7 @@ import time
 from urllib.parse import quote, urlsplit
 
 from flask import Blueprint, Response, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from . import core, engine
 
@@ -98,6 +99,7 @@ def _cors(resp, origin):
 # claude.ai·ChatGPT 커넥터는 그 회사 서버에서 부르므로, 그 사용자들은 몇 개의 주소를 함께 쓴다 — 상한을 넉넉히 둔다.
 _RATE: dict = {}
 _RATE_LOCK = threading.Lock()
+_RATE_MAX = 5000                                            # 표에 두는 (주소, 분) 수 상한 — 꾸민 주소로 메모리를 늘리지 못하게
 
 
 def _per_min() -> int:
@@ -110,23 +112,26 @@ def _per_min() -> int:
 def _client_ip() -> str:
     # Vercel 은 앞단에서 X-Forwarded-For 를 실제 접속 주소로 채운다. 그 밖에서는 요청자가 이 머리글을 꾸밀 수 있으므로
     # 프록시 뒤라고 밝힌 때(MCP_TRUST_PROXY=1)만 믿고, 아니면 실제 연결 주소(remote_addr)를 쓴다.
+    # 앞쪽 주소는 요청자가 꾸며 보낼 수 있다 — 믿는 프록시가 맨 끝에 붙인 주소(가장 오른쪽)를 쓴다
     if os.environ.get("VERCEL") or (os.environ.get("MCP_TRUST_PROXY") or "").strip() == "1":
-        v = (request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or "").split(",")[0].strip()
+        v = (request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP") or "").split(",")[-1].strip()
         if v:
             return v
     return request.remote_addr or ""
 
 
-def rate_limited() -> bool:
-    """이번 1분 동안 이 주소의 호출이 상한을 넘었는가(세면서 판단)."""
+def rate_limited(cost: int = 1) -> bool:
+    """이번 1분 동안 이 주소의 호출이 상한을 넘었는가(세면서 판단). cost: 이번에 셀 호출 수(묶음이면 건수)."""
     now = int(time.time() // 60)
     k = (_client_ip(), now)
     with _RATE_LOCK:
-        n = _RATE.get(k, 0) + 1
-        _RATE[k] = n
-        if len(_RATE) > 5000:
-            for kk in [x for x in _RATE if x[1] < now]:
+        if k not in _RATE and len(_RATE) >= _RATE_MAX:
+            for kk in [x for x in _RATE if x[1] != now]:     # 지난 분의 기록부터 버린다
                 _RATE.pop(kk, None)
+            if len(_RATE) >= _RATE_MAX:                       # 이번 1분에 새 주소가 너무 많다 — 표를 늘리지 않고 막는다
+                return True
+        n = _RATE.get(k, 0) + max(1, int(cost))
+        _RATE[k] = n
     return n > _per_min()
 
 
@@ -171,7 +176,10 @@ def mcp_endpoint():
         return r
     if (request.content_length or 0) > MAX_BODY:
         return _rpc_error(413, -32600, "요청이 너무 큽니다(1MB 이하).", origin)
-    raw = request.get_data(cache=False)
+    try:                                                    # 길이를 밝히지 않은(chunked) 본문도 상한 + 1 바이트까지만 읽는다
+        raw = request.stream.read(MAX_BODY + 1)
+    except RequestEntityTooLarge:
+        return _rpc_error(413, -32600, "요청이 너무 큽니다(1MB 이하).", origin)
     if len(raw) > MAX_BODY:
         return _rpc_error(413, -32600, "요청이 너무 큽니다(1MB 이하).", origin)
     try:
@@ -188,7 +196,9 @@ def mcp_endpoint():
     if isinstance(msg, list):                               # 묶음(2025-03-26 판까지)
         if not msg or len(msg) > MAX_BATCH:
             return _rpc_error(400, -32600, "Invalid Request: 묶음은 1~20건입니다.", origin)
-        out = [x for x in (core.handle(m, mode="http", base=base) for m in msg) if x is not None]
+        if len(msg) > 1 and rate_limited(len(msg) - 1):     # 묶음은 건마다 센다(위에서 한 건은 이미 셌다)
+            return _rpc_error(429, -32000, "요청이 너무 많습니다. 잠시 후 다시 시도하세요.", origin, {"Retry-After": _retry_after()})
+        out = [x for x in _batch(msg, base) if x is not None]
     else:
         out = core.handle(msg, mode="http", base=base)
     if not out:                                             # 알림·응답만 왔으면 본문 없이 202
@@ -200,6 +210,20 @@ def mcp_endpoint():
     else:
         r = Response(body, mimetype="application/json")
     return _cors(r, origin)
+
+
+def _batch(msgs, base):
+    """묶음 처리 — 묶음 전체가 한 번의 HTTP 요청 제한(engine.HTTP_TIMEOUT) 안에 끝나게 시간을 함께 쓴다.
+    시간이 다 되면 남은 요청은 돌리지 않고 따로 다시 보내라는 오류로 답한다(알림은 답이 없다)."""
+    deadline = time.monotonic() + engine.HTTP_TIMEOUT
+    for m in msgs:
+        if time.monotonic() >= deadline:
+            if isinstance(m, dict) and "id" in m and m.get("method") is not None:
+                mid = m.get("id")
+                yield {"jsonrpc": "2.0", "id": mid if isinstance(mid, (str, int)) and not isinstance(mid, bool) else None,
+                       "error": {"code": -32000, "message": f"묶음 처리 시간({engine.HTTP_TIMEOUT}초)이 다 되어 이 요청은 하지 않았습니다. 이 요청은 따로 다시 보내세요."}}
+            continue
+        yield core.handle(m, mode="http", base=base, deadline=deadline)
 
 
 @bp.route("/api/mcp/doc/<fmt>/<token>")
@@ -215,6 +239,8 @@ def mcp_doc(fmt, token):
         return r
     try:
         op, inp = core.read_token(token)
+    except core.LinkExpired as e:
+        return Response(str(e), status=410, mimetype="text/plain; charset=utf-8")
     except PermissionError as e:
         return Response(str(e), status=403, mimetype="text/plain; charset=utf-8")
     except ValueError as e:

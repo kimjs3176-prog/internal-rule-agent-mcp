@@ -10,7 +10,7 @@
       (사내 메신저·협업 도구의 수신 웹훅).
     · 리눅스 cron 예: 매일 08:10  →  10 8 * * *  cd /srv/regagent && .venv/bin/python scripts/watch_laws.py
       윈도 작업 스케줄러도 같은 명령을 등록하면 된다.
-결과: 0 정상(바뀐 것 없음 포함) · 3 법제처 조회가 모두 실패(망 차단 등).
+결과: 0 정상(바뀐 것 없음 포함) · 3 법제처 조회가 모두 실패(망 차단 등) · 4 알림(webhook) 전송 실패(기준은 그대로 둔다).
 """
 from __future__ import annotations
 
@@ -88,18 +88,24 @@ def main(argv=None, look_law=None, look_rule=None) -> int:
     res = ra.law_watch_diff(prev, cur, idx)
     text = report(ra.ORG, res, len(cur), fail)
     print(text)
-    if not a.dry_run:
-        tmp = a.state + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"at": datetime.now(_KST).isoformat(timespec="seconds"), "laws": res["snapshot"]}, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, a.state)
+    # 알림을 먼저 보내고, 성공(2xx)했을 때만 기준을 바꾼다 — 실패하면 다음 실행에서 같은 변경을 다시 알린다
     if res["changes"] and a.webhook:
         try:
             import requests
             r = requests.post(a.webhook, json={"text": text}, timeout=10)
             print(f"  → 알림 전송 {r.status_code}")
+            sent = 200 <= r.status_code < 300
         except Exception as e:
             print(f"  ⚠ 알림 전송 실패: {e}")
+            sent = False
+        if not sent:
+            print("  ⚠ 알림이 전달되지 않아 기준은 그대로 둡니다.")
+            return 4
+    if not a.dry_run:
+        tmp = a.state + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"at": datetime.now(_KST).isoformat(timespec="seconds"), "laws": res["snapshot"]}, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, a.state)
     return 0
 
 

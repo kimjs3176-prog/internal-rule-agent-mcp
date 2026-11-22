@@ -11,6 +11,7 @@ import hmac
 import json
 import os
 import re
+import time
 import zlib
 from urllib.parse import quote
 
@@ -32,6 +33,12 @@ def _mode():
 def _base_url():
     c = _CTX.get()
     return ((c or {}).get("base") or "").rstrip("/")
+
+
+def _left(limit):
+    """이번 실행에 쓸 시간(초): limit 와 묶음 요청에 남은 시간 중 작은 것(묶음이 아니면 limit)."""
+    dl = (_CTX.get() or {}).get("deadline")
+    return limit if dl is None else max(1, min(limit, int(dl - time.monotonic())))
 
 
 # ── 웹 서비스 API 를 그대로 부른다(같은 프로세스, 네트워크 없음) ───────────────────────
@@ -462,10 +469,9 @@ def t_alio_compare_values(item, unit, keyword, scope="peer", agencies=None, max_
     전체를 COMPARE_BUDGET 안에 끝낸다: 남은 시간이 모자란 기관은 ‘시간 제한으로 건너뜀’으로 알리고 끝난 것만 돌려준다."""
     import concurrent.futures as cf
     import statistics
-    import time
     import alio
     import reg_agent
-    t_end = time.monotonic() + COMPARE_BUDGET
+    t_end = time.monotonic() + _left(COMPARE_BUDGET)
     item = re.sub(r"\s+", " ", str(item or "")).strip()[:20]
     kw = re.sub(r"\s+", " ", str(keyword or "")).strip()[:40]
     if len(item.replace(" ", "")) < 2 or unit not in _UNITS:
@@ -743,9 +749,17 @@ def _compact(inp):
     return inp
 
 
+LINK_TTL = 24 * 3600                                    # 내려받기 링크 유효 시간(초) — 링크가 대화 밖으로 퍼져도 오래 쓰이지 않게
+
+
+class LinkExpired(Exception):
+    """기한이 지난(또는 기한이 없는 옛) 내려받기 링크."""
+
+
 def make_token(op, inp):
-    """내려받기 링크에 담을 요청 — 서버에 저장하지 않고 링크 자체에 담는다(서버리스에서도 된다). MCP_TOKEN 이 있으면 서명한다."""
-    raw = base64.urlsafe_b64encode(zlib.compress(json.dumps([op, inp], ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)).decode().rstrip("=")
+    """내려받기 링크에 담을 요청 — 서버에 저장하지 않고 링크 자체에 담는다(서버리스에서도 된다). MCP_TOKEN 이 있으면 서명한다.
+    링크에는 기한(exp, 만든 때 + LINK_TTL)을 함께 담고 서명한다."""
+    raw = base64.urlsafe_b64encode(zlib.compress(json.dumps([op, inp, int(time.time()) + LINK_TTL], ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)).decode().rstrip("=")
     if _secret():
         raw += "." + base64.urlsafe_b64encode(hmac.new(_secret().encode(), raw.encode(), hashlib.sha256).digest()[:18]).decode()
     return raw
@@ -755,7 +769,8 @@ MAX_TOKEN_DATA = 160_000                                # 링크 안 요청(압�
 
 
 def read_token(tok):
-    """링크 토큰 → (op, inp). 잘못됐으면 ValueError, 서명이 맞지 않으면 PermissionError. 입력은 도구 호출과 같은 규칙으로 다시 정리한다."""
+    """링크 토큰 → (op, inp). 잘못됐으면 ValueError, 서명이 맞지 않으면 PermissionError, 기한이 지났으면 LinkExpired.
+    입력은 도구 호출과 같은 규칙으로 다시 정리한다."""
     tok = str(tok or "")
     if len(tok) > MAX_LINK * 2:
         raise ValueError("링크가 너무 깁니다.")
@@ -769,10 +784,15 @@ def read_token(tok):
         data = z.decompress(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), MAX_TOKEN_DATA)
         if z.unconsumed_tail:
             raise ValueError
-        op, inp = json.loads(data.decode("utf-8"))
+        body = json.loads(data.decode("utf-8"))
+        if not isinstance(body, list) or len(body) not in (2, 3):
+            raise ValueError
+        op, inp, exp = (body + [None])[:3]
         inp, _ = clean_input(op, inp)
     except Exception:
         raise ValueError("링크를 읽지 못했습니다.")
+    if not isinstance(exp, int) or isinstance(exp, bool) or exp < time.time():
+        raise LinkExpired("내려받기 링크의 기한(24시간)이 지났습니다. AI 도우미에게 같은 문서를 다시 만들어 달라고 요청해 새 링크를 받으세요.")
     return op, inp
 
 
@@ -781,7 +801,7 @@ def doc_file(op, inp, fmt):
     inp, err = resolve_source(op, inp)
     if err:
         return None, "", err.get("error") or "규정 원문을 읽지 못했습니다."
-    res = engine.run(op, {**inp, "docs": True}, timeout=engine.HTTP_TIMEOUT)
+    res = engine.run(op, {**inp, "docs": True}, timeout=_left(engine.HTTP_TIMEOUT))
     doc = res.get("doc") if isinstance(res, dict) else None
     if not doc:
         return None, "", (res or {}).get("error") or "이 요청으로는 만들 문서가 없습니다(바뀐 조문 없음)."
@@ -800,7 +820,7 @@ def _with_docs(op, inp, out_dir, fmt, documents):
     if err:
         return {**err, "warnings": warn}
     if _mode() == "http":
-        res = engine.run(op, inp, timeout=engine.HTTP_TIMEOUT)
+        res = engine.run(op, inp, timeout=_left(engine.HTTP_TIMEOUT))
         if warn:
             res["warnings"] = warn + list(res.get("warnings") or [])
         if documents is not False and not res.get("error") and res.get("doc_ready"):
@@ -810,7 +830,7 @@ def _with_docs(op, inp, out_dir, fmt, documents):
                 res["download"] = {"hwpx": hw, "docx": dx,
                                    # 주소가 길어(요청을 링크에 담는다) 그대로 보이면 화면을 덮는다 — 이름 붙은 링크로 보여 준다
                                    "markdown": f"[한글(hwpx) 문서 세트 내려받기]({hw}) · [Word(docx) 내려받기]({dx})",
-                                   "note": "심의안건서·개정문·신구조문대비표·이유서 등 문서 세트. 링크를 열면 그때 만들어 내려받는다. "
+                                   "note": "심의안건서·개정문·신구조문대비표·이유서 등 문서 세트. 링크를 열면 그때 만들어 내려받는다(링크는 24시간 동안 쓸 수 있다). "
                                            "사용자에게는 markdown 을 그대로 보여 주고 긴 주소를 글로 풀어 쓰지 않는다."}
             else:
                 res["download"] = {"note": "요청이 길어 내려받기 링크를 만들지 못했습니다. 내 컴퓨터 연결(stdio)의 output_dir 로 파일을 받거나, 웹 화면(내규똑똑 /agent)에서 같은 작업을 하고 ‘문서 받기’를 쓰세요."}
@@ -1019,7 +1039,7 @@ def _call(name, args):
         return {"content": [{"type": "text", "text": f"{name}: 이 범용 서버에는 등록된 내규가 없어 쓸 수 없습니다. "
                                                      "다른 기관 사규는 amend_regulation·check_regulation 에 source_text(원문)나 alio_id 를 주세요."}],
                 "isError": True}
-    if not t:
+    if not t:                                        # handle 이 먼저 -32602 로 답한다(직접 부를 때만)
         return {"content": [{"type": "text", "text": f"모르는 도구: {name}"}], "isError": True}
     props = _schema(name, t[4]).get("properties", {})
     args = {k: v for k, v in (args or {}).items() if k in props}      # 형식에 없는 값은 버린다(연결 방식에 없는 output_dir 등)
@@ -1068,9 +1088,10 @@ def _instructions():
     return s
 
 
-def handle(msg, mode="stdio", base=""):
-    """JSON-RPC 메시지 하나 → 응답(알림·클라이언트 응답이면 None). mode: stdio|http, base: 원격일 때 이 서버의 공개 주소."""
-    tok = _CTX.set({"mode": mode, "base": base})
+def handle(msg, mode="stdio", base="", deadline=None):
+    """JSON-RPC 메시지 하나 → 응답(알림·클라이언트 응답이면 None). mode: stdio|http, base: 원격일 때 이 서버의 공개 주소.
+    deadline: 묶음 요청이 함께 쓰는 끝 시각(time.monotonic) — 엔진·비교 시간을 그 안으로 줄인다."""
+    tok = _CTX.set({"mode": mode, "base": base, "deadline": deadline})
     try:
         return _handle(msg)
     finally:
@@ -1087,7 +1108,7 @@ def _handle(msg):
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32600, "message": "Invalid Request"}}
     if "id" not in msg:                              # 알림(notifications/initialized 등)에는 답하지 않는다
         return None
-    if not isinstance(method, str) or not (mid is None or isinstance(mid, (str, int))) or isinstance(mid, bool):
+    if not isinstance(method, str) or not isinstance(mid, (str, int)) or isinstance(mid, bool):   # id 는 문자열·정수(null 은 안 된다)
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}
     if params is None:
         params = {}
@@ -1106,6 +1127,8 @@ def _handle(msg):
         name, args = params.get("name"), params.get("arguments")
         if not isinstance(name, str) or not (args is None or isinstance(args, dict)):
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "Invalid params: name(문자열)과 arguments(객체)가 필요합니다."}}
+        if name not in _BY:                          # 모르는 도구는 MCP 규약대로 프로토콜 오류(Invalid params)
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"Invalid params: 모르는 도구입니다: {name[:80]}"}}
         res = _call(name, args)
     else:
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method not found: {method}"}}

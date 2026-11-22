@@ -14,14 +14,12 @@ try:
     def _xml_fromstring(s): return _DET.fromstring(s)
 except Exception:
     def _xml_fromstring(s): return ET.fromstring(s)
-import urllib3
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import requests as req_lib
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 app.json.ensure_ascii = False                 # 한글을 \uXXXX 로 늘리지 않는다(응답 크기 1/2~1/3)
@@ -36,7 +34,8 @@ if _origins_env:
     _cors_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
 else:
     _cors_origins = [
-        re.compile(r"^https://agro-law[\w.-]*\.vercel\.app$"),
+        re.compile(r"^https://agro-law\.vercel\.app$"),                               # 운영 주소
+        re.compile(r"^https://agro-law-[a-z0-9-]+-kimjs3176-5164s-projects\.vercel\.app$"),   # 이 팀의 미리보기 배포만(남의 agro-law-*.vercel.app 은 막는다)
         re.compile(r"^http://localhost(:\d+)?$"),
         re.compile(r"^http://127\.0\.0\.1(:\d+)?$"),
     ]
@@ -107,10 +106,29 @@ def _make_session(verify: bool = True, retries: int = 4) -> req_lib.Session:
 
 # 기본 세션은 TLS 인증서를 검증한다(GitHub 토큰·Google API 키 전송에 사용).
 _SESSION = _make_session()
-# 법제처(law.go.kr)는 인증서 체인 문제가 있어 이 호출에만 검증을 끈다.
-# 민감한 토큰을 보내는 GitHub/Google 세션과 분리해 노출을 막는다.
+# 법제처(law.go.kr)는 중간 인증서(GlobalSign RSA OV SSL CA 2018)를 보내지 않아 기본 검증이 실패한다.
+# 검증을 끄지 않고, certifi 묶음에 그 중간 인증서(certs/law_go_kr_intermediate.pem)를 더한 묶음으로 검증한다.
+_LAW_INTERMEDIATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "law_go_kr_intermediate.pem")
+
+
+def _law_ca_bundle():
+    """certifi(또는 REQUESTS_CA_BUNDLE·SSL_CERT_FILE — 사내망 TLS 검사 인증서) + 법제처 중간 인증서 → 임시 묶음 파일 경로."""
+    import certifi
+    import tempfile
+    srcs = [certifi.where()] + [os.environ[k] for k in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
+                                 if os.environ.get(k) and os.path.isfile(os.environ[k])] + [_LAW_INTERMEDIATE]
+    parts = []
+    for f in dict.fromkeys(srcs):
+        with open(f, encoding="utf-8", errors="ignore") as fh:
+            parts.append(fh.read().strip())
+    fd, path = tempfile.mkstemp(prefix="law_ca_", suffix=".pem")      # 서버리스(Vercel)도 /tmp 는 쓸 수 있다
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(parts) + "\n")
+    return path
+
+
 # 재시도는 _law_get_xml 한 곳에서만 한다(겹치면 법제처 장애 때 수십 초씩 붙잡힌다).
-_LAW_SESSION = _make_session(verify=False, retries=0)
+_LAW_SESSION = _make_session(verify=_law_ca_bundle(), retries=0)
 
 
 # ── 공통 HTTP 헬퍼 ────────────────────────────────────────────────────────────
@@ -727,6 +745,7 @@ def index():
 
 # ── 관련법령: 법령 체계도(상위·하위법)·관련법령(준용·피준용 등) ─────────────────────────
 _REL_CACHE: dict = {}
+_REL_CACHE_MAX = 500                     # 법령명마다 쌓이므로 상한을 두고 오래된 것부터 버린다
 _REL_KIND = (("피준용", "피준용"), ("준용", "준용"), ("상위", "상위법"), ("하위", "하위법"), ("시행령", "하위법"),
              ("시행규칙", "하위법"), ("위임", "위임"), ("인용", "인용"), ("관련", "관련법령"))
 
@@ -812,7 +831,10 @@ def get_law_related():
         src = ["guess"]
     v = {"success": True, "law": law, "id": info.get("id", ""), "mst": info.get("mst", ""), "items": items[:120], "source": src}
     if src != ["guess"]:
+        _REL_CACHE.pop(name, None)
         _REL_CACHE[name] = {"at": time.time(), "v": v}
+        while len(_REL_CACHE) > _REL_CACHE_MAX:
+            _REL_CACHE.pop(next(iter(_REL_CACHE)), None)
     return jsonify(v)
 
 
@@ -969,7 +991,9 @@ def _gemini_latest_model(api_key: str) -> str:
     (모델명을 고정하면 미출시/미허용 버전일 때 AI 기능 전체가 실패하므로 검증 후 사용)
     """
     now = time.time()
-    if _GEMINI_MODEL_CACHE["model"] and now - _GEMINI_MODEL_CACHE["ts"] < _GEMINI_CACHE_TTL:
+    # 서버 키로 얻은 결과만 모두의 기본(6시간 캐시)으로 쓴다 — 사용자 키는 그 사람 계정의 목록이라 기억하지 않는다
+    shared = bool(api_key) and api_key == os.environ.get("GEMINI_API_KEY", "").strip()
+    if shared and _GEMINI_MODEL_CACHE["model"] and now - _GEMINI_MODEL_CACHE["ts"] < _GEMINI_CACHE_TTL:
         return _GEMINI_MODEL_CACHE["model"]
     fallback = _AI_MODEL_FALLBACK["gemini"]
     if not api_key:
@@ -1007,15 +1031,18 @@ def _gemini_latest_model(api_key: str) -> str:
             elif pref and not pref_ver and pref.lower() in name.lower():
                 if pbest_score is None or sc > pbest_score:
                     pbest, pbest_score = name, sc
-        _GEMINI_MODEL_CACHE["ranked"] = [n for _, n in sorted(scored, reverse=True)]
+        if shared:
+            _GEMINI_MODEL_CACHE["ranked"] = [n for _, n in sorted(scored, reverse=True)]
         if pbest:
-            _GEMINI_MODEL_CACHE.update({"model": pbest, "ts": now})
+            if shared:
+                _GEMINI_MODEL_CACHE.update({"model": pbest, "ts": now})
             print(f"[ai-model] 선호 버전({pref}) 모델 사용: {pbest}")
             return pbest
         if pref:
             print(f"[ai-model] 선호 버전({pref}) 사용 불가 → 최신 버전으로 대체")
         if best:
-            _GEMINI_MODEL_CACHE.update({"model": best, "ts": now})
+            if shared:
+                _GEMINI_MODEL_CACHE.update({"model": best, "ts": now})
             print(f"[ai-model] Gemini 최신 모델 선택: {best}")
             return best
     except Exception as e:
@@ -1080,7 +1107,8 @@ def ai_models():
     provider = (request.args.get("provider") or "gemini").lower()
     if provider == "compat":
         return jsonify({"success": True, "provider": "compat", **_compat_models()})
-    key = (request.args.get("api_key") or
+    # 키는 URL 쿼리로 받지 않는다(접근 로그에 남는다). 사용자 Gemini 키는 헤더(X-Gemini-Key)로만.
+    key = ((request.headers.get("X-Gemini-Key") if provider == "gemini" else "") or
            os.environ.get(f"{provider.upper()}_API_KEY", "")).strip()
     if provider == "gemini":
         mdl = _gemini_latest_model(key)
@@ -1182,7 +1210,8 @@ def _ai_generate(provider: str, api_key: str, mdl: str, system: str, user: str,
                     if sm and re.fullmatch(r"[\w.\-]{1,80}", sm.group(1)):
                         alts.append(sm.group(1).rstrip(".,"))
                 if not _GEMINI_MODEL_CACHE.get("ranked") and deadline - _t.time() > 20:
-                    _GEMINI_MODEL_CACHE["ts"] = 0
+                    if api_key == os.environ.get("GEMINI_API_KEY", "").strip():
+                        _GEMINI_MODEL_CACHE["ts"] = 0            # 서버 키일 때만 공용 캐시를 새로 채운다(사용자 키는 기억하지 않음)
                     _gemini_latest_model(api_key)                # 이 계정이 쓸 수 있는 현행 모델 목록을 채운다(한 번, 8초 제한)
                 for a in alts + _gemini_alternates(mdl):
                     if a.lower() != (mdl or "").lower() and a not in alts:
@@ -1401,6 +1430,7 @@ _VEC_PREFIX = os.environ.get("REG_VECTORS") or os.path.join(os.path.dirname(os.p
 _VEC_BIN = _VEC_PREFIX + ".bin"
 _VEC_META = _VEC_PREFIX + ".json"
 _VEC_CACHE: dict = {"loaded": False, "meta": None, "mat": None, "np": None}
+_VEC_LOCK = threading.Lock()
 # 코사인 하한. 관련 없는 조문은 대체로 0.5 아래에 몰려 있어 노이즈를 걸러낸다.
 _SEM_MIN = float(os.environ.get("SEMANTIC_MIN_SCORE", "0.55"))
 
@@ -1409,7 +1439,16 @@ def _vec_load():
     """벡터 파일 로드(프로세스당 1회). numpy 가 없으면 의미 검색을 끈다."""
     if _VEC_CACHE["loaded"]:
         return _VEC_CACHE
-    _VEC_CACHE["loaded"] = True
+    with _VEC_LOCK:                            # 첫 요청 여럿이 겹쳐도 한 번만 읽고, 다 읽은 뒤에 loaded 를 켠다
+        if not _VEC_CACHE["loaded"]:
+            try:
+                _vec_load_now()
+            finally:
+                _VEC_CACHE["loaded"] = True
+    return _VEC_CACHE
+
+
+def _vec_load_now():
     try:
         import numpy as np
     except ImportError:
