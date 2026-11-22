@@ -3653,7 +3653,7 @@ function raHealthSeg(v){
   if(v!=='diag'||!_raHealth) return tabs;                     // 오류 목록은 자기 ‘전체 점검’ 단추가 있다
   const at=_raHealthAt?new Date(_raHealthAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
   return `<div class="ra-hseg-row">${tabs}<div class="ra-hseg-a">${at?`<span class="ra-meta">진단 ${_e(at)}</span>`:''}`+
-    `<button class="svc-btn sm" onclick="raHealthReload()" ${_raBusy.health?'disabled':''} title="내규를 새로 올렸거나 고친 뒤 점수를 새로 매깁니다">${raIc('check')}다시 진단하기</button></div></div>`;
+    `<button class="svc-btn sm" onclick="raHealthReload()" title="내규를 새로 올렸거나 고친 뒤 점수를 새로 매깁니다">${raIc('check')}다시 진단하기</button></div></div>`;
 }
 function raHealthErrorsView(){
   const all=`<div class="ra-row"><button class="svc-btn yes" onclick="raCheckAll()">${raIc('check')}기관 ${_e(RA_ORG.reg_word)} 전체 점검</button>${raTip(`모든 내규에서 없는 조문 인용·현행 목록에 없는 내규명·구 명칭(재단·이사장 등)·조 번호 중복을 찾아 내규별로 보여 줍니다. 진단 요약의 점수는 같은 결과로 매깁니다.`)}</div><div id="raChkAll">${raCheckAllView()}</div>`;
