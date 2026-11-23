@@ -445,14 +445,19 @@ def _fetch_law_root(law_name: str, target: str = "law", timeout=None, info: dict
     전혀 다른 법령을 가져올 수 있어 쓰지 않는다.)
     """
     ref = info if info is not None else _lookup_law(law_name, target)
-    endpoint = "admRulService.do" if target == "admrul" else "lawService.do"
+    # 행정규칙 본문도 lawService.do(target=admrul)로 받는다 — admRulService.do 는 법제처에 없는 주소라
+    # 연결이 끊겨 모든 행정규칙(훈령·예규·고시) 본문을 가져오지 못했다
+    endpoint = "lawService.do"
     tries = []
     if target == "law" and ref.get("id"):
         tries.append({"target": target, "ID": ref["id"]})
-    if ref.get("mst"):
+    if target == "admrul":
+        if ref.get("mst"):
+            tries.append({"target": target, "ID": ref["mst"]})    # 행정규칙은 ID=행정규칙일련번호
+        if ref.get("id"):
+            tries.append({"target": target, "LID": ref["id"]})    # LID=행정규칙ID(현행본)
+    elif ref.get("mst"):
         tries.append({"target": target, "MST": ref["mst"]})
-        if target == "admrul":
-            tries.append({"target": target, "ID": ref["mst"]})   # 행정규칙은 ID=일련번호
     for params in tries:
         try:
             r = _law_get_xml(endpoint, params, timeout=timeout)
@@ -608,7 +613,7 @@ def _parse_articles(root: ET.Element):
 
     # 법령 공포일자 (기준일)
     law_date = ""
-    for tag in ("공포일자", "시행일자"):
+    for tag in ("공포일자", "발령일자", "시행일자"):
         el = root.find(f".//{tag}")
         if el is not None and el.text and el.text.strip():
             law_date = el.text.strip(); break
@@ -729,8 +734,36 @@ def _parse_articles(root: ET.Element):
         if articles:
             return law_name, law_date, articles
 
+    # ── 전략 4: 행정규칙(lawService.do?target=admrul) — 조마다 <조문내용> 글 덩어리 하나, 번호 태그 없음 ──
+    #    "제1장 총 칙" / "제1조(목적) 이 규정은 …\n① …" 처럼 글 첫머리에 번호·제목이 들어 있다
+    blocks = [(el.text or "").strip() for el in root.iter("조문내용")]
+    blocks = [b for b in blocks if b]
+    if blocks:
+        print(f"[파싱] 전략4 행정규칙 조문내용 {len(blocks)}개")
+        for b in blocks:
+            mh = _ADM_HEAD_RE.match(b)
+            if mh and "\n" not in b:
+                articles.append({"조문번호": "", "조문제목": mh.group(2).strip(), "조문내용": "",
+                                 "type": "header", "header_no": re.sub(r"\s+", "", mh.group(1))})
+                continue
+            ma = _ADM_ART_RE.match(b)
+            if not ma:
+                continue                        # 조 번호로 시작하지 않는 글은 조문이 아니다
+            no_d, branch = ma.group(1), ma.group(2) or ""
+            articles.append({"조문번호": no_d, "조문가지번호": branch,
+                             "조문표시번호": _art_label(no_d, branch),
+                             "조문제목": (ma.group(3) or "").strip(),
+                             "조문내용": b, "type": "article"})
+        if any(a["type"] == "article" for a in articles):
+            return law_name, law_date, articles
+        articles = []
+
     print(f"[파싱] 실패 — 태그: {sorted(all_tags)[:40]}")
     return law_name, law_date, articles
+
+
+_ADM_HEAD_RE = re.compile(r"^(제\s*\d+\s*(?:장|절|관|편)(?:\s*의\s*\d+)?)\s*(.{0,60})$")
+_ADM_ART_RE = re.compile(r"^제\s*(\d{1,4})\s*조(?:\s*의\s*(\d{1,3}))?\s*(?:\(([^()\n]{0,60})\))?")
 
 
 
@@ -874,9 +907,9 @@ def get_law_articles():
             try:
                 mst_admrul = _get_mst(law_name, target="admrul")
                 if mst_admrul:
-                    for param_name in ("MST", "ID"):
+                    for param_name in ("ID",):           # 행정규칙 본문: lawService.do?target=admrul&ID=일련번호
                         try:
-                            r_adm = _law_get_xml("admRulService.do",
+                            r_adm = _law_get_xml("lawService.do",
                                                  {"target": "admrul", param_name: mst_admrul},
                                                  timeout=(5, 20))
                             if _is_valid_law_xml(r_adm):
