@@ -33,3 +33,33 @@ def test_admrul_articles(client, monkeypatch):
     assert arts[0]["조문제목"] == "목적"
     assert any(x.get("type") == "header" and x.get("header_no") == "제1장" for x in d["articles"])
     assert not any(ep == "admRulService.do" for ep, _ in calls)
+
+
+def test_law_go_redirects_by_kind(client, monkeypatch):
+    """법령 바로가기: 행정규칙이면 /행정규칙/, 법령이면 /법령/(조문까지), 확인 못 하면 /법령/."""
+    from urllib.parse import unquote
+    import api_server as A
+    calls = []
+    monkeypatch.setattr(A, "_law_get_xml", _fake(calls, A))
+    A._LOOKUP_CACHE.clear() if hasattr(A, "_LOOKUP_CACHE") and hasattr(A._LOOKUP_CACHE, "clear") else None
+    r = client.get("/api/law/go", query_string={"name": NM, "art": "제5조"})
+    assert r.status_code == 302 and unquote(r.headers["Location"]) == f"https://www.law.go.kr/행정규칙/{NM}"
+
+    def law_xml(ep, params, *a, **k):
+        if ep == "lawSearch.do" and params.get("target") == "law":
+            return ET.fromstring("<LawSearch><law><법령명한글>민법</법령명한글><법령일련번호>1</법령일련번호></law></LawSearch>")
+        raise AssertionError("법령이면 행정규칙을 찾지 않는다")
+    monkeypatch.setattr(A, "_law_get_xml", law_xml)
+    r = client.get("/api/law/go", query_string={"name": "민법", "art": "제 3 조의2"})
+    assert r.status_code == 302 and unquote(r.headers["Location"]) == "https://www.law.go.kr/법령/민법/제3조의2"
+
+    monkeypatch.setattr(A, "OC", "")
+    r = client.get("/api/law/go", query_string={"name": "어떤 법"})
+    assert unquote(r.headers["Location"]) == "https://www.law.go.kr/법령/어떤 법"
+    assert client.get("/api/law/go").status_code == 400
+
+
+def test_agent_law_links_go_through_server():
+    import pathlib
+    js = (pathlib.Path(__file__).resolve().parents[1] / "assets" / "reg_agent.js").read_text(encoding="utf-8")
+    assert "'/api/law/go?name='" in js and "law.go.kr/법령/'+" not in js
