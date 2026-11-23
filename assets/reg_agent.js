@@ -3831,7 +3831,10 @@ function raHistView(slug, no){
 }
 // ── 관계·법령: 인용하는/인용받는 내규, 인용 법령(법제처 바로가기·관련 법령), 준용·피준용 ──
 let _raRel={}, _raLawRel={};
-function raLawUrl(name, art){ const a=String(art||'').replace(/\s+/g,'').match(/^제\d+조(?:의\d+)?/); return 'https://www.law.go.kr/법령/'+encodeURIComponent(String(name).trim())+(a?'/'+encodeURIComponent(a[0]):''); }
+// 법령 바로가기는 서버(/api/law/go)를 거친다 — 행정규칙(훈령·예규·고시)은 법제처 주소가 /행정규칙/… 이라 서버가 종류를 확인해 보낸다
+function raLawUrl(name, art){ const a=String(art||'').replace(/\s+/g,'').match(/^제\d+조(?:의\d+)?/);
+  const u='/api/law/go?name='+encodeURIComponent(String(name).trim())+(a?'&art='+encodeURIComponent(a[0]):'');
+  return typeof raApi==='function'?raApi(u):u; }
 function raLawLink(name, art){ return `<a class="ra-link" href="${raLawUrl(name,art)}" target="_blank" rel="noopener" title="국가법령정보센터에서 보기">「${_e(name)}」${art?' '+_e(art):''}</a>`; }
 function raRegRelView(r){
   const d=_raRel[r.slug]; if(!d){ if(d!==0){ _raRel[r.slug]=0; raGet('/api/regagent/relations?slug='+encodeURIComponent(r.slug)).then(x=>{ _raRel[r.slug]=x; if(RA.regs.open===r.slug) raRegsRedraw(); }); } return raSpin('관계를 찾는 중…'); }

@@ -824,6 +824,32 @@ def _law_rel_items(root: ET.Element, me: str) -> list:
     return out
 
 
+@app.route("/api/law/go")
+def law_go():
+    """법령명 → 국가법령정보센터 한글주소로 보낸다. 행정규칙(훈령·예규·고시)은 /법령/ 이 아니라 /행정규칙/ 주소라
+    (/법령/… 은 '한글주소명을 찾을 수 없습니다') 법제처에서 어느 쪽인지 확인해 맞는 주소로 보낸다.
+    확인하지 못하면(키 없음·연결 실패) 예전처럼 /법령/ 으로 보낸다."""
+    from urllib.parse import quote
+    name = re.sub(r"\s+", " ", request.args.get("name", "")).strip()[:120]
+    if not name:
+        return jsonify({"error": "name 파라미터가 필요합니다"}), 400
+    art = re.sub(r"\s+", "", request.args.get("art", ""))
+    kind = "법령"
+    if OC:
+        try:
+            if _lookup_law(name, "law").get("rank", 99) != 0 and _lookup_law(name, "admrul").get("rank") == 0:
+                kind = "행정규칙"
+        except Exception as e:
+            print(f"[law/go] '{name}' 종류 확인 실패: {_redact_oc(e)}")
+    url = f"https://www.law.go.kr/{kind}/{quote(name)}"
+    m = re.match(r"^제\d{1,4}조(?:의\d{1,3})?$", art)
+    if m and kind == "법령":
+        url += "/" + quote(m.group(0))
+    r = Response(status=302, headers={"Location": url})
+    r.headers["Cache-Control"] = "public, max-age=3600"
+    return r
+
+
 @app.route("/api/law/related")
 def get_law_related():
     """법령명 → 관련 법령(상위·하위법, 준용·피준용 등). 법제처 체계도·관련법령 API를 쓰고,
