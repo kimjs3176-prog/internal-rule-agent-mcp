@@ -77,3 +77,22 @@ def test_check_org_config_our_profile_refs_exist():
     errs, warns, oks = chk.check(ra.ORG, ra.all_regs())
     assert errs == []
     assert any("모두 「내규관리규칙」에 있음" in x for x in oks), warns
+
+
+def test_check_org_config_named_refs_and_special_regs():
+    """근거의 「다른 규정」 제N조는 그 규정에서 찾고, 내규심의 특례의 내규 이름은 들여온 내규와 맞춰 본다."""
+    import copy
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import reg_agent as ra
+    import check_org_config as chk
+    org = copy.deepcopy(dict(ra.ORG.items()))
+    pr = org["procedure"]
+    step = next(s for s in pr["steps"] if s.get("id") == "daily" and "감사규정" in (s.get("ref") or ""))
+    errs, warns, oks = chk.check(org, ra.all_regs())
+    assert not warns or not any("근거 조항" in w for w in warns), warns          # 「감사규정 시행세칙」 제38조·제39조 는 그 규정에 있다
+    step["ref"] = "「감사규정 시행세칙」 제999조"                                 # 그 규정에 없는 조
+    pr["special"]["delegate"]["rows"].append(["없는위원회", ["없는 내규 이름"]])
+    pr["special"]["upper"]["groups"][0]["ref"] = "「없는 규정」 제1조"
+    errs, warns, oks = chk.check(org, ra.all_regs())
+    w = "\n".join(warns)
+    assert "「감사규정 시행세칙」 제999조" in w and "「없는 규정」(들여온 내규에 없음)" in w and "「없는 내규 이름」" in w, w
