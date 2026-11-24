@@ -4843,6 +4843,30 @@ function raPlanExport(fmt){
 }
 
 // ── 절차 안내 대시보드 ────────────────────────────────────────────────────
+// 내규심의 특례 — 기관 프로필(procedure.special): 상급위원회 심의 대상 · 전문 위원회 심의로 대신하는 내규 · 유의사항
+// 내규 이름은 누르면 연다: 호스트(내규똑똑)가 window.raHostOpenReg 를 주면 그쪽(작업공간 창), 없으면 내규 목록에서
+function raOpenReg(title){
+  const f=typeof window!=='undefined'&&window.raHostOpenReg;
+  if(typeof f==='function'){ try{ if(f(title)!==false) return; }catch(e){} }
+  const r=(_raCatalog||[]).find(x=>x.title===title);
+  if(!r){ _toast(`「${title}」${raEul(title)} ${RA_ORG.reg_word} 목록에서 찾지 못했습니다.`); return; }
+  Object.assign(RA.regs,{q:r.title,cat:'',open:r.slug,view:'arts',art:''}); _raRegHits=null; _raSave(); raTab('regs');
+}
+function raSpReg(n){ return `<button type="button" class="ra-chip btn ra-sp-reg" title="「${_e(n)}」 원문 열기" onclick="raOpenReg('${_a(n)}')">${_e(n)}</button>`; }
+function raProcSpecial(){
+  const S=raPCfg().special; if(!S||!(S.upper||S.delegate)) return '';
+  const U=S.upper, D=S.delegate;
+  const head=(t,ref,d)=>`<div class="ra-sp-h"><b>${_e(t)}</b>${ref?`<span class="ra-ref">${_e(ref)}</span>`:''}</div>${d?`<p class="ra-sp-d">${_e(d)}</p>`:''}`;
+  const up=U?`<div class="ra-sp-c">${head(U.t||'상급위원회 심의',U.ref,U.d)}`+raArr(U.groups).map((g,i)=>
+      `<div class="ra-sp-g"><div class="ra-sp-gt"><span class="ra-sp-no">${i+1}</span>${_e(g.t)}${g.ref?` <span class="ra-ref">${_e(g.ref)}</span>`:''}</div>`+
+      (g.d?`<div class="ra-sp-gd">${_e(g.d)}</div>`:'')+
+      (raArr(g.regs).length?`<div class="ra-sp-regs">${g.regs.map(raSpReg).join('')}${g.more?`<span class="ra-sp-more">${_e(g.more)}</span>`:''}</div>`:'')+`</div>`).join('')+`</div>`:'';
+  const dl=D?`<div class="ra-sp-c">${head(D.t||'전문 위원회 심의로 대신',D.ref,D.d)}<div class="ra-sp-tbl" role="table" aria-label="${_e(D.t||'전문 위원회 심의로 대신')}">`+
+      `<div class="ra-sp-r ra-sp-th" role="row"><span role="columnheader">위원회</span><span role="columnheader">${_e(RA_ORG.reg_word)}</span></div>`+
+      raArr(D.rows).map(([c,regs,more])=>`<div class="ra-sp-r" role="row"><span class="ra-sp-k" role="rowheader">${_e(c)}</span><span class="ra-sp-v" role="cell">${raArr(regs).map(raSpReg).join('')}${more?`<span class="ra-sp-more">${_e(more)}</span>`:''}</span></div>`).join('')+`</div></div>`:'';
+  const notes=raArr(S.notes).length?`<div class="ra-sp-notes"><div class="ra-sp-nt">${raIc('info')}유의</div><ul>${S.notes.map(n=>`<li>${_e(n.t)}${n.ref?` <span class="ra-ref">${_e(n.ref)}</span>`:''}</li>`).join('')}</ul></div>`:'';
+  return `<div class="ra-sp">${up}${dl}</div>${notes}`;
+}
 function raProcView(){
   const st=raProcState(), sc=raSchedule(st.live), a=RA.proc.ans||{}, Q=raPQ();
   const flow=st.flow, done=flow.filter(s=>s.done).length, pct=flow.length?Math.round(done/flow.length*100):0, next=st.next;
@@ -4872,7 +4896,7 @@ function raProcView(){
       (sdocs.length?`<div class="ra-card-docs">${sdocs.map(d=>mode?`<button class="ra-chip btn" onclick="raGoDoc('${mode}','${d}')">${raIc('doc')}${_e(names[d])}</button>`:`<span class="ra-chip">${raIc('doc')}${_e(names[d])}</span>`).join('')}</div>`:'')+
       `<div class="ra-card-f">${s.done?`<span class="ra-ev ok">${raIc('check')}완료${s.doneAt?' '+raMd(s.doneAt):''}</span>`:r?`<span class="ra-card-dt">예정 ${r.e>r.s?`${raMd(raAddD(sc.start,r.s))}–${raMd(raAddD(sc.start,r.e))}`:raMd(raAddD(sc.start,r.s))}</span>`:''}</div>`+
       (ss==='next'?'<div class="ra-card-now">지금 할 일</div>':'')+`</div>`; };
-  const lanes=`<div class="ra-lanes">`+raPhases().map((ph,pi)=>{
+  const lanes=`<div class="ra-lanes" style="--ra-lanes:${raPhases().length}">`+raPhases().map((ph,pi)=>{
     const ps=st.live.filter(s=>s.phase===ph.id), req=ps.filter(s=>s.st==='in'&&!s.optional), pd=req.filter(s=>s.done).length;
     const outs=st.out.filter(s=>s.phase===ph.id);
     const lst=!ps.length?'none':req.length&&pd===req.length&&!ps.some(s=>s.st==='tbd')?'done':ps.some(s=>next&&s.id===next.id)?'now':ps.every(s=>s.locked||s.st==='tbd')?'lock':'todo';
@@ -4894,6 +4918,7 @@ function raProcView(){
     raSec(2,'프로세스 맵',raTip('행위 주체(행) × 국면(열). 단계를 누르면 아래 체크리스트로 이동합니다.'),raProcMap(st))+
     raSec(3,'단계별 체크리스트',raTip(`앞 국면의 필수 단계와 선행 단계를 마쳐야 다음 단계가 열립니다(관문). 체크하면 완료일이 이 브라우저에 저장됩니다.${mode?' 문서 칩을 누르면 해당 문서로 이동합니다.':''}`),lanes)+
     raSec(4,'일정 계획',raTip('국면 순서대로 최소 기간을 더해 예정일을 계산합니다. 병행 국면은 가장 긴 기간만 셉니다.'),plan)+
+    (raProcSpecial()?raSec(5,`${_e(RA_ORG.reg_word)}심의 특례`,raTip(`상급위원회에서 심의하거나 다른 위원회 심의로 ${RA_ORG.reg_word}심의를 대신하는 경우입니다(「${raRules()}」 ${raPCfg().special.ref||''}). ${RA_ORG.reg_word} 이름을 누르면 원문이 열립니다.`),raProcSpecial()):'')+
     `<details class="ra-sec ra-sec-det"><summary class="ra-sec-h"><div class="ra-sec-t"><h2>작성 기준 요약 — 「${_e(raRules())}」</h2></div>${raTip('절차·심의기준·기관 명칭은 기관 프로필(org_config.json)에서 바꿀 수 있습니다')}</summary><div class="ra-rules">${sum||'<div class="ra-empty">기관 프로필에 작성 기준 요약이 없습니다.</div>'}</div></details>`+
     `<div class="ra-foot"><button class="svc-btn ghost sm" onclick="if(confirm('해당 여부 답변·진행 체크·일정을 모두 지울까요?')){RA.proc={ans:{},chk:{},plan:{}};_raSave();raRender();}">절차 초기화</button></div></div>`;
 }

@@ -97,7 +97,7 @@ test('raSchedule: 병행 국면은 가장 긴 기간, 나머지는 합산', () =
   RA.proc.ans = { level: 'rule', minor: 'n', public: 'y', multi: 'n', impact: 'n', burden: 'n' };
   RA.proc.plan = { start: '2026-10-03', target: '2026-11-15' };
   const st = c.raProcState(), sc = c.raSchedule(st.flow);
-  assert.equal(sc.total, cfg.notice_days + 7);
+  assert.equal(sc.total, cfg.notice_days + 7 + 7);   // 사전예고 → 일상감사(감사부서 7일 이내 통보) → 심의(개최 7일 전 제출)
   assert.equal(sc.end, c.raAddD('2026-10-03', sc.total));
   assert.equal(sc.slack, c.raDiffD(sc.end, '2026-11-15'));
 });
@@ -1533,4 +1533,38 @@ test('위임 조항 불러오기 실패는 화면에 남고 직접 입력으로 
   assert.ok(h.includes('「없는법」 조문을 불러오지 못했습니다') && h.includes('onclick="raDelManual()">직접 입력</button>으로'), h);
   vm.runInContext(`RA.enact.manOpen=true;`, c);
   assert.ok(!c.raDelegView().includes('조문을 불러오지 못했습니다'));   // 직접 입력 칸을 열면 안내는 거둔다
+});
+
+test('절차 안내: 일상감사 국면(부패영향평가 함께), 경미하면 제34조 적용배제 검토', () => {
+  const c = load();
+  const RA = c.__RA();
+  const ph = c.raPhases().map(p => p.id);
+  assert.ok(ph.indexOf('opinion') < ph.indexOf('audit') && ph.indexOf('audit') < ph.indexOf('review'), '의견수렴 → 일상감사 → 심의 순서');
+  RA.proc = { ans: { level: 'rule', minor: 'n', public: 'n', multi: 'n', impact: 'y', burden: 'n' }, chk: {}, plan: {} };
+  let st = c.raProcSteps();
+  const daily = st.find(s => s.id === 'daily');
+  assert.ok(daily && /일상감사 의뢰/.test(daily.t) && daily.phase === 'audit' && c.raDays(daily) === 7);
+  assert.equal(st.find(s => s.id === 'corrupt').phase, 'audit', '부패영향평가는 일상감사와 함께');
+  assert.ok(st.findIndex(s => s.id === 'daily') < st.findIndex(s => s.id === 'review'), '일상감사가 심의보다 앞');
+  RA.proc.ans.minor = 'y';
+  st = c.raProcSteps();
+  const d2 = st.find(s => s.id === 'daily');
+  assert.ok(d2 && /적용배제/.test(d2.t) && d2.ref === '제34조' && c.raDays(d2) === 0);
+});
+
+test('절차 안내: 내규심의 특례 — 상급위원회 대상·전문 위원회 대신·유의사항, 내규 이름은 누르면 열림', () => {
+  const c = load();
+  const h = c.raProcSpecial();
+  assert.ok(h.includes('상급위원회 심의') && h.includes('제16조의2제1항') && h.includes('원장 또는 부원장'), '자리표시자({head}·{deputy}) 치환');
+  for (const n of ['한국농업기술진흥원 정관', '이사회 운영규정', '재무회계규정', '노사협의회 운영규칙', '보안업무규칙', '에너지 관리 규칙'])
+    assert.ok(h.includes(`raOpenReg('${n}')`), n);
+  assert.ok(h.includes('인사위원회') && h.includes('직무발명심의위원회') && h.includes('제16조의2제3항'));
+  // 호스트(내규똑똑)가 raHostOpenReg 를 주면 그쪽으로 연다
+  let opened = '';
+  c.window.raHostOpenReg = t => { opened = t; };
+  c.raOpenReg('보안업무규칙');
+  assert.equal(opened, '보안업무규칙');
+  // 특례가 없는 기관 프로필이면 칸을 만들지 않는다
+  vm.runInContext(`RA_ORG=Object.assign({},RA_ORG,{procedure:Object.assign({},RA_ORG.procedure,{special:undefined})});`, c);
+  assert.equal(c.raProcSpecial(), '');
 });

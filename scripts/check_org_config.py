@@ -23,6 +23,12 @@ import reg_agent as ra  # noqa: E402
 
 _REF_RE = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?(?:\s*제\s*(\d+)\s*항)?(?:\s*제\s*(\d+)\s*호)?")
 _HANG = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+# 근거 문자열 안의 「규정명」 — 뒤따르는 조항은 그 규정의 조항이다(없으면 기관 규칙 rules_name)
+_NAMED_RE = re.compile(r"「([^」]{1,80})」|" + _REF_RE.pattern)
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", "", t or "")
 
 
 def _refs(org: dict) -> list:
@@ -36,6 +42,27 @@ def _refs(org: dict) -> list:
     pr = org.get("procedure") or {}
     out += [(f"procedure.questions[{q.get('k')}]", q.get("ref")) for q in pr.get("questions") or [] if q.get("ref")]
     out += [(f"procedure.steps[{s.get('id')}]", s.get("ref")) for s in pr.get("steps") or [] if s.get("ref")]
+    sp = pr.get("special") if isinstance(pr.get("special"), dict) else {}
+    out += [("procedure.special", sp.get("ref"))] if sp.get("ref") else []
+    for k in ("upper", "delegate"):
+        b = sp.get(k) if isinstance(sp.get(k), dict) else {}
+        out += [(f"procedure.special.{k}", b.get("ref"))] if b.get("ref") else []
+        out += [(f"procedure.special.{k}.groups[{i}]", g.get("ref")) for i, g in enumerate(b.get("groups") or []) if g.get("ref")]
+    out += [(f"procedure.special.notes[{i}]", x.get("ref")) for i, x in enumerate(sp.get("notes") or []) if x.get("ref")]
+    return out
+
+
+def _special_regs(org: dict) -> list:
+    """내규심의 특례(procedure.special)에 적은 내규 이름 — (어디에, 이름)."""
+    sp = (org.get("procedure") or {}).get("special")
+    if not isinstance(sp, dict):
+        return []
+    out = []
+    for i, g in enumerate((sp.get("upper") or {}).get("groups") or []):
+        out += [(f"procedure.special.upper.groups[{i}]", n) for n in g.get("regs") or []]
+    for row in (sp.get("delegate") or {}).get("rows") or []:
+        if isinstance(row, list) and len(row) > 1:
+            out += [(f"procedure.special.delegate[{row[0]}]", n) for n in row[1] or []]
     return out
 
 
@@ -66,20 +93,38 @@ def check(org: dict, regs: list) -> tuple:
         errs.append(f"근거 규칙 「{org.get('rules_name')}」이 들여온 내규에 없습니다. rules_name 을 기관의 내규관리 규칙 이름으로 고치세요.")
     else:
         oks.append(f"근거 규칙 「{rules['title']}」 확인({len(rules['articles'])}개 조)")
-        arts = {a["no"]: a for a in rules["articles"] if not a.get("deleted")}
+        by_title = {_norm(r["title"]): r for r in regs}
+        arts_of = lambda r: {a["no"]: a for a in r["articles"] if not a.get("deleted")}
+        own = arts_of(rules)
         bad, n = [], 0
         for where, ref in _refs(org):
-            for m in _REF_RE.finditer(str(ref)):
+            arts, named = own, ""                        # 「다른 규정」 뒤의 조항은 그 규정에서 찾는다
+            for m in _NAMED_RE.finditer(str(ref)):
+                if m.group(1):
+                    named = m.group(1)
+                    r = by_title.get(_norm(named))
+                    arts = arts_of(r) if r else None
+                    if r is None:
+                        bad.append(f"{where}: 「{named}」(들여온 내규에 없음)")
+                    continue
+                if arts is None:
+                    continue
                 n += 1
-                no = m.group(1) + (f"의{m.group(2)}" if m.group(2) else "")
+                no = m.group(2) + (f"의{m.group(3)}" if m.group(3) else "")
                 a = arts.get(no)
-                if not a or not _has(a, m.group(3), m.group(4)):
-                    bad.append(f"{where}: “{m.group(0)}”")
+                if not a or not _has(a, m.group(4), m.group(5)):
+                    bad.append(f"{where}: “{('「' + named + '」 ') if named else ''}{m.group(0)}”")
         if bad:
             warns.append(f"근거 조항 {len(bad)}/{n}개가 「{rules['title']}」에 없습니다 — 기관 규칙의 조 번호로 고치거나 빈칸(\"\")으로 두세요:\n      "
                          + "\n      ".join(bad[:30]) + (f"\n      … 외 {len(bad) - 30}개" if len(bad) > 30 else ""))
         else:
             oks.append(f"근거 조항 {n}개 모두 「{rules['title']}」에 있음")
+        miss = [f"{w}: 「{t}」" for w, t in _special_regs(org) if _norm(t) not in by_title]
+        if miss:
+            warns.append(f"내규심의 특례에 적은 내규 {len(miss)}개가 들여온 내규에 없습니다 — 등록된 내규명과 같게 적으세요:\n      "
+                         + "\n      ".join(miss[:30]))
+        elif _special_regs(org):
+            oks.append(f"내규심의 특례의 내규 {len(_special_regs(org))}개 모두 들여온 내규에 있음")
     text = "\n".join(a.get("body") or "" for r in regs for a in r["articles"])
     names = [x for x in (org.get("org_name"), org.get("org_short")) if x]
     if regs and not any(x in text for x in names):
