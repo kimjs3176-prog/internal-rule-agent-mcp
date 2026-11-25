@@ -1333,7 +1333,8 @@ def _ai_generate(provider: str, api_key: str, mdl: str, system: str, user: str,
                     if r is not None and r.status_code == 400 and think and "thinking" in (r.text or "").lower():
                         r = call(limit, None)
                     if r is not None and r.status_code == 200:
-                        if gone:                                    # 은퇴한 모델은 다시 부르지 않게 기본을 바꿔 둔다
+                        # 은퇴한 모델은 다시 부르지 않게 기본을 바꿔 둔다 — 서버 키일 때만(사용자 키의 결과는 모두의 기본으로 기억하지 않는다)
+                        if gone and api_key == os.environ.get("GEMINI_API_KEY", "").strip():
                             _GEMINI_MODEL_CACHE.update({"model": alt, "ts": _t.time()})
                             print(f"[ai] {mdl} 은퇴 → 기본 모델을 {alt}(으)로 바꿈")
                         mdl = alt

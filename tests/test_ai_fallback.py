@@ -105,12 +105,30 @@ def test_retired_model_uses_suggested_then_remembers(monkeypatch):
     monkeypatch.setattr(A.req_lib, "post", post)
     monkeypatch.setattr(A, "_gemini_latest_model", lambda k: "gemini-flash-latest")   # 목록 조회는 이 시험에서 막는다
     monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setenv("GEMINI_API_KEY", "k")                    # 서버 키로 부른 경우
     A._GEMINI_MODEL_CACHE.update({"model": None, "ranked": []})
     text, err = A._ai_generate("gemini", "k", "gemini-2.0-flash", "sys", "user")
     assert (text, err) == ("ok", "")
     assert "gemini-3.8-flash:" in calls[1]                       # 원 모델 1회(재시도 안 함) 뒤 바로 안내된 모델
     assert A._GEMINI_MODEL_CACHE["model"] == "gemini-3.8-flash"
     assert A._default_model_for("gemini") == "gemini-3.8-flash"
+    A._GEMINI_MODEL_CACHE.update({"model": None, "ranked": []})
+
+
+def test_retired_model_with_user_key_does_not_change_shared_default(monkeypatch):
+    """사용자 키로 부른 결과는 그 요청에만 쓰고, 모두의 기본 모델로 기억하지 않는다."""
+    def post(url, **kw):
+        if "gemini-3.8-flash:" in url:
+            return _ok("ok")
+        return _R(404, {"error": {"message": "This model models/gemini-2.0-flash is no longer available. Please update your code to use models/gemini-3.8-flash for the latest features and improvements."}})
+    monkeypatch.setattr(A.req_lib, "post", post)
+    monkeypatch.setattr(A, "_gemini_latest_model", lambda k: "gemini-flash-latest")
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setenv("GEMINI_API_KEY", "server-key")
+    A._GEMINI_MODEL_CACHE.update({"model": None, "ranked": []})
+    text, err = A._ai_generate("gemini", "user-key", "gemini-2.0-flash", "sys", "user")
+    assert (text, err) == ("ok", "")                             # 이 요청은 안내된 모델로 답한다
+    assert A._GEMINI_MODEL_CACHE["model"] is None                # 공용 기본은 그대로
     A._GEMINI_MODEL_CACHE.update({"model": None, "ranked": []})
 
 
