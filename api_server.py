@@ -345,7 +345,7 @@ def _norm_key(s: str) -> str:
     return re.sub(r"\s+", "", (s or "")).lower()
 
 
-def _lookup_law(law_name: str, target: str = "law") -> dict:
+def _lookup_law(law_name: str, target: str = "law", timeout=None) -> dict:
     """
     법령명 → {"mst", "id", "name", "rank"}.
     · 법제처 검색은 질의어를 포함하는 다른 법령을 먼저 주는 경우가 있어
@@ -359,7 +359,7 @@ def _lookup_law(law_name: str, target: str = "law") -> dict:
     out = {"mst": "", "id": "", "name": "", "rank": 99}
     try:
         root = _law_get_xml("lawSearch.do",
-                            {"target": target, "query": law_name, "display": "30"})
+                            {"target": target, "query": law_name, "display": "30"}, timeout=timeout)
         items = [el for el in root if _mst_of(el)] or \
                 [el for el in root.iter() if el is not root and _mst_of(el)]
         want = _norm_key(law_name)
@@ -752,7 +752,7 @@ def _parse_articles(root: ET.Element):
             no_d, branch = ma.group(1), ma.group(2) or ""
             articles.append({"조문번호": no_d, "조문가지번호": branch,
                              "조문표시번호": _art_label(no_d, branch),
-                             "조문제목": (ma.group(3) or "").strip(),
+                             "조문제목": _adm_title(b, ma.end()),
                              "조문내용": b, "type": "article"})
         if any(a["type"] == "article" for a in articles):
             return law_name, law_date, articles
@@ -762,8 +762,24 @@ def _parse_articles(root: ET.Element):
     return law_name, law_date, articles
 
 
-_ADM_HEAD_RE = re.compile(r"^(제\s*\d+\s*(?:장|절|관|편)(?:\s*의\s*\d+)?)\s*(.{0,60})$")
-_ADM_ART_RE = re.compile(r"^제\s*(\d{1,4})\s*조(?:\s*의\s*(\d{1,3}))?\s*(?:\(([^()\n]{0,60})\))?")
+_ADM_HEAD_RE = re.compile(r"^(제\s*\d+\s*(?:장|절|관|편)(?:\s*의\s*\d+)?)\s*(.{0,200})$")
+_ADM_ART_RE = re.compile(r"^제\s*(\d{1,4})\s*조(?:\s*의\s*(\d{1,3}))?\s*")
+
+
+def _adm_title(b: str, i: int) -> str:
+    """조 번호 뒤 괄호 제목 — 괄호가 겹쳐도(“위원회의 구성(등)”) 짝이 맞는 닫는 괄호까지. 같은 줄 120자 안에서만."""
+    if i >= len(b) or b[i] != "(":
+        return ""
+    depth = 0
+    for j in range(i, min(len(b), i + 122)):
+        c = b[j]
+        if c == "\n":
+            break
+        depth += c == "("
+        depth -= c == ")"
+        if depth == 0:
+            return b[i + 1:j].strip()
+    return ""
 
 
 
@@ -824,29 +840,68 @@ def _law_rel_items(root: ET.Element, me: str) -> list:
     return out
 
 
+# 법령 바로가기: 이름별 종류(법령/행정규칙)를 기억해 같은 링크를 누를 때마다 법제처를 부르지 않는다.
+# 공개 주소라 법제처 조회는 서버 전체 분당 _LAW_GO_PER_MIN 회까지 — 넘으면 조회 없이 /법령/ 로(실패와 같이 캐시하지 않음)
+_LAW_GO_KIND: dict = {}                 # 이름 → (시각, "법령"|"행정규칙")
+_LAW_GO_TTL = 12 * 3600
+_LAW_GO_MAX = 2000
+_LAW_GO_PER_MIN = 60
+_LAW_GO_T = (3, 6)                      # 링크를 누른 사람이 기다리는 조회 — 짧게
+_LAW_GO_HITS: list = []
+_LAW_GO_LOCK = threading.Lock()
+
+
+def _law_go_kind(name: str):
+    """(종류, 확정 여부). 확정이 아니면(키 없음·실패·조회 한도) 응답을 캐시하지 않는다."""
+    now = time.time()
+    hit = _LAW_GO_KIND.get(name)
+    if hit and now - hit[0] < _LAW_GO_TTL:
+        return hit[1], True
+    if not OC:
+        return "법령", False
+    with _LAW_GO_LOCK:
+        _LAW_GO_HITS[:] = [t for t in _LAW_GO_HITS if now - t < 60]
+        if len(_LAW_GO_HITS) >= _LAW_GO_PER_MIN:
+            return "법령", False
+        _LAW_GO_HITS.append(now)
+    law = _lookup_law(name, "law", timeout=_LAW_GO_T)
+    if law.get("rank") == 0:
+        kind = "법령"
+    elif law.get("error"):
+        return "법령", False
+    else:
+        adm = _lookup_law(name, "admrul", timeout=_LAW_GO_T)
+        if adm.get("error"):
+            return "법령", False
+        kind = "행정규칙" if adm.get("rank") == 0 else "법령"
+    with _LAW_GO_LOCK:
+        if len(_LAW_GO_KIND) >= _LAW_GO_MAX:
+            _LAW_GO_KIND.pop(next(iter(_LAW_GO_KIND)))
+        _LAW_GO_KIND[name] = (now, kind)
+    return kind, True
+
+
 @app.route("/api/law/go")
 def law_go():
     """법령명 → 국가법령정보센터 한글주소로 보낸다. 행정규칙(훈령·예규·고시)은 /법령/ 이 아니라 /행정규칙/ 주소라
     (/법령/… 은 '한글주소명을 찾을 수 없습니다') 법제처에서 어느 쪽인지 확인해 맞는 주소로 보낸다.
-    확인하지 못하면(키 없음·연결 실패) 예전처럼 /법령/ 으로 보낸다."""
+    확인하지 못하면(키 없음·연결 실패·조회 한도) 예전처럼 /법령/ 으로 보내고, 그 응답은 캐시하지 않는다."""
     from urllib.parse import quote
     name = re.sub(r"\s+", " ", request.args.get("name", "")).strip()[:120]
     if not name:
         return jsonify({"error": "name 파라미터가 필요합니다"}), 400
     art = re.sub(r"\s+", "", request.args.get("art", ""))
-    kind = "법령"
-    if OC:
-        try:
-            if _lookup_law(name, "law").get("rank", 99) != 0 and _lookup_law(name, "admrul").get("rank") == 0:
-                kind = "행정규칙"
-        except Exception as e:
-            print(f"[law/go] '{name}' 종류 확인 실패: {_redact_oc(e)}")
+    try:
+        kind, sure = _law_go_kind(name)
+    except Exception as e:
+        print(f"[law/go] '{name}' 종류 확인 실패: {_redact_oc(e)}")
+        kind, sure = "법령", False
     url = f"https://www.law.go.kr/{kind}/{quote(name)}"
     m = re.match(r"^제\d{1,4}조(?:의\d{1,3})?$", art)
     if m and kind == "법령":
         url += "/" + quote(m.group(0))
     r = Response(status=302, headers={"Location": url})
-    r.headers["Cache-Control"] = "public, max-age=3600"
+    r.headers["Cache-Control"] = "public, max-age=3600" if sure else "no-store"
     return r
 
 

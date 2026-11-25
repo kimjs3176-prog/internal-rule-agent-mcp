@@ -96,3 +96,14 @@ def test_check_org_config_named_refs_and_special_regs():
     errs, warns, oks = chk.check(org, ra.all_regs())
     w = "\n".join(warns)
     assert "「감사규정 시행세칙」 제999조" in w and "「없는 규정」(들여온 내규에 없음)" in w and "「없는 내규 이름」" in w, w
+
+
+def test_replace_term_copula_forms():
+    """짧은 용어 일괄 변경: 서술격 조사 활용(이라는·이란·이라도·이거나)도 바꾸고 받침에 맞춘다. 파생어(이사회·이사장)는 그대로."""
+    import reg_agent as ra
+    f = lambda t, new: ra.replace_term(t, "이사", new)[0]
+    assert f("이사이라는 자", "원장") == "원장이라는 자" and f("이사이라는 자", "부서") == "부서라는 자"
+    assert f("이사이란", "원장") == "원장이란" and f("이사이란", "부서") == "부서란"
+    assert f("이사라는", "원장") == "원장이라는" and f("이사이라도", "원장") == "원장이라도"
+    assert f("이사이거나", "원장") == "원장이거나" and f("이사이며", "원장") == "원장이며"
+    assert f("이사회·이사장·이사가족", "원장") == "이사회·이사장·이사가족"

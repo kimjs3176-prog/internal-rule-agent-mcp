@@ -547,10 +547,10 @@ def _blocks_to_view_html(title: str, meta: dict, blocks: list,
             m = _ART_HEAD_RE.match(t)
             aid = (f"{sec}-" if sec else "") + f"a-{m.group(1)}" + (f"-{m.group(2)}" if m.group(2) else "")
             if aid in seen:                       # 같은 구역에 같은 조 번호가 또 나오면 꼬리표로 구분
-                k = 2
-                while f"{aid}-{k}" in seen:
+                k = 2                             # “~2” — “a-1-2”(제1조의2)와 겹치지 않게 가지 번호와 다른 구분자
+                while f"{aid}~{k}" in seen:
                     k += 1
-                aid = f"{aid}-{k}"
+                aid = f"{aid}~{k}"
             seen.add(aid)
             body.append(f'<h3 class="art" id="{aid}">{_esc(t)}</h3>')
         elif _APX_HEAD_RE.match(t):
