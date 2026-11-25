@@ -2842,10 +2842,18 @@ def replace_term(text: str, old: str, new: str, whole: bool = True):
             stacked = part in ("과", "와", "로", "으로") and re.match(r"(의|는|도|만|부터|서|써)", tail)
             # 짧은 용어는 조사처럼 보이는 글자 뒤에 한글이 더 붙으면 다른 낱말이다(“부서이동”·“이사가족”).
             # 겹친 조사와 서술격 조사(“이사이며”·“부서이고”)만 받는다.
-            if (whole and len(old) <= 3 and not stacked
-                    and not (part == "이" and re.match(r"(?:며|고|다|면|나|므로|지만|어야|어서|었)(?![가-힣])", text[m.end():]))):
+            rest = text[m.end():]
+            # 서술격 조사 “이다”의 활용: 이사이며·이사이고 / 이사이라는·이사라는·이사이란·이사이거나·이사이라도
+            cop_i = part == "이" and re.match(r"(?:며|고|다|면|나|므로|지만|어야|어서|었|란|라(?:는|도|면|고|서|야)?|거나|든지|든가|어도)(?![가-힣])", rest)
+            cop_ra = part in ("이라", "라") and re.match(r"(?:는|도|면|고|서|야|며|든지|든가)(?![가-힣])", rest)
+            if whole and len(old) <= 3 and not stacked and not cop_i and not cop_ra:
                 continue
-            part_fixed = _rjosa(new, part) if stacked else part
+            if stacked or cop_ra:
+                part_fixed = _rjosa(new, part)                    # 원장이라는 / 부서라는
+            elif cop_i and rest[:1] in ("란", "라"):
+                part_fixed = "이" if _rjosa(new, "이라") == "이라" else ""   # 원장이란 / 부서란
+            else:
+                part_fixed = part
         else:
             part_fixed = _rjosa(new, part) if part else ""
         out.append(text[last:m.start()] + new + part_fixed)

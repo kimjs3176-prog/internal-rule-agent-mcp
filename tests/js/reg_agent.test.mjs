@@ -1568,3 +1568,17 @@ test('절차 안내: 내규심의 특례 — 상급위원회 대상·전문 위�
   vm.runInContext(`RA_ORG=Object.assign({},RA_ORG,{procedure:Object.assign({},RA_ORG.procedure,{special:undefined})});`, c);
   assert.equal(c.raProcSpecial(), '');
 });
+
+test('특례 내규 열기: 목록을 아직 안 받았으면 받아서 찾고, 띄어쓰기가 달라도 찾는다 / 추진계획표 근거에 규칙 이름이 겹치지 않음', async () => {
+  const c = load();
+  let fetched = 0;
+  c.raGet = async () => { fetched++; return { regs: [{ title: '보안업무규칙', slug: 'sec' }] }; };
+  c.raTab = () => {};
+  vm.runInContext('_raCatalog=null', c);
+  await c.raOpenReg('보안 업무규칙');
+  assert.equal(fetched, 1);
+  assert.equal(c.__RA().regs.open, 'sec');
+  assert.equal(c.raRefFull('제15조의3'), '「내규관리규칙」 제15조의3');
+  assert.equal(c.raRefFull('「감사규정 시행세칙」 제38조·제39조'), '「감사규정 시행세칙」 제38조·제39조');
+  assert.equal(c.raRefFull(''), '');
+});

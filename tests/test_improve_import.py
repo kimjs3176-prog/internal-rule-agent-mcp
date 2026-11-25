@@ -133,3 +133,10 @@ def test_docx_vmerge_row_fully_continued_keeps_rowspan_consistent():
     assert len(rows) == 3
     assert rows[0][0]["rs"] == 2 and rows[0][1]["rs"] == 2
     assert [c["t"] for c in rows[2]] == ["마", "바", "사"]
+
+
+def test_article_anchor_duplicate_tail_does_not_collide_with_branch_article():
+    """같은 구역에 제1조가 또 나와도 꼬리표가 제1조의2(a-1-2)와 겹치지 않는다."""
+    h = _view(["제1조(목적) 가", "제1조(목적) 다시", "제1조의2(특례) 나"])
+    ids = re.findall(r'<h3 class="art" id="([^"]+)"', h)
+    assert ids == ["a-1", "a-1~2", "a-1-2"] and len(set(ids)) == 3, ids

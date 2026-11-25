@@ -4832,7 +4832,7 @@ function raPlanExport(fmt){
   const when=s=>{ if(s.st==='tbd') return '조건 확인 필요'; const r=sc.m[s.id]; if(!r) return ''; return r.e>r.s?`${raAddD(sc.start,r.s)} ~ ${raAddD(sc.start,r.e)}`:raAddD(sc.start,r.s); };
   const state=s=>s.done?`완료${s.doneAt?' '+s.doneAt:''}`:s.st==='tbd'?'미정':s.locked?'선행 대기':st.next&&st.next.id===s.id?'진행':'예정';
   const rows=[['순번','단계','담당','근거','예정일','산출 문서','상태'].map(t=>({t,hd:1})),
-    ...st.live.map(s=>[{t:String(s.no)},{t:s.t+(s.optional&&!/선택/.test(s.t)?'(선택)':'')},{t:s.who||''},{t:s.ref?`「${raRules()}」 ${s.ref}`:''},{t:when(s)},{t:s.docs.map(d=>names[d]).filter(Boolean).join(', ')},{t:state(s)}])];
+    ...st.live.map(s=>[{t:String(s.no)},{t:s.t+(s.optional&&!/선택/.test(s.t)?'(선택)':'')},{t:s.who||''},{t:raRefFull(s.ref)},{t:when(s)},{t:s.docs.map(d=>names[d]).filter(Boolean).join(', ')},{t:state(s)}])];
   const head=[`「${title}」 ${mode==='amend'?'개정':mode==='enact'?'제정':'제·개정'} 추진계획표`,'',
     `기준일 ${sc.start} · 예상 시행 가능일 ${sc.end}${sc.tbd?'(잠정)':''} (최소 ${sc.total}일${sc.brk.length?': '+sc.brk.join(' + '):''})`+(sc.target?` · 목표 시행일 ${sc.target} (${sc.slack>=0?`여유 ${sc.slack}일`:`${-sc.slack}일 부족`})`:''),
     `해당 여부: `+raPQ().map(q=>`${raQLabel(q.k)} ${a[q.k]?raALabel(q.k,a[q.k]):'미답변'}`).join(' · '),''].join('\n');
@@ -4845,10 +4845,14 @@ function raPlanExport(fmt){
 // ── 절차 안내 대시보드 ────────────────────────────────────────────────────
 // 내규심의 특례 — 기관 프로필(procedure.special): 상급위원회 심의 대상 · 전문 위원회 심의로 대신하는 내규 · 유의사항
 // 내규 이름은 누르면 연다: 호스트(내규똑똑)가 window.raHostOpenReg 를 주면 그쪽(작업공간 창), 없으면 내규 목록에서
-function raOpenReg(title){
+// 근거 표기: 기관 규칙 조항이면 「규칙명」을 붙이고, 이미 「다른 규정」을 적은 근거는 그대로
+function raRefFull(ref){ ref=String(ref||'').trim(); return !ref?'':/^「/.test(ref)?ref:`「${raRules()}」 ${ref}`; }
+async function raOpenReg(title){
   const f=typeof window!=='undefined'&&window.raHostOpenReg;
   if(typeof f==='function'){ try{ if(f(title)!==false) return; }catch(e){} }
-  const r=(_raCatalog||[]).find(x=>x.title===title);
+  const key=String(title||'').replace(/\s+/g,'');
+  let cat=_raCatalog; if(!cat){ try{ cat=await raCatalog(); }catch(e){ cat=[]; } }   // 목록을 아직 안 받았으면(새로고침 직후) 받아서 찾는다
+  const r=(cat||[]).find(x=>String(x.title||'').replace(/\s+/g,'')===key);
   if(!r){ _toast(`「${title}」${raEul(title)} ${RA_ORG.reg_word} 목록에서 찾지 못했습니다.`); return; }
   Object.assign(RA.regs,{q:r.title,cat:'',open:r.slug,view:'arts',art:''}); _raRegHits=null; _raSave(); raTab('regs');
 }
