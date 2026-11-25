@@ -983,24 +983,16 @@ def get_law_articles():
             root = _fetch_law_root(law_name, "law", info=info)
             tried.append("law:" + ("성공" if root is not None else "실패"))
 
-        # Step 4: 행정규칙(admrul) fallback — lawService.do 모두 실패한 경우(앞에서 이미 행정규칙을 찾아봤으면 생략)
-        if root is None and not any(t.startswith("admrul") for t in tried) and info.get("rank", 99) > 1:
+        # Step 4: 행정규칙(admrul) 폴백 — 국가법령 본문을 못 받았을 때. 이름이 정확히 같은 행정규칙만 쓴다
+        # (부분 일치로 고르면 사내 규정명·오타에 이름 일부만 겹치는 다른 훈령·고시 본문이 열린다)
+        if root is None and not any(t.startswith("admrul") for t in tried):
             try:
-                mst_admrul = _get_mst(law_name, target="admrul")
-                if mst_admrul:
-                    for param_name in ("ID",):           # 행정규칙 본문: lawService.do?target=admrul&ID=일련번호
-                        try:
-                            r_adm = _law_get_xml("lawService.do",
-                                                 {"target": "admrul", param_name: mst_admrul},
-                                                 timeout=(5, 20))
-                            if _is_valid_law_xml(r_adm):
-                                root = r_adm
-                                tried.append(f"admrul:{param_name}={mst_admrul}(성공)")
-                                break
-                        except Exception as e_adm:
-                            tried.append(f"admrul:{param_name}={mst_admrul}({_redact_oc(e_adm)})")
+                adm = _lookup_law(law_name, "admrul")
+                if adm.get("rank") == 0:
+                    root = _fetch_law_root(law_name, "admrul", timeout=(5, 20), info=adm)
+                    tried.append("admrul(정확일치·폴백):" + ("성공" if root is not None else "실패"))
                 else:
-                    tried.append("admrul:MST 없음")
+                    tried.append("admrul:같은 이름 없음")
             except Exception as e4:
                 print(f"[articles] Step4(admrul) 오류: {_redact_oc(e4)}")
 

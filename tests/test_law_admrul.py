@@ -113,3 +113,23 @@ def test_admrul_title_nested_parens_and_long_chapter():
     _, _, arts = A._parse_articles(ET.fromstring(x))
     assert arts[0]["type"] == "header" and arts[0]["조문제목"] == long
     assert arts[1]["조문제목"] == "위원회의 구성(등)" and arts[2]["조문표시번호"] == "제4조"
+
+
+def test_articles_do_not_open_partially_matching_admrul(client, monkeypatch):
+    """국가법령에 없는 이름(사내 규정명·오타)으로 조회할 때 이름 일부만 겹치는 다른 행정규칙 본문을 열지 않는다."""
+    import api_server as A
+    calls = []
+
+    def fake(ep, params, *a, **k):
+        calls.append((ep, dict(params)))
+        if ep == "lawSearch.do" and params.get("target") == "admrul":
+            return ET.fromstring("<AdmRulSearch><admrul><행정규칙명>농림축산검역본부 여비 지급 규정</행정규칙명>"
+                                 "<행정규칙일련번호>9</행정규칙일련번호></admrul></AdmRulSearch>")
+        if ep == "lawSearch.do":
+            return ET.fromstring("<LawSearch><totalCnt>0</totalCnt></LawSearch>")
+        raise AssertionError(f"본문을 부르면 안 된다: {params}")
+    monkeypatch.setattr(A, "_law_get_xml", fake)
+    A._LOOKUP_CACHE.clear() if hasattr(A, "_LOOKUP_CACHE") and hasattr(A._LOOKUP_CACHE, "clear") else None
+    d = client.get("/api/law/articles", query_string={"name": "여비 지급 규정"}).get_json()
+    assert d.get("count") == 0 and not d.get("articles")
+    assert not any(ep == "lawService.do" for ep, _ in calls)
