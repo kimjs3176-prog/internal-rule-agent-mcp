@@ -1,24 +1,19 @@
 {
   "version": 2,
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "git": {
     "deploymentEnabled": {
       "ledger-data": false
     }
   },
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
-    },
-    {
-      "src": "regulations/**",
-      "use": "@vercel/static"
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "{assets/**,certs/**,mcp_server/**,regulations/**,samples/**,org_config.json,regulations_manifest.json,regulations_vectors.json,regulations_vectors.bin}"
     }
-  ],
+  },
   "routes": [
     {
       "src": "/api/(.*)",
